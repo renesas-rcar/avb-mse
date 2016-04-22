@@ -1,0 +1,53 @@
+#
+# Renesas device configuration
+#
+
+menuconfig AVB_MSE
+	bool "AVB MSE"
+	default y
+	---help---
+	  This option enable Renesas AVB Media Streaming Engine (MSE) driver.
+	  MSE contains following sub modules.
+	  - MSE Core module
+	  - MSE EAVB Adapter
+	  - MSE ALSA Adapter
+	  - MSE V4L2 Adapter
+
+if AVB_MSE
+
+config MSE_CORE
+	tristate "MSE Core module"
+	default m
+	---help---
+	  This option enable core functions in MSE.
+	  Core functions contains following features.
+	  - In kernel API for MSE Adapters.
+	  - Sysfs I/F for configuration by userland process.
+	  - AVTP Packetizer/De-Packetizer.
+
+config MSE_ADAPTER_EAVB
+	tristate "MSE EAVB Adapter"
+	depends on MSE_CORE
+	default m
+	---help---
+	  Renesas Ethernet AVB software
+	  Support MSE Adapter for Renesas AVB Streaming driver
+
+config MSE_ADAPTER_ALSA
+	tristate "MSE ALSA Adapter"
+	depends on MSE_CORE
+	default m
+	---help---
+	  Renesas Ethernet AVB software
+	  Support MSE Adapter for Linux ALSA
+
+config MSE_ADAPTER_V4L2
+	tristate "MSE V4L2 Adapter"
+	depends on MSE_CORE
+	select VIDEOBUF2_VMALLOC
+	default m
+	---help---
+	  Renesas Ethernet AVB software.
+	  Support MSE Adapter for V4L2.
+
+endif
