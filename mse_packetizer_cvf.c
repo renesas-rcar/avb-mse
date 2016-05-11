@@ -79,6 +79,7 @@
 #define AVTP_PAYLOAD_MAX        (ETHFRAMELEN_MAX - AVTP_PAYLOAD_OFFSET)
 #define AVTP_PAYLOAD_MIN        (60 - AVTP_PAYLOAD_OFFSET)
 
+#define TRANSMIT_RATE_BASE      (1000000)
 #define PORT_TRANSMIT_RATE      (100000000) /* 100M [bit/sec] */
 
 #define MSE_PACKETIZER_MAX      (10)
@@ -280,10 +281,11 @@ static int mse_packetizer_video_cvf_calc_cbs(int index,
 	pr_debug("[%s] index=%d\n", __func__, index);
 	cvf = &cvf_packetizer_table[index];
 
-	bandwidth_fraction_denominator = (u64)PORT_TRANSMIT_RATE;
+	bandwidth_fraction_denominator =
+		(u64)PORT_TRANSMIT_RATE / TRANSMIT_RATE_BASE;
 	bandwidth_fraction_numerator = (u64)cvf->cvf_config.bitrate *
 						(u64)ETHFRAMELEN_MAX_IPG;
-
+	do_div(bandwidth_fraction_numerator, TRANSMIT_RATE_BASE);
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
 	do_div(value, bandwidth_fraction_denominator);
 	do_div(value, AVTP_PAYLOAD_MAX);
