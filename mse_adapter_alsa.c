@@ -95,6 +95,7 @@ struct alsa_stream {
 
 /* Device info */
 struct alsa_device {
+	struct device			dev;
 	struct snd_card			*card;
 	struct snd_pcm			*pcm;
 	int				adapter_index;
@@ -600,6 +601,11 @@ static int mse_adapter_alsa_dev_free(struct snd_device *device)
 	return mse_adapter_alsa_free(device->device_data);
 }
 
+static void alsa_chip_dev_release(struct device *dev)
+{
+	/* reserved */
+}
+
 static int mse_adapter_alsa_probe(int devno)
 {
 	struct snd_pcm *pcm;
@@ -613,23 +619,33 @@ static int mse_adapter_alsa_probe(int devno)
 
 	pr_debug("[%s] devno=%d\n", __func__, devno);
 
-	err = snd_card_new(NULL,
-			   SNDRV_DEFAULT_IDX1,
-			   SNDRV_DEFAULT_STR1,
-			   THIS_MODULE,
-			   0,
-			   &card);
+	/* allocate a chip-specific data with zero filled */
+	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
+	if (!chip)
+		return -ENOMEM;
+
+	/* device initialize */
+	device_initialize(&chip->dev);
+	chip->dev.release = alsa_chip_dev_release;
+	dev_set_name(&chip->dev, "mse_alsa%d", devno);
+	err = device_add(&chip->dev);
+	if (err) {
+		pr_err("[%s] Failed device_add() err=%d\n", __func__, err);
+		return -EPERM;
+	}
+
+	err = snd_card_new(
+		&chip->dev,
+		SNDRV_DEFAULT_IDX1,
+		SNDRV_DEFAULT_STR1,
+		THIS_MODULE,
+		0,
+		&card);
 	if (err < 0) {
 		pr_err("[%s] Failed snd_card_new() err=%d\n", __func__, err);
 		return -EPERM;
 	}
 
-	/* allocate a chip-specific data with zero filled */
-	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
-	if (!chip) {
-		snd_card_free(card);
-		return -ENOMEM;
-	}
 	chip->card = card;
 	chip->adapter_index = MSE_INDEX_UNDEFINED;
 
