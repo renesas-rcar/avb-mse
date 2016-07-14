@@ -195,6 +195,12 @@ struct mse_device {
 };
 
 /*
+ * module parameters
+ */
+static int debug;
+module_param(debug, int, 0660);
+
+/*
  * global parameters
  */
 static struct mse_sysfs_config mse_sysfs_config_audio[] = {

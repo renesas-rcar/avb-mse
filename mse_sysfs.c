@@ -179,7 +179,7 @@ int mse_sysfs_init(struct mse_sysfs_config *config)
 	int ret;
 	int i, j;
 	char config_name[MSE_SYSFS_NAME_LENGTH];
-	struct module *mod;
+	struct kobject *mod_kobj;
 	struct kobject *mse_kobj;
 	struct attribute_group *mse_attr_group;
 	struct attribute **mse_attrs;
@@ -196,8 +196,15 @@ int mse_sysfs_init(struct mse_sysfs_config *config)
 	/* create /sys/kernel/mse */
 	sprintf(config_name, "mse%d", i);
 
-	mod = THIS_MODULE;
-	mse_kobj = kobject_create_and_add(config_name, &mod->mkobj.kobj);
+#ifdef MODULE
+	mod_kobj = &((THIS_MODULE)->mkobj.kobj);
+#else
+	mod_kobj = kset_find_obj(module_kset, KBUILD_MODNAME);
+#endif
+	if (!mod_kobj)
+		return -ENOMEM;
+
+	mse_kobj = kobject_create_and_add(config_name, mod_kobj);
 	if (!mse_kobj)
 		return -ENOMEM;
 
