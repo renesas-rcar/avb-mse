@@ -216,8 +216,8 @@ int mse_packet_ctrl_make_packet(int index,
 				     &processed,
 				     &timestamp);
 
-		pcount++;
 		if (ret >= 0) {
+			pcount++;
 			if (packet_size >= 64) {
 				dma->packet_table[dma->write_p].len =
 					packet_size;
@@ -225,6 +225,8 @@ int mse_packet_ctrl_make_packet(int index,
 				dma->packet_table[dma->write_p].len = 64;
 			}
 			dma->write_p = new_write_p;
+		} else {
+			break;
 		}
 	}
 

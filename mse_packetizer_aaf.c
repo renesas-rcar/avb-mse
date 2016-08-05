@@ -101,6 +101,7 @@ struct avtp_param {
 
 struct aaf_packetizer {
 	bool used_f;
+	bool piece_f;
 
 	int send_seq_num;
 	int old_seq_num;
@@ -110,8 +111,10 @@ struct aaf_packetizer {
 	int sample_per_packet;
 	int frame_interval_time;
 	int data_bytes_per_ch;
+	int piece_data_len;
 
 	unsigned char packet_template[ETHFRAMELEN_MAX];
+	unsigned char packet_piece[ETHFRAMELEN_MAX];
 
 	struct mse_network_config net_config;
 	struct mse_audio_config aaf_config;
@@ -134,10 +137,12 @@ static int mse_packetizer_audio_aaf_open(void)
 	aaf = &aaf_packetizer_table[index];
 
 	aaf->used_f = true;
+	aaf->piece_f = false;
 	aaf->send_seq_num = 0;
 	aaf->old_seq_num = SEQNUM_INIT;
 	aaf->seq_num_err = SEQNUM_INIT;
 	aaf->data_bytes_per_ch = sizeof(unsigned short); /* 1ch 16bit */
+	aaf->piece_data_len = 0;
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 
@@ -169,9 +174,11 @@ static int mse_packetizer_audio_aaf_packet_init(int index)
 	pr_debug("[%s] index=%d\n", __func__, index);
 	aaf = &aaf_packetizer_table[index];
 
+	aaf->piece_f = false;
 	aaf->send_seq_num = 0;
 	aaf->old_seq_num = SEQNUM_INIT;
 	aaf->seq_num_err = SEQNUM_INIT;
+	aaf->piece_data_len = 0;
 
 	return 0;
 }
@@ -363,6 +370,7 @@ static int mse_packetizer_audio_aaf_packetize(int index,
 	struct aaf_packetizer *aaf;
 	int i, data_len, data_size;
 	u16 *sample, *data;
+	int piece_size = 0, piece_len = 0;
 
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
@@ -373,30 +381,51 @@ static int mse_packetizer_audio_aaf_packetize(int index,
 		 buffer_size, *timestamp);
 
 	/* header */
-	memcpy(packet, aaf->packet_template, aaf->avtp_packet_size);
+	if (aaf->piece_f) {
+		piece_len = aaf->piece_data_len;
+		piece_size = piece_len / aaf->data_bytes_per_ch;
+		aaf->piece_f = false;
+		aaf->piece_data_len = 0;
+		memcpy(packet, aaf->packet_piece, aaf->avtp_packet_size);
+	} else {
+		memcpy(packet, aaf->packet_template, aaf->avtp_packet_size);
+	}
 
 	/* payload */
-	sample = (u16 *)(packet + AVTP_AAF_PAYLOAD_OFFSET);
+	sample = (u16 *)(packet + AVTP_AAF_PAYLOAD_OFFSET + piece_len);
 	data = (u16 *)(buffer + *buffer_processed);
 
 	/* size check */
 	data_size = aaf->sample_per_packet * aaf->aaf_config.channels;
 	data_len = data_size * aaf->data_bytes_per_ch;
-	if (data_len + *buffer_processed > buffer_size) {
+	if (data_len - piece_len > buffer_size - *buffer_processed) {
+		aaf->piece_f = true;
 		data_len = buffer_size - *buffer_processed;
 		data_size = data_len / aaf->data_bytes_per_ch;
-		*packet_size = AVTP_AAF_PAYLOAD_OFFSET + data_len;
+		*packet_size = AVTP_AAF_PAYLOAD_OFFSET + data_len + piece_len;
 	} else {
 		*packet_size = aaf->avtp_packet_size;
 	}
 
 	/* 16 bits integer */
-	for (i = 0; i < data_size; i++)
+	for (i = 0; i < (data_size - piece_size); i++)
 		*(sample + i) = htons(*(data + i));
 
-	*buffer_processed += data_len;
+	*buffer_processed += data_len - piece_len;
 
-	/* TODO buffer over check */
+	/* keep piece of data */
+	if (aaf->piece_f) {
+		aaf->piece_data_len = data_len + piece_len;
+		memcpy(aaf->packet_piece, packet, *packet_size);
+		return -1;
+	}
+
+	/* variable header */
+	avtp_set_sequence_num(packet, aaf->send_seq_num++);
+	avtp_set_timestamp(packet, (u32)*timestamp);
+	avtp_set_stream_data_length(packet, data_len);
+
+	/* buffer over check */
 	if (*buffer_processed >= buffer_size)
 		return 1; /* end of buffer */
 	else
@@ -509,7 +538,8 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 	struct aaf_packetizer *aaf;
 	int seq_num;
 	int err;
-	int payload_size;
+	int payload_size, piece_size = 0;
+	char *buf, tmp_buffer[ETHFRAMEMTU_MAX] = {0};
 	unsigned long value;
 
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
@@ -523,6 +553,20 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 		       __func__, avtp_get_subtype(packet));
 		return -EINVAL;
 	}
+
+	if (aaf->piece_f) {
+		aaf->piece_f = false;
+		memcpy(buffer, aaf->packet_piece, aaf->piece_data_len);
+		*buffer_processed += aaf->piece_data_len;
+		aaf->piece_data_len = 0;
+	}
+
+	payload_size = avtp_get_stream_data_length(packet);
+	/* buffer over check */
+	if (*buffer_processed + payload_size > buffer_size)
+		buf = tmp_buffer;
+	else
+		buf = buffer + *buffer_processed;
 
 	/* seq_num check */
 	seq_num = avtp_get_sequence_num(packet);
@@ -547,16 +591,26 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 	aaf->old_seq_num = (seq_num + 1 + (AVTP_SEQUENCE_NUM_MAX + 1)) %
 						(AVTP_SEQUENCE_NUM_MAX + 1);
 
-	payload_size = avtp_get_stream_data_length(packet);
-	err = mse_packetizer_audio_aaf_data_convert(
-					(u16 *)(buffer + *buffer_processed),
-					packet);
+	err = mse_packetizer_audio_aaf_data_convert((u16 *)buf, packet);
 	if (err) {
 		pr_err("[%s] error convert\n", __func__);
 		return -EPERM;
 	}
 
-	*buffer_processed += payload_size;
+	if (*buffer_processed + payload_size > buffer_size) {
+		aaf->piece_f = true;
+		piece_size = buffer_size - *buffer_processed;
+		aaf->piece_data_len = payload_size - piece_size;
+		memcpy(buffer + *buffer_processed, buf, piece_size);
+		memcpy(aaf->packet_piece, buf + piece_size,
+		       aaf->piece_data_len);
+	}
+
+	if (*buffer_processed + payload_size > buffer_size)
+		*buffer_processed += (buffer_size - *buffer_processed);
+	else
+		*buffer_processed += payload_size;
+
 	*timestamp = avtp_get_timestamp(packet);
 
 	aaf->sample_per_packet =
