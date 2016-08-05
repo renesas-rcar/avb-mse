@@ -158,8 +158,10 @@ static inline struct alsa_stream *mse_adapter_alsa_mse_to_io(
 {
 	if (mse_get_inout(index) == MSE_DIRECTION_INPUT)
 		return &chip->playback;
-	else
+	else if (mse_get_inout(index) == MSE_DIRECTION_OUTPUT)
 		return &chip->capture;
+	else
+		return NULL;
 }
 
 static int mse_adapter_alsa_callback(int index, int size)
@@ -179,6 +181,10 @@ static int mse_adapter_alsa_callback(int index, int size)
 	}
 
 	io = mse_adapter_alsa_mse_to_io(chip, index);
+	if (!io) {
+		pr_err("[%s] Failed mse_adapter_alsa_mse_to_io()\n", __func__);
+		return 0;
+	}
 	runtime = io->substream->runtime;
 
 	io->byte_pos += io->byte_per_period;
@@ -704,6 +710,7 @@ static int mse_adapter_alsa_probe(int devno)
 
 	/* regist mse */
 	index = mse_register_adapter_media(MSE_TYPE_ADAPTER_AUDIO_PCM,
+					   MSE_DIRECTION_BOTH,
 					   "ALSA Adapter",
 					   chip,
 					   device_name);

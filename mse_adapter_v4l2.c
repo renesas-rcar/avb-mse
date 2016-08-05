@@ -2489,10 +2489,21 @@ static int register_mse_core(struct v4l2_adapter_device *vadp_dev)
 	int index_mse;
 	struct video_device *vdev = &vadp_dev->vdev;
 	char device_name[MSE_NAME_LEN_MAX];
+	enum MSE_DIRECTION inout;
 
 	sprintf(device_name, "/dev/%s", video_device_node_name(vdev));
 
+	if (vdev->vfl_dir == VFL_DIR_RX) {
+		inout = MSE_DIRECTION_OUTPUT;
+	} else if (vdev->vfl_dir == VFL_DIR_TX) {
+		inout = MSE_DIRECTION_INPUT;
+	} else {
+		pr_err("[%s] illegal vfl_dir=%d\n", __func__, vdev->vfl_dir);
+		return MSE_ADAPTER_V4L2_RTN_NG;
+	}
+
 	index_mse = mse_register_adapter_media(MSE_TYPE_ADAPTER_VIDEO_H264,
+					       inout,
 					       vdev->name,
 					       vadp_dev,
 					       device_name);

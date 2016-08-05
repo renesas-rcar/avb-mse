@@ -625,9 +625,11 @@ static int sysfs_name_cmp(char *defname, char *sysfsname)
 	return ret;
 }
 
-static int mse_create_config_device(struct mse_adapter *adapter)
+static int mse_create_config_device(int index_media,
+				    struct mse_adapter *adapter,
+				    char *device_name)
 {
-	int ret;
+	int ret, type;
 
 	pr_debug("[%s]\n", __func__);
 
@@ -637,12 +639,29 @@ static int mse_create_config_device(struct mse_adapter *adapter)
 						GFP_KERNEL);
 		memcpy(adapter->sysfs_config, mse_sysfs_config_audio,
 		       sizeof(mse_sysfs_config_audio));
+
+		type = 0; /* both */
+
 		break;
 	case MSE_TYPE_ADAPTER_VIDEO:
 		adapter->sysfs_config = kzalloc(sizeof(mse_sysfs_config_video),
 						GFP_KERNEL);
 		memcpy(adapter->sysfs_config, mse_sysfs_config_video,
 		       sizeof(mse_sysfs_config_video));
+
+		switch (adapter->inout) {
+		case MSE_DIRECTION_INPUT:
+			type = 0; /* talker */
+			break;
+		case MSE_DIRECTION_OUTPUT:
+			type = 1; /* listener */
+			break;
+		default:
+			pr_err("[%s] undefined type=%d\n",
+			       __func__, adapter->inout);
+			return -EPERM;
+		}
+
 		break;
 	default:
 		pr_err("[%s] undefined type=%d\n", __func__, adapter->type);
@@ -657,6 +676,29 @@ static int mse_create_config_device(struct mse_adapter *adapter)
 	}
 
 	adapter->index_sysfs = ret;
+
+	/* device name */
+	ret = mse_sysfs_set_config_str(
+			index_media,
+			MSE_SYSFS_NAME_STR_DEVICE,
+			device_name,
+			MSE_NAME_LEN_MAX);
+	if (ret < 0) {
+		pr_err("[%s] failed setting for sysfs ret=%d type=%s\n",
+		       __func__, ret, MSE_SYSFS_NAME_STR_DEVICE);
+		return ret;
+	}
+
+	/* type */
+	ret = mse_sysfs_set_config_int(
+			index_media,
+			MSE_SYSFS_NAME_STR_TYPE,
+			type);
+	if (ret < 0) {
+		pr_err("[%s] failed setting for sysfs ret=%d type=%s\n",
+		       __func__, ret, MSE_SYSFS_NAME_STR_TYPE);
+		return ret;
+	}
 
 	return 0;
 }
@@ -1905,6 +1947,7 @@ static bool is_audio_adapter(struct mse_adapter *adapter)
 
 /* External function */
 int mse_register_adapter_media(enum MSE_TYPE type,
+			       enum MSE_DIRECTION inout,
 			       char *name,
 			       void *data,
 			       char *device_name)
@@ -1939,23 +1982,20 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 			/* init table */
 			mse->media_table[i].used_f = true;
 			mse->media_table[i].type = type;
+			mse->media_table[i].inout = inout;
 			mse->media_table[i].private_data = data;
 			strncpy(mse->media_table[i].name, name,
 				MSE_NAME_LEN_MAX);
 			/* create control device */
-			mse_create_config_device(&mse->media_table[i]);
-			pr_debug("[%s] registered index=%d\n", __func__, i);
-			err = mse_sysfs_set_config_str(
-					i,
-					MSE_SYSFS_NAME_STR_DEVICE,
-					device_name,
-					MSE_NAME_LEN_MAX);
+			err = mse_create_config_device(i,
+						       &mse->media_table[i],
+						       device_name);
 			if (err < 0) {
-				pr_err("[%s] failed setting for sysfs\n",
-				       __func__);
 				spin_unlock(&mse->lock);
 				return -EPERM;
 			}
+
+			pr_debug("[%s] registered index=%d\n", __func__, i);
 
 			spin_unlock(&mse->lock);
 
@@ -2541,7 +2581,6 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	instance->inout = inout;
 	instance->state = MSE_STATE_OPEN;
 	instance->media = adapter;
-	instance->media->inout = inout;
 	instance->packetizer = packetizer;
 	instance->network = network;
 	instance->index_media = index_media;
@@ -3007,12 +3046,23 @@ EXPORT_SYMBOL(mse_get_private_data);
 
 enum MSE_DIRECTION mse_get_inout(int index_media)
 {
+	int index;
+
 	if ((index_media < 0) || (index_media >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index_media);
+		pr_err("[%s] invalid argument. index=%d\n",
+		       __func__, index_media);
 		return -EINVAL;
 	}
 
-	return mse->media_table[index_media].inout;
+	for (index = 0; index < ARRAY_SIZE(mse->instance_table); index++) {
+		if (index_media == mse->instance_table[index].index_media)
+			return mse->instance_table[index].inout;
+	}
+
+	pr_err("[%s] adapter was unregistered. index=%d\n",
+	       __func__, index_media);
+
+	return -EPERM;
 }
 EXPORT_SYMBOL(mse_get_inout);
 
