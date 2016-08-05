@@ -81,13 +81,14 @@ extern void mse_packet_ctrl_free(struct mse_packet_ctrl *dma);
 extern int mse_packet_ctrl_make_packet(int index,
 				       void *data,
 				       size_t size,
+				       int ptp_clock,
+				       int timestamp_size,
 				       unsigned int *timestamp,
 				       struct mse_packet_ctrl *dma,
 				       struct mse_packetizer_ops *ops);
-extern int mse_packet_ctrl_send_packet(
-				int index,
-				struct mse_packet_ctrl *dma,
-				struct mse_adapter_network_ops *ops);
+extern int mse_packet_ctrl_send_packet(int index,
+				       struct mse_packet_ctrl *dma,
+				       struct mse_adapter_network_ops *ops);
 extern int mse_packet_ctrl_receive_prepare_packet(
 				int index,
 				struct mse_packet_ctrl *dma,
@@ -97,10 +98,28 @@ extern int mse_packet_ctrl_receive_packet(
 				int max_size,
 				struct mse_packet_ctrl *dma,
 				struct mse_adapter_network_ops *ops);
+extern int mse_packet_ctrl_receive_packet_crf(
+				int index,
+				int max_size,
+				struct mse_packet_ctrl *dma,
+				struct mse_adapter_network_ops *ops);
 extern int mse_packet_ctrl_take_out_packet(int index,
 					   void *data,
 					   size_t size,
-					   unsigned int *timestamp,
+					   unsigned int *timestamps,
+					   int t_size,
+					   int *t_stored,
 					   struct mse_packet_ctrl *dma,
-					   struct mse_packetizer_ops *ops);
+					   struct mse_packetizer_ops *ops,
+					   size_t *processed);
+extern int mse_packet_ctrl_make_packet_crf(int index,
+					   struct ptp_clock_time *timestamps,
+					   int count,
+					   struct mse_packet_ctrl *dma);
+extern int mse_packet_ctrl_take_out_packet_crf(
+	int index,
+	u64 *timestamp,
+	int size,
+	struct mse_packet_ctrl *dma);
+
 #endif /* __MSE_PACKET_CTRL_H__ */

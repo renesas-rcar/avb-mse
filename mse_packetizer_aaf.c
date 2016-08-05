@@ -80,7 +80,7 @@
 #define CBS_ADJUSTMENT_DENOMINATOR      (100)
 
 #define PORT_TRANSMIT_RATE      (100000000) /* 100M [bit/sec] */
-#define CLASS_INTERVAL_FRAMES   (1000) /* class A */
+#define CLASS_INTERVAL_FRAMES   (1000) /* class C */
 #define INTERVAL_FRAMES         (1)
 
 #define MSE_PACKETIZER_MAX      (10)
@@ -124,6 +124,7 @@ static int mse_packetizer_audio_aaf_open(void)
 	for (index = 0; aaf_packetizer_table[index].used_f &&
 	     index < ARRAY_SIZE(aaf_packetizer_table); index++)
 		;
+
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
 
@@ -136,6 +137,7 @@ static int mse_packetizer_audio_aaf_open(void)
 	aaf->data_bytes_per_ch = sizeof(unsigned short); /* 1ch 16bit */
 
 	pr_debug("[%s] index=%d\n", __func__, index);
+
 	return index;
 }
 
@@ -150,6 +152,7 @@ static int mse_packetizer_audio_aaf_release(int index)
 	pr_debug("[%s] index=%d\n", __func__, index);
 
 	memset(aaf, 0, sizeof(*aaf));
+
 	return 0;
 }
 
@@ -166,6 +169,7 @@ static int mse_packetizer_audio_aaf_packet_init(int index)
 	aaf->send_seq_num = 0;
 	aaf->old_seq_num = SEQNUM_INIT;
 	aaf->seq_num_err = SEQNUM_INIT;
+
 	return 0;
 }
 
@@ -181,6 +185,7 @@ static int mse_packetizer_audio_aaf_set_network_config(
 	pr_debug("[%s] index=%d\n", __func__, index);
 	aaf = &aaf_packetizer_table[index];
 	aaf->net_config = *config;
+
 	return 0;
 }
 
@@ -221,6 +226,8 @@ static int mse_packetizer_audio_aaf_header_build(void *dst,
 	return hlen + len;
 }
 
+static int class_interval_frames;
+
 static int mse_packetizer_audio_aaf_set_audio_config(
 					int index,
 					struct mse_audio_config *config)
@@ -232,14 +239,30 @@ static int mse_packetizer_audio_aaf_set_audio_config(
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d rate=%d channels=%d\n",
-		 __func__, index, config->sample_rate, config->channels);
+	pr_debug("[%s] index=%d rate=%d channels=%d bytes_per_frame=%d\n",
+		 __func__, index, config->sample_rate, config->channels,
+		 config->bytes_per_frame);
 	aaf = &aaf_packetizer_table[index];
 	aaf->aaf_config = *config;
 
-	aaf->sample_per_packet = aaf->aaf_config.sample_rate /
-				(CLASS_INTERVAL_FRAMES * INTERVAL_FRAMES);
-	aaf->frame_interval_time = NSEC / CLASS_INTERVAL_FRAMES;
+	/* when bytes_per_frame is not set */
+	if (!aaf->aaf_config.bytes_per_frame) {
+		class_interval_frames = CLASS_INTERVAL_FRAMES;
+		aaf->sample_per_packet = aaf->aaf_config.sample_rate /
+				(class_interval_frames * INTERVAL_FRAMES);
+		aaf->frame_interval_time = NSEC / class_interval_frames;
+	} else {
+		aaf->sample_per_packet = aaf->aaf_config.bytes_per_frame /
+			(aaf->aaf_config.channels * aaf->data_bytes_per_ch);
+		if (aaf->sample_per_packet < 2)
+			aaf->sample_per_packet = 2;
+		else if (aaf->sample_per_packet > 128)
+			aaf->sample_per_packet = 128;
+		class_interval_frames = aaf->aaf_config.sample_rate /
+					aaf->sample_per_packet;
+		aaf->frame_interval_time = NSEC / class_interval_frames;
+	}
+
 	payload_size = aaf->sample_per_packet * aaf->aaf_config.channels *
 						aaf->data_bytes_per_ch;
 	aaf->avtp_packet_size = AVTP_AAF_PAYLOAD_OFFSET + payload_size;
@@ -257,6 +280,20 @@ static int mse_packetizer_audio_aaf_set_audio_config(
 	param.sample_rate = aaf->aaf_config.sample_rate;
 
 	mse_packetizer_audio_aaf_header_build(aaf->packet_template, &param);
+
+	return 0;
+}
+
+static int mse_packetizer_audio_aaf_get_audio_info(
+	int index,
+	struct mse_audio_info *info)
+{
+	struct aaf_packetizer *aaf;
+
+	aaf = &aaf_packetizer_table[index];
+	info->avtp_packet_size = aaf->avtp_packet_size;
+	info->sample_per_packet = aaf->sample_per_packet;
+	info->frame_interval_time = aaf->frame_interval_time;
 
 	return 0;
 }
@@ -283,7 +320,7 @@ static int mse_packetizer_audio_aaf_calc_cbs(int index,
 
 	bandwidth_fraction_numerator =
 		(ETHOVERHEAD_REAL + aaf->avtp_packet_size) * BYTE_TO_BIT *
-		CLASS_INTERVAL_FRAMES * INTERVAL_FRAMES *
+		class_interval_frames * INTERVAL_FRAMES *
 		CBS_ADJUSTMENT_NUMERATOR;
 
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
@@ -298,8 +335,8 @@ static int mse_packetizer_audio_aaf_calc_cbs(int index,
 	do_div(value, bandwidth_fraction_denominator);
 	cbs->sendSlope = value;
 
-	value = USHRT_MAX * (bandwidth_fraction_denominator
-					 - bandwidth_fraction_numerator);
+	value = USHRT_MAX * (bandwidth_fraction_denominator -
+					 bandwidth_fraction_numerator);
 	do_div(value, bandwidth_fraction_denominator);
 	cbs->idleSlope = value;
 
@@ -344,17 +381,11 @@ static int mse_packetizer_audio_aaf_packetize(int index,
 		*packet_size = aaf->avtp_packet_size;
 	}
 
-	/* variable header */
-	avtp_set_sequence_num(packet, aaf->send_seq_num++);
-	avtp_set_timestamp(packet, (u32)*timestamp);
-	avtp_set_stream_data_length(packet, data_len);
-
 	/* 16 bits integer */
 	for (i = 0; i < data_size; i++)
 		*(sample + i) = htons(*(data + i));
 
 	*buffer_processed += data_len;
-	*timestamp += aaf->frame_interval_time;
 
 	/* TODO buffer over check */
 	if (*buffer_processed >= buffer_size)
@@ -470,6 +501,10 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 	int seq_num;
 	int err;
 	int payload_size;
+	unsigned long value;
+
+	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+		return -EPERM;
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 	aaf = &aaf_packetizer_table[index];
@@ -515,6 +550,14 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 	*buffer_processed += payload_size;
 	*timestamp = avtp_get_timestamp(packet);
 
+	aaf->sample_per_packet =
+		avtp_get_stream_data_length(packet) /
+		(avtp_get_aaf_channels_per_frame(packet) *
+		 avtp_aaf_format_to_bytes(avtp_get_aaf_format(packet)));
+	value = NSEC * aaf->sample_per_packet;
+	do_div(value, avtp_aaf_nsr_to_sample_rate(avtp_get_aaf_nsr(packet)));
+	aaf->frame_interval_time = value;
+
 	/* buffer over check */
 	if (*buffer_processed >= buffer_size)
 		return 1; /* end of buffer */
@@ -531,6 +574,7 @@ struct mse_packetizer_ops mse_packetizer_audio_aaf_ops = {
 	.init = mse_packetizer_audio_aaf_packet_init,
 	.set_network_config = mse_packetizer_audio_aaf_set_network_config,
 	.set_audio_config = mse_packetizer_audio_aaf_set_audio_config,
+	.get_audio_info = mse_packetizer_audio_aaf_get_audio_info,
 	.calc_cbs = mse_packetizer_audio_aaf_calc_cbs,
 	.packetize = mse_packetizer_audio_aaf_packetize,
 	.depacketize = mse_packetizer_audio_aaf_depacketize,

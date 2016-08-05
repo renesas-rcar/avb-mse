@@ -76,6 +76,22 @@
 #define MSE_SYSFS_NAME_STR_FPS_SECONDS               "fps_seconds"
 #define MSE_SYSFS_NAME_STR_FPS_FRAMES                "fps_frames"
 #define MSE_SYSFS_NAME_STR_BITRATE                   "bitrate"
+#define MSE_SYSFS_NAME_STR_BYTES_PER_FRAME           "bytes_per_frame"
+#define MSE_SYSFS_NAME_STR_DEVICE                    "device"
+#define MSE_SYSFS_NAME_STR_PTP_CLOCK                 "ptp_clock"
+#define MSE_SYSFS_NAME_STR_PTP_CLOCK_DEVICE          "ptp_clock_device"
+#define MSE_SYSFS_NAME_STR_PTP_CAPTURE_CH            "ptp_capture_ch"
+#define MSE_SYSFS_NAME_STR_PTP_CAPTURE_FREQ          "ptp_capture_freq"
+#define MSE_SYSFS_NAME_STR_MEDIA_CLOCK_RECOVERY      "media_clock_recovery"
+#define MSE_SYSFS_NAME_STR_MEDIA_CLOCK_TYPE          "media_clock_type"
+#define MSE_SYSFS_NAME_STR_RECOVERY_CAPTURE_FREQ     "recovery_capture_freq"
+#define MSE_SYSFS_NAME_STR_SEND_CLOCK                "send_clock"
+#define MSE_SYSFS_NAME_STR_SEND_CLOCK_DST_MAC        "send_clock_dst_mac"
+#define MSE_SYSFS_NAME_STR_SEND_CLOCK_SRC_MAC        "send_clock_src_mac"
+#define MSE_SYSFS_NAME_STR_SEND_CLOCK_UNIQUE_ID      "send_clock_unique_id"
+#define MSE_SYSFS_NAME_STR_MAX_TRANSIT_TIME          "max_transit_time"
+#define MSE_SYSFS_NAME_STR_TALKER_DELAY_TIME         "talker_delay_time"
+#define MSE_SYSFS_NAME_STR_LISTENER_DELAY_TIME       "listener_delay_time"
 
 enum MSE_SYSFS_CONFIG_TYPE {
 	MSE_TYPE_INT,

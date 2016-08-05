@@ -117,6 +117,8 @@ enum MSE_TYPE {
 	MSE_TYPE_PACKETIZER_VIDEO_H264,
 	/** @brief Packetizer for Video MJPEG */
 	MSE_TYPE_PACKETIZER_VIDEO_MJPEG,
+	/** @brief Packetizer for control protocol CRF  */
+	MSE_TYPE_PACKETIZER_CTRL_CRF,
 };
 
 /**
@@ -151,8 +153,19 @@ struct mse_audio_config {
 	/** @brief period_size */
 	int period_size;
 	/** @brief samples per frame */
-	int bytes_par_sample;
+	int bytes_per_sample;
+	/** @brief bytes per frame */
+	int bytes_per_frame;
 	/* if need, add more parameters */
+};
+
+/**
+ * @brief aduio stream information
+ */
+struct mse_audio_info {
+	int avtp_packet_size;
+	int sample_per_packet;
+	int frame_interval_time;
 };
 
 /**
@@ -247,7 +260,9 @@ struct mse_adapter_network_ops {
 	/** @brief stop function pointer */
 	int (*stop)(int index);
 	/** @brief send function pointer */
-	int (*send)(int index, struct mse_packet *packets, int num_packets);
+	int (*send)(int index,
+		    struct mse_packet *packets,
+		    int num_packets);
 	/** @brief receive function pointer */
 	int (*receive_prepare)(int index,
 			       struct mse_packet *packets,
@@ -283,6 +298,8 @@ struct mse_packetizer_ops {
 	int (*set_audio_config)(int index, struct mse_audio_config *config);
 	/** @brief set video config function pointer */
 	int (*set_video_config)(int index, struct mse_video_config *config);
+	/** @brief get audio info function pointer */
+	int (*get_audio_info)(int index, struct mse_audio_info *info);
 
 	/** @brief calc_cbs function pointer */
 	int (*calc_cbs)(int index, struct eavb_cbsparam *cbs);
@@ -305,6 +322,22 @@ struct mse_packetizer_ops {
 			   size_t packet_size);
 };
 
+/**
+ * @brief registered operations for mch
+ */
+struct mch_ops {
+	int (*open)(int *dev_id);
+	int (*close)(int dev_id);
+	int (*send_timestamps)(int dev_id,
+			       int time_rate_ns,
+			       int master_count,
+			       unsigned int master_timestamps[],
+			       int device_count,
+			       unsigned int device_timestamps[]);
+	int (*get_recovery_value)(int dev_id,
+				  int *value);
+};
+
 #define GET_UPPER_16BIT(id) (((id) & 0xFF00) >> 8)
 #define GET_LOWER_16BIT(id) ((id) & 0x00FF)
 
@@ -324,23 +357,25 @@ extern inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
  * @param[in] type type of adapter
  * @param[in] name of adapter
  * @param[in] data private adapter pointer
+ * @param[in] device_name device name
  *
- * @retval 0 MSE instance ID
+ * @retval >=0 MSE adapter ID
  * @retval <0 Error
  */
 extern int mse_register_adapter_media(enum MSE_TYPE type,
 				      char *name,
-				      void *data);
+				      void *data,
+				      char *device_name);
 
 /**
  * @brief unregister media adapter from MSE
  *
- * @param[in] index instance ID of MSE
+ * @param[in] index_media MSE adapter ID
  *
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_unregister_adapter_media(int index);
+extern int mse_unregister_adapter_media(int index_media);
 
 /**
  * @brief register network adapter to MSE
@@ -358,7 +393,7 @@ extern int mse_register_adapter_network(struct mse_adapter_network_ops *ops);
 /**
  * @brief unregister network adapter from MSE
  *
- * @param[in] index instance ID of MSE
+ * @param[in] index MSE instance ID
  *
  * @retval 0 Success
  * @retval <0 Error
@@ -391,7 +426,7 @@ extern int mse_unregister_packetizer(int index);
 /**
  * @brief get audio configuration
  *
- * @param[in] index instance ID of MSE
+ * @param[in] index MSE instance ID
  * @param[out] config audio configuration
  *
  * @retval 0 Success
@@ -402,7 +437,7 @@ extern int mse_get_audio_config(int index, struct mse_audio_config *config);
 /**
  * @brief set audio configuration
  *
- * @param[in] index instance ID of MSE
+ * @param[in] index MSE instance ID
  * @param[in] config audio configuration
  *
  * @retval 0 Success
@@ -413,7 +448,7 @@ extern int mse_set_audio_config(int index, struct mse_audio_config *config);
 /**
  * @brief get video configuration
  *
- * @param[in] index instance ID of MSE
+ * @param[in] index MSE instance ID
  * @param[out] config video configuration
  *
  * @retval 0 Success
@@ -424,7 +459,7 @@ extern int mse_get_video_config(int index, struct mse_video_config *config);
 /**
  * @brief set video configuration
  *
- * @param[in] index instance ID of MSE
+ * @param[in] index MSE instance ID
  * @param[in] config video configuration
  *
  * @retval 0 Success
@@ -435,7 +470,7 @@ extern int mse_set_video_config(int index, struct mse_video_config *config);
 /**
  * @brief MSE open
  *
- * @param[in] index adapter ID of MSE
+ * @param[in] index_media MSE adapter ID
  * @param[in] type direction of adapter
  *
  * @retval >=0 instance ID of MSE
@@ -446,7 +481,7 @@ extern int mse_open(int index_media, enum MSE_DIRECTION inout);
 /**
  * @brief MSE close
  *
- * @param[in] index instance ID of MSE
+ * @param[in] index MSE instance ID
  *
  * @retval 0 Success
  * @retval <0 Error
@@ -456,7 +491,7 @@ extern int mse_close(int index);
 /**
  * @brief MSE streaming on
  *
- * @param[in] index instance ID of MSE
+ * @param[in] index MSE instance ID
  *
  * @retval 0 Success
  * @retval <0 Error
@@ -466,7 +501,7 @@ extern int mse_start_streaming(int index);
 /**
  * @brief MSE streaming off
  *
- * @param[in] index instance ID of MSE
+ * @param[in] index MSE instance ID
  *
  * @retval 0 Success
  * @retval <0 Error
@@ -476,7 +511,7 @@ extern int mse_stop_streaming(int index);
 /**
  * @brief MSE start transmission
  *
- * @param[in] index instance ID of MSE
+ * @param[in] index MSE instance ID
  * @param[in] buffer send data
  * @param[in] buffer_size buffer size
  * @param[in] mse_completion callback function pointer
@@ -492,21 +527,41 @@ extern int mse_start_transmission(int index,
 /**
  * @brief get private data
  *
- * @param[in] index instance ID of MSE
+ * @param[in] index MSE adapter ID
  * @param[out] private_data pointer
  *
  * @retval 0 Success
  */
-extern int mse_get_private_data(int index, void **private_data);
+extern int mse_get_private_data(int index_media, void **private_data);
 
 /**
  * @brief get input output info
  *
- * @param[in] adapter
+ * @param[in] index MSE adapter ID
  *
  * @retval MSE_DIRECTION_INPUT input
  * @retval MSE_DIRECTION_OUTPUT output
  */
-extern enum MSE_DIRECTION mse_get_inout(int index);
+extern enum MSE_DIRECTION mse_get_inout(int index_media);
+
+/**
+ * @brief register MCH to MSE
+ *
+ * @param[in] ops
+ *
+ * @retval 0 MCH table ID
+ * @retval <0 Error
+ */
+extern int mse_register_mch(struct mch_ops *ops);
+
+/**
+ * @brief unregister MCH to MSE
+ *
+ * @param[in] index
+ *
+ * @retval 0 Success
+ * @retval <0 Error
+ */
+extern int mse_unregister_mch(int index);
 
 #endif /* __MSE_CORE_H__ */

@@ -73,7 +73,7 @@
 #include "mse_sysfs.h"
 
 #define MSE_SYSFS_SIZE	(10)
-#define MSE_SYSFS_DATA	(16)
+#define MSE_SYSFS_DATA	(32)
 
 #define MSE_SYSFS_NAME_OFFSET		(3)
 #define MSE_SYSFS_NAME_LENGTH		(10)

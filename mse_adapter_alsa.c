@@ -526,7 +526,7 @@ static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 	config.sample_format		= runtime->format;
 	config.channels			= runtime->channels;
 	config.period_size		= runtime->period_size;
-	config.bytes_par_sample		= samples_to_bytes(runtime, 1);
+	config.bytes_per_sample		= samples_to_bytes(runtime, 1);
 
 	err = mse_set_audio_config(io->index, &config);
 	if (err < 0) {
@@ -616,6 +616,7 @@ static int mse_adapter_alsa_probe(int devno)
 	struct snd_card *card;
 	int err;
 	int index;
+	char device_name[MSE_NAME_LEN_MAX];
 
 	pr_debug("[%s] devno=%d\n", __func__, devno);
 
@@ -699,10 +700,13 @@ static int mse_adapter_alsa_probe(int devno)
 		return -EPERM;
 	}
 
+	sprintf(device_name, "hw:%d,0", card->number);
+
 	/* regist mse */
 	index = mse_register_adapter_media(MSE_TYPE_ADAPTER_AUDIO_PCM,
 					   "ALSA Adapter",
-					   chip);
+					   chip,
+					   device_name);
 	if (index < 0) {
 		pr_err("[%s] Failed register adapter index=%d\n",
 		       __func__, index);

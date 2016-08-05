@@ -80,8 +80,9 @@
 #define CBS_ADJUSTMENT_DENOMINATOR      (100)
 
 #define PORT_TRANSMIT_RATE      (100000000) /* 100M [bit/sec] */
-#define CLASS_INTERVAL_FRAMES   (1000) /* class A */
+#define CLASS_INTERVAL_FRAMES   (1000) /* class C */
 #define INTERVAL_FRAMES         (1)
+#define AM824_DATA_SIZE         (sizeof(u32))
 
 #define MSE_PACKETIZER_MAX      (10)
 
@@ -168,10 +169,12 @@ static int mse_packetizer_audio_iec_packet_init(int index)
 	pr_debug("[%s] index=%d\n", __func__, index);
 	iec = &iec_packetizer_table[index];
 
+	iec->piece_f = false;
 	iec->send_seq_num = 0;
 	iec->old_seq_num = SEQNUM_INIT;
 	iec->seq_num_err = SEQNUM_INIT;
 	iec->local_total_samples = 0;
+	iec->piece_data_len = 0;
 
 	return 0;
 }
@@ -230,6 +233,8 @@ static int mse_packetizer_audio_iec_header_build(void *dst,
 	return hlen + len;
 }
 
+static int class_interval_frames;
+
 static int mse_packetizer_audio_iec_set_audio_config(
 					int index,
 					struct mse_audio_config *config)
@@ -246,11 +251,26 @@ static int mse_packetizer_audio_iec_set_audio_config(
 	iec = &iec_packetizer_table[index];
 	iec->iec_config = *config;
 
-	iec->sample_per_packet = iec->iec_config.sample_rate /
-				(CLASS_INTERVAL_FRAMES * INTERVAL_FRAMES);
-	iec->frame_interval_time = NSEC / CLASS_INTERVAL_FRAMES;
+	/* when bytes_per_frame is not set */
+	if (!iec->iec_config.bytes_per_frame) {
+		class_interval_frames = CLASS_INTERVAL_FRAMES;
+		iec->sample_per_packet = iec->iec_config.sample_rate /
+				(class_interval_frames * INTERVAL_FRAMES);
+		iec->frame_interval_time = NSEC / CLASS_INTERVAL_FRAMES;
+	} else {
+		iec->sample_per_packet = iec->iec_config.bytes_per_frame /
+			(iec->iec_config.channels * AM824_DATA_SIZE);
+		if (iec->sample_per_packet < 2)
+			iec->sample_per_packet = 2;
+		else if (iec->sample_per_packet > 128)
+			iec->sample_per_packet = 128;
+		class_interval_frames = iec->iec_config.sample_rate /
+					iec->sample_per_packet;
+		iec->frame_interval_time = NSEC / class_interval_frames;
+	}
+
 	payload_size = iec->sample_per_packet * iec->iec_config.channels *
-						iec->data_bytes_per_ch;
+						AM824_DATA_SIZE;
 	iec->avtp_packet_size = AVTP_IEC61883_6_PAYLOAD_OFFSET + payload_size;
 	if (iec->avtp_packet_size < ETHFRAMELEN_MIN)
 		iec->avtp_packet_size = ETHFRAMELEN_MIN;
@@ -266,6 +286,20 @@ static int mse_packetizer_audio_iec_set_audio_config(
 	param.sample_rate = iec->iec_config.sample_rate;
 
 	mse_packetizer_audio_iec_header_build(iec->packet_template, &param);
+
+	return 0;
+}
+
+static int mse_packetizer_audio_iec_get_audio_info(
+	int index,
+	struct mse_audio_info *info)
+{
+	struct iec_packetizer *iec;
+
+	iec = &iec_packetizer_table[index];
+	info->avtp_packet_size = iec->avtp_packet_size;
+	info->sample_per_packet = iec->sample_per_packet;
+	info->frame_interval_time = iec->frame_interval_time;
 
 	return 0;
 }
@@ -292,7 +326,7 @@ static int mse_packetizer_audio_iec_calc_cbs(int index,
 
 	bandwidth_fraction_numerator =
 		(ETHOVERHEAD_REAL + iec->avtp_packet_size) * BYTE_TO_BIT *
-		CLASS_INTERVAL_FRAMES * INTERVAL_FRAMES *
+		class_interval_frames * INTERVAL_FRAMES *
 		CBS_ADJUSTMENT_NUMERATOR;
 
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
@@ -326,7 +360,7 @@ static int mse_packetizer_audio_iec_packetize(int index,
 					      unsigned int *timestamp)
 {
 	struct iec_packetizer *iec;
-	int i, data_len, data_size;
+	int i, payload_len, data_size;
 	u32 *sample;
 	u16 *data;
 
@@ -346,12 +380,16 @@ static int mse_packetizer_audio_iec_packetize(int index,
 	data = (u16 *)(buffer + *buffer_processed);
 
 	/* size check */
-	data_size = iec->sample_per_packet * iec->iec_config.channels;
-	data_len = data_size * iec->data_bytes_per_ch;
+	data_size = iec->sample_per_packet * iec->iec_config.channels *
+							iec->data_bytes_per_ch;
+	payload_len = iec->sample_per_packet * iec->iec_config.channels *
+							AM824_DATA_SIZE;
+
 	if (data_len + *buffer_processed > buffer_size) {
-		data_len = buffer_size - *buffer_processed;
-		data_size = data_len / iec->data_bytes_per_ch;
-		*packet_size = AVTP_IEC61883_6_PAYLOAD_OFFSET + data_len;
+		data_size = buffer_size - *buffer_processed;
+		payload_len = data_size / iec->data_bytes_per_ch *
+							AM824_DATA_SIZE;
+		*packet_size = AVTP_IEC61883_6_PAYLOAD_OFFSET + payload_len;
 	} else {
 		*packet_size = iec->avtp_packet_size;
 	}
@@ -359,7 +397,7 @@ static int mse_packetizer_audio_iec_packetize(int index,
 	/* variable header */
 	avtp_set_sequence_num(packet, iec->send_seq_num++);
 	avtp_set_timestamp(packet, (u32)*timestamp);
-	avtp_set_stream_data_length(packet, data_len);
+	avtp_set_stream_data_length(packet, payload_len);
 	avtp_set_iec61883_dbc(packet, 1 + iec->local_total_samples);
 
 	/* 16 bits integer */
@@ -388,7 +426,7 @@ static void mse_packetizer_audio_iec_data_convert(u16 *dst, void *packet)
 
 	payload_size = avtp_get_stream_data_length(packet);
 	channels = avtp_get_iec61883_dbs(packet);
-	samples_per_frame = payload_size / (sizeof(u32) * channels);
+	samples_per_frame = payload_size / (AM824_DATA_SIZE * channels);
 	payload = packet + AVTP_IEC61883_6_PAYLOAD_OFFSET;
 
 	if (channels == 1) {
@@ -417,6 +455,8 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 	struct iec_packetizer *iec;
 	int seq_num;
 	int payload_size;
+	int data_size;
+	unsigned long value;
 
 	if (index >= ARRAY_SIZE(iec_packetizer_table))
 		return -EPERM;
@@ -461,6 +501,14 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 	*buffer_processed += payload_size;
 	*timestamp = avtp_get_timestamp(packet);
 
+	iec->sample_per_packet =
+		avtp_get_stream_data_length(packet) /
+		(AM824_DATA_SIZE * avtp_get_iec61883_dbs(packet));
+	value = NSEC * iec->sample_per_packet;
+	do_div(value,
+	       avtp_fdf_to_sample_rate(avtp_get_iec61883_fdf(packet)));
+	iec->frame_interval_time = value;
+
 	/* TODO buffer over check */
 	if (*buffer_processed >= buffer_size)
 		return 1; /* end of buffer */
@@ -477,6 +525,7 @@ struct mse_packetizer_ops mse_packetizer_audio_iec61883_6_ops = {
 	.init = mse_packetizer_audio_iec_packet_init,
 	.set_network_config = mse_packetizer_audio_iec_set_network_config,
 	.set_audio_config = mse_packetizer_audio_iec_set_audio_config,
+	.get_audio_info = mse_packetizer_audio_iec_get_audio_info,
 	.calc_cbs = mse_packetizer_audio_iec_calc_cbs,
 	.packetize = mse_packetizer_audio_iec_packetize,
 	.depacketize = mse_packetizer_audio_iec_depacketize,
