@@ -85,6 +85,7 @@
 #define PORT_TRANSMIT_RATE      (100000000) /* 100M [bit/sec] */
 #define CLASS_INTERVAL_FRAMES   (1000) /* class C */
 #define INTERVAL_FRAMES         (1)
+#define AM824_DATA_SIZE         (sizeof(u32))
 
 #define MSE_PACKETIZER_MAX      (10)
 
@@ -267,7 +268,7 @@ static int mse_packetizer_audio_iec_set_audio_config(
 		iec->frame_interval_time = NSEC / CLASS_INTERVAL_FRAMES;
 	} else {
 		iec->sample_per_packet = iec->iec_config.bytes_per_frame /
-			(iec->iec_config.channels * iec->data_bytes_per_ch);
+			(iec->iec_config.channels * AM824_DATA_SIZE);
 		if (iec->sample_per_packet < 2)
 			iec->sample_per_packet = 2;
 		else if (iec->sample_per_packet > 128)
@@ -278,7 +279,7 @@ static int mse_packetizer_audio_iec_set_audio_config(
 	}
 
 	payload_size = iec->sample_per_packet * iec->iec_config.channels *
-						iec->data_bytes_per_ch;
+						AM824_DATA_SIZE;
 	iec->avtp_packet_size = AVTP_IEC61883_6_PAYLOAD_OFFSET + payload_size;
 	if (iec->avtp_packet_size < ETHFRAMELEN_MIN)
 		iec->avtp_packet_size = ETHFRAMELEN_MIN;
@@ -374,7 +375,7 @@ static int mse_packetizer_audio_iec_packetize(int index,
 					      unsigned int *timestamp)
 {
 	struct iec_packetizer *iec;
-	int i, data_len, data_size;
+	int i, payload_len, data_size;
 	u32 *sample;
 	u16 *data;
 	int piece_size = 0, piece_len = 0;
@@ -390,7 +391,8 @@ static int mse_packetizer_audio_iec_packetize(int index,
 	/* header */
 	if (iec->piece_f) {
 		piece_len = iec->piece_data_len;
-		piece_size = piece_len / iec->data_bytes_per_ch;
+		piece_size = piece_len / AM824_DATA_SIZE *
+							iec->data_bytes_per_ch;
 		iec->piece_f = false;
 		iec->piece_data_len = 0;
 		memcpy(packet, iec->packet_piece, iec->avtp_packet_size);
@@ -403,14 +405,18 @@ static int mse_packetizer_audio_iec_packetize(int index,
 	data = (u16 *)(buffer + *buffer_processed);
 
 	/* size check */
-	data_size = iec->sample_per_packet * iec->iec_config.channels;
-	data_len = data_size * iec->data_bytes_per_ch;
-	if (data_len - piece_len > buffer_size - *buffer_processed) {
+	data_size = iec->sample_per_packet * iec->iec_config.channels *
+							iec->data_bytes_per_ch;
+	payload_len = iec->sample_per_packet * iec->iec_config.channels *
+							AM824_DATA_SIZE;
+
+	if (data_size - piece_size > buffer_size - *buffer_processed) {
 		iec->piece_f = true;
-		data_len = buffer_size - *buffer_processed;
-		data_size = data_len / iec->data_bytes_per_ch;
+		data_size = buffer_size - *buffer_processed;
+		payload_len = data_size / iec->data_bytes_per_ch *
+							AM824_DATA_SIZE;
 		*packet_size = AVTP_IEC61883_6_PAYLOAD_OFFSET +
-			       data_len + piece_len;
+			       payload_len + piece_len;
 	} else {
 		*packet_size = iec->avtp_packet_size;
 	}
@@ -419,11 +425,11 @@ static int mse_packetizer_audio_iec_packetize(int index,
 	for (i = 0; i < (data_size - piece_size); i++)
 		*(sample + i) = SET_AM824_MBLA_16BIT(*(data + i));
 
-	*buffer_processed += data_len - piece_len;
+	*buffer_processed += data_size - piece_size;
 
 	/* keep piece of data */
 	if (iec->piece_f) {
-		iec->piece_data_len = data_len + piece_len;
+		iec->piece_data_len = payload_len + piece_len;
 		memcpy(iec->packet_piece, packet, *packet_size);
 		return -1;
 	}
@@ -431,7 +437,7 @@ static int mse_packetizer_audio_iec_packetize(int index,
 	/* variable header */
 	avtp_set_sequence_num(packet, iec->send_seq_num++);
 	avtp_set_timestamp(packet, (u32)*timestamp);
-	avtp_set_stream_data_length(packet, data_len);
+	avtp_set_stream_data_length(packet, payload_len);
 	avtp_set_iec61883_dbc(packet, 1 + iec->local_total_samples);
 
 	/* buffer over check */
@@ -453,7 +459,7 @@ static void mse_packetizer_audio_iec_data_convert(u16 *dst, void *packet)
 
 	payload_size = avtp_get_stream_data_length(packet);
 	channels = avtp_get_iec61883_dbs(packet);
-	samples_per_frame = payload_size / (sizeof(u32) * channels);
+	samples_per_frame = payload_size / (AM824_DATA_SIZE * channels);
 	payload = packet + AVTP_IEC61883_6_PAYLOAD_OFFSET;
 
 	if (channels == 1) {
@@ -482,6 +488,7 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 	struct iec_packetizer *iec;
 	int seq_num;
 	int payload_size, piece_size = 0;
+	int data_size;
 	char *buf, tmp_buffer[ETHFRAMEMTU_MAX] = {0};
 	unsigned long value;
 
@@ -505,8 +512,10 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 	}
 
 	payload_size = avtp_get_stream_data_length(packet);
+	data_size = payload_size / AM824_DATA_SIZE *
+					iec->data_bytes_per_ch;
 	/* buffer over check */
-	if (*buffer_processed + payload_size > buffer_size)
+	if (*buffer_processed + data_size > buffer_size)
 		buf = tmp_buffer;
 	else
 		buf = buffer + *buffer_processed;
@@ -536,25 +545,24 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 
 	mse_packetizer_audio_iec_data_convert((u16 *)buf, packet);
 
-	if (*buffer_processed + payload_size > buffer_size) {
+	if (*buffer_processed + data_size > buffer_size) {
 		iec->piece_f = true;
 		piece_size = buffer_size - *buffer_processed;
-		iec->piece_data_len = payload_size - piece_size;
+		iec->piece_data_len = data_size - piece_size;
 		memcpy(buffer + *buffer_processed, buf, piece_size);
 		memcpy(iec->packet_piece, buf + piece_size,
 		       iec->piece_data_len);
-	}
 
-	if (*buffer_processed + payload_size > buffer_size)
 		*buffer_processed += (buffer_size - *buffer_processed);
-	else
-		*buffer_processed += payload_size;
+	} else {
+		*buffer_processed += data_size;
+	}
 
 	*timestamp = avtp_get_timestamp(packet);
 
 	iec->sample_per_packet =
 		avtp_get_stream_data_length(packet) /
-		(sizeof(u32) * avtp_get_iec61883_dbs(packet));
+		(AM824_DATA_SIZE * avtp_get_iec61883_dbs(packet));
 	value = NSEC * iec->sample_per_packet;
 	do_div(value,
 	       avtp_fdf_to_sample_rate(avtp_get_iec61883_fdf(packet)));
