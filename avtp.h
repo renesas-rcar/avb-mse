@@ -63,31 +63,33 @@
 #define __AVTP_H__
 
 /* ether header(6+6+2=14), Q-Tag(4) */
-#define ETHOVERHEAD       (14 + 4)
+#define ETHOVERHEAD       (ETH_HLEN + 4)
 /* preamble(8), ETHOVERHEAD, CRC(4) */
-#define ETHOVERHEAD_REAL  (8 + ETHOVERHEAD + 4)
+#define ETHOVERHEAD_REAL  (8 + ETHOVERHEAD + ETH_FCS_LEN)
 /* ETHOVERHEAD_REAL, IFG(12) */
 #define ETHOVERHEAD_IFG   (ETHOVERHEAD_REAL + 12)
 
-#define ETHFRAMEMTU_MIN   (46)
-#define ETHFRAMEMTU_MAX   (1500)
+#define ETHFRAMEMTU_MIN   (ETH_ZLEN - ETH_HLEN)
+#define ETHFRAMEMTU_MAX   ETH_DATA_LEN
 #define ETHFRAMELEN_MIN   (ETHFRAMEMTU_MIN + ETHOVERHEAD)
 #define ETHFRAMELEN_MAX   (ETHFRAMEMTU_MAX + ETHOVERHEAD)
 
-#define ETH_P_1722 (0x22F0)
+#define ETH_P_1722 ETH_P_TSN
 
 #ifndef AVTP_OFFSET
 /* Ethernet frame header length (DA + SA + Qtag + EthType) */
 #define AVTP_OFFSET (18)
 #endif
 
-#define AVTP_PAYLOAD_OFFSET (24 + AVTP_OFFSET)
-#define AVTP_IEC61883_6_PAYLOAD_OFFSET (32 + AVTP_OFFSET)
-#define AVTP_AAF_PAYLOAD_OFFSET (AVTP_PAYLOAD_OFFSET)
+#define AVTP_PAYLOAD_OFFSET              (24 + AVTP_OFFSET)
+#define AVTP_IEC61883_6_PAYLOAD_OFFSET   (8 + AVTP_PAYLOAD_OFFSET)
+#define AVTP_AAF_PAYLOAD_OFFSET          (AVTP_PAYLOAD_OFFSET)
 #define AVTP_CVF_H264_D13_PAYLOAD_OFFSET (AVTP_PAYLOAD_OFFSET)
-#define AVTP_CVF_H264_PAYLOAD_OFFSET (4 + AVTP_PAYLOAD_OFFSET)
+#define AVTP_CVF_H264_PAYLOAD_OFFSET     (4 + AVTP_PAYLOAD_OFFSET)
+#define AVTP_CVF_MJPEG_PAYLOAD_OFFSET    (8 + AVTP_PAYLOAD_OFFSET)
+#define AVTP_CRF_PAYLOAD_OFFSET          (20 + AVTP_OFFSET)
 
-#define AVTP_MAC_ADDR_SIZE (6)
+#define AVTP_MAC_ADDR_SIZE ETH_ALEN
 #define AVTP_STREAMID_SIZE (8)
 
 #define AVTP_SEQUENCE_NUM_MAX (255)
@@ -392,6 +394,7 @@ static inline u8 avtp_get_aaf_nsr(void *data)
 static inline void avtp_set_aaf_nsr(void *data, u8 value)
 {
 	u8 tmp = *((u8 *)(data + 17 + AVTP_OFFSET));
+
 	*((u8 *)(data + 17 + AVTP_OFFSET)) = (tmp & 0x0f) | (value << 4);
 }
 
@@ -447,6 +450,35 @@ static inline int avtp_aaf_format_to_bytes(int format)
 /* CVF */
 DEF_AVTP_ACCESSER_UINT8(cvf_format, 16)
 DEF_AVTP_ACCESSER_UINT8(cvf_format_subtype, 17)
+DEF_AVTP_ACCESSER_UINT32(cvf_h264_timestamp, 24)
+
+static inline u32 avtp_get_cvf_m(void *data)
+{
+	u8 tmp = *((u8 *)(data + 22 + AVTP_OFFSET));
+
+	return (tmp & 0x10) >> 4;
+}
+
+static inline void avtp_set_cvf_m(void *data, bool value)
+{
+	u8 tmp = *((u8 *)(data + 22 + AVTP_OFFSET));
+
+	*((u8 *)(data + 22 + AVTP_OFFSET)) = (tmp & 0xef) | (value << 4);
+}
+
+static inline u32 avtp_get_cvf_h264_ptv(void *data)
+{
+	u8 tmp = *((u8 *)(data + 22 + AVTP_OFFSET));
+
+	return (tmp & 0x20) >> 4;
+}
+
+static inline void avtp_set_cvf_h264_ptv(void *data, bool value)
+{
+	u8 tmp = *((u8 *)(data + 22 + AVTP_OFFSET));
+
+	*((u8 *)(data + 22 + AVTP_OFFSET)) = (tmp & 0xDf) | (value << 5);
+}
 
 /**
  * Template - IEEE1722
@@ -454,5 +486,5 @@ DEF_AVTP_ACCESSER_UINT8(cvf_format_subtype, 17)
 extern void avtp_copy_iec61883_6_template(void *data);
 extern void avtp_copy_aaf_pcm_template(void *data);
 extern void avtp_copy_cvf_h264_d13_template(void *data);
-
+extern void avtp_copy_cvf_h264_template(void *data);
 #endif /* __AVTP_H__ */

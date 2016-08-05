@@ -322,7 +322,7 @@ static struct mse_sysfs_config mse_sysfs_config_video[] = {
 	{
 		.name = MSE_SYSFS_NAME_STR_PACKETIZER_NAME,
 		.type = MSE_TYPE_STR,
-		.str_value = MSE_PACKETIZER_NAME_STR_CVF_H264_D13,
+		.str_value = MSE_PACKETIZER_NAME_STR_CVF_H264,
 	},
 	{
 		.name = MSE_SYSFS_NAME_STR_FPS_SECONDS,
