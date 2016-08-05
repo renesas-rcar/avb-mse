@@ -256,6 +256,25 @@ enum AVTP_CVF_RFC_FORMAT {
 	/* 0x03-0xFF Reserved */
 };
 
+/* P1722/D16 Table 26 CRF Types */
+enum AVTP_CRF_TYPE {
+	AVTP_CRF_TYPE_USER          = 0x1, /* User Specified               */
+	AVTP_CRF_TYPE_AUDIO_SAMPLE  = 0x2, /* Audio Sample Timestamp       */
+	AVTP_CRF_TYPE_VIDEO_FRAME   = 0x3, /* Video Frame Sync Timestamp   */
+	AVTP_CRF_TYPE_VIDEO_LINE    = 0x4, /* Video Line Sync Timestamp    */
+	AVTP_CRF_TYPE_MACHINE_CYCLE = 0x5, /* Machine Cycle Timestamp      */
+};
+
+/* P1722/D16 Table 27 - pull field values */
+enum AVTP_CRF_BASE_FREQ {
+	AVTP_CRF_BASE_FREQ_0 = 0x0, /* Multiply base_frequency field by 1.0     */
+	AVTP_CRF_BASE_FREQ_1 = 0x1, /* Multiply base_frequency field by 1/1.001 */
+	AVTP_CRF_BASE_FREQ_2 = 0x2, /* Multiply base_frequency field by 1.001   */
+	AVTP_CRF_BASE_FREQ_3 = 0x3, /* Multiply base_frequency field by 24/25   */
+	AVTP_CRF_BASE_FREQ_4 = 0x4, /* Multiply base_frequency field by 25/24   */
+	AVTP_CRF_BASE_FREQ_5 = 0x5, /* Multiply base_frequency field by 1/8     */
+};
+
 /**
  * Accessor - IEEE802.1Q
  */
@@ -505,6 +524,11 @@ static inline void avtp_set_cvf_mjpeg_offset(void *data, u32 value)
 	*((u8 *)(data + 27 + AVTP_OFFSET)) = value;
 }
 
+/* CRF */
+DEF_AVTP_ACCESSER_UINT32(crf_base_frequency, 12)
+DEF_AVTP_ACCESSER_UINT16(crf_data_length, 16)
+DEF_AVTP_ACCESSER_UINT16(crf_timestamp_interval, 18)
+
 /**
  * Template - IEEE1722
  */
@@ -513,4 +537,6 @@ extern void avtp_copy_aaf_pcm_template(void *data);
 extern void avtp_copy_cvf_h264_d13_template(void *data);
 extern void avtp_copy_cvf_h264_template(void *data);
 extern void avtp_copy_cvf_mjpeg_template(void *data);
+extern void avtp_copy_crf_template(void *data);
+
 #endif /* __AVTP_H__ */

@@ -288,3 +288,32 @@ void avtp_copy_cvf_mjpeg_template(void *data)
 	memcpy(data + AVTP_OFFSET, &avtp_cvf_mjpeg_hdr_tmpl,
 	       sizeof(avtp_cvf_mjpeg_hdr_tmpl));
 }
+
+/* CRF */
+struct avtp_crf_hdr {
+	u8 subtype;
+	u8 sv_version_mr_gv_tv; /* sv:1, version:3, mr:1, r:1, fs:1, tu:1 */
+	u8 sequence_num;
+	u8 type;
+	__be64 stream_id;
+	__be32 packet_info;     /* pull:3, base fequency:29 */
+	__be16 crf_data_length;
+	__be16 timestamp_interval;
+} __packed;
+
+/* AVTP CRF header */
+static const struct avtp_crf_hdr avtp_crf_tmpl = {
+	.subtype                = AVTP_SUBTYPE_CRF,
+	.sv_version_mr_gv_tv    = 0x80, /* sv=1, version=0, mr=0, gv=0, tv=0 */
+	.sequence_num           = 0,
+	.type                   = AVTP_CRF_TYPE_AUDIO_SAMPLE,
+	.stream_id              = cpu_to_be64(0),
+	.packet_info            = cpu_to_be32(0),
+	.crf_data_length        = cpu_to_be16(0),
+	.timestamp_interval     = cpu_to_be16(0),
+};
+
+void avtp_copy_crf_template(void *data)
+{
+	memcpy(data + AVTP_OFFSET, &avtp_crf_tmpl, sizeof(struct avtp_crf_hdr));
+}
