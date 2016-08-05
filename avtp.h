@@ -480,6 +480,31 @@ static inline void avtp_set_cvf_h264_ptv(void *data, bool value)
 	*((u8 *)(data + 22 + AVTP_OFFSET)) = (tmp & 0xDf) | (value << 5);
 }
 
+/* MJPEG */
+DEF_AVTP_ACCESSER_UINT8(cvf_mjpeg_tspec, 24)
+DEF_AVTP_ACCESSER_UINT8(cvf_mjpeg_type, 28)
+DEF_AVTP_ACCESSER_UINT8(cvf_mjpeg_q, 29)
+DEF_AVTP_ACCESSER_UINT8(cvf_mjpeg_width, 30)
+DEF_AVTP_ACCESSER_UINT8(cvf_mjpeg_height, 31)
+
+static inline u32 avtp_get_cvf_mjpeg_offset(void *data)
+{
+	u32 tmp;
+
+	tmp = *((u8 *)(data + 25 + AVTP_OFFSET)) << 16;
+	tmp |= *((u8 *)(data + 26 + AVTP_OFFSET)) << 8;
+	tmp |= *((u8 *)(data + 27 + AVTP_OFFSET));
+
+	return tmp;
+}
+
+static inline void avtp_set_cvf_mjpeg_offset(void *data, u32 value)
+{
+	*((u8 *)(data + 25 + AVTP_OFFSET)) = value >> 16;
+	*((u8 *)(data + 26 + AVTP_OFFSET)) = value >> 8;
+	*((u8 *)(data + 27 + AVTP_OFFSET)) = value;
+}
+
 /**
  * Template - IEEE1722
  */
@@ -487,4 +512,5 @@ extern void avtp_copy_iec61883_6_template(void *data);
 extern void avtp_copy_aaf_pcm_template(void *data);
 extern void avtp_copy_cvf_h264_d13_template(void *data);
 extern void avtp_copy_cvf_h264_template(void *data);
+extern void avtp_copy_cvf_mjpeg_template(void *data);
 #endif /* __AVTP_H__ */

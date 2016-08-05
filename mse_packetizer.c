@@ -74,6 +74,7 @@ static struct {
 	{ -1, &mse_packetizer_audio_iec61883_6_ops },
 	{ -1, &mse_packetizer_video_cvf_h264_ops },
 	{ -1, &mse_packetizer_video_cvf_h264_d13_ops },
+	{ -1, &mse_packetizer_video_cvf_mjpeg_ops },
 	{ -1, NULL },
 };
 

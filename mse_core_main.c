@@ -559,6 +559,10 @@ static void mse_work_packetize(struct work_struct *work)
 		pr_debug("[%s] media_buffer=%p packetized=%d\n",
 			 __func__, instance->media_buffer, ret);
 		instance->work_length += ret;
+
+		if (instance->use_temp_video_buffer_mjpeg)
+			instance->f_temp_video_buffer_rewind = true;
+
 		/* start workqueue for streaming */
 		queue_work(instance->wq_stream, &instance->wk_stream);
 		break;
@@ -1171,6 +1175,14 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 		return -EPERM;
 	}
 
+	/* if mjpeg input */
+	if (sysfs_name_cmp(MSE_PACKETIZER_NAME_STR_CVF_MJPEG, name) == 0 &&
+	    inout == MSE_DIRECTION_INPUT) {
+		pr_err("[%s] use mjpeg\n",  __func__);
+		instance->use_temp_video_buffer_mjpeg = true;
+		instance->f_first_vframe = true;
+	}
+
 	/* search packetizer name for configuration value */
 	for (j = 0; j < ARRAY_SIZE(mse->packetizer_table); j++) {
 		packetizer = mse->packetizer_table[j];
@@ -1356,6 +1368,24 @@ int mse_stop_streaming(int index)
 	return 0;
 }
 EXPORT_SYMBOL(mse_stop_streaming);
+
+static bool check_mjpeg(struct mse_instance *instance)
+{
+	int i;
+
+	if (instance->eoi_pos > 0)
+		return false;
+
+	for (i = 0; i < instance->temp_vw - 1; i++) {
+		if (instance->temp_video_buffer[i] == 0xFF &&
+		    instance->temp_video_buffer[i + 1] == 0xD9) {
+			instance->eoi_pos = i;
+			return true;
+		}
+	}
+
+	return false;
+}
 
 int mse_start_transmission(int index,
 			   void *buffer,

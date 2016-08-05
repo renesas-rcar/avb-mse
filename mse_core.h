@@ -115,6 +115,8 @@ enum MSE_TYPE {
 	MSE_TYPE_PACKETIZER_AUDIO_PCM,
 	/** @brief Packetizer for Video H.264 */
 	MSE_TYPE_PACKETIZER_VIDEO_H264,
+	/** @brief Packetizer for Video MJPEG */
+	MSE_TYPE_PACKETIZER_VIDEO_MJPEG,
 };
 
 /**

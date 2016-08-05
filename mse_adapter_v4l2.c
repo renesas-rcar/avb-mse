@@ -131,13 +131,13 @@ struct v4l2_adapter_device {
 	struct mutex		lock;
 	struct v4l2_pix_format	format;
 	struct v4l2_fract	frameintervals;
-	unsigned		input;
+	unsigned int		input;
 	struct vb2_queue	queue;
 	/* spin lock */
 	spinlock_t		qlock;
 	struct list_head	buf_list;
-	unsigned		sequence;
-	unsigned		output;
+	unsigned int		sequence;
+	unsigned int		output;
 	/* index for register */
 	int			index_mse;
 	/* index for MSE instance */
@@ -150,6 +150,7 @@ struct v4l2_adapter_init_info {
 	int				vfl_dir;
 	unsigned int			type;
 	const struct vb2_ops		*queue_ops;
+	const char			*adapter_name;
 };
 
 /* Format information */
@@ -164,12 +165,28 @@ static const struct v4l2_fmtdesc g_playback_formats[] = {
 		.description = "H264 with start codes",
 		.pixelformat = V4L2_PIX_FMT_H264,
 	},
+	{
+		.description = "MPEG-1/2/4 Multiplexed",
+		.pixelformat = V4L2_PIX_FMT_MPEG,
+	},
+	{
+		.description = "Motion-JPEG",
+		.pixelformat = V4L2_PIX_FMT_MJPEG,
+	},
 };
 
 static const struct v4l2_fmtdesc g_capture_formats[] = {
 	{
 		.description = "H264 with start codes",
 		.pixelformat = V4L2_PIX_FMT_H264,
+	},
+	{
+		.description = "MPEG-1/2/4 Multiplexed",
+		.pixelformat = V4L2_PIX_FMT_MPEG,
+	},
+	{
+		.description = "Motion-JPEG",
+		.pixelformat = V4L2_PIX_FMT_MJPEG,
 	},
 };
 
@@ -192,6 +209,46 @@ static const struct v4l2_adapter_fmt g_mse_adapter_v4l2_common_fmt_sizes[] = {
 	},
 	{
 		.fourcc	= V4L2_PIX_FMT_H264,
+		.width	= 640,
+		.height	= 480,
+	},
+	{
+		.fourcc	= V4L2_PIX_FMT_MPEG,
+		.width	= 1920,
+		.height	= 1080,
+	},
+	{
+		.fourcc	= V4L2_PIX_FMT_MPEG,
+		.width	= 1280,
+		.height	= 960,
+	},
+	{
+		.fourcc	= V4L2_PIX_FMT_MPEG,
+		.width	= 1280,
+		.height	= 720,
+	},
+	{
+		.fourcc	= V4L2_PIX_FMT_MPEG,
+		.width	= 640,
+		.height	= 480,
+	},
+	{
+		.fourcc	= V4L2_PIX_FMT_MJPEG,
+		.width	= 1920,
+		.height	= 1080,
+	},
+	{
+		.fourcc	= V4L2_PIX_FMT_MJPEG,
+		.width	= 1280,
+		.height	= 960,
+	},
+	{
+		.fourcc	= V4L2_PIX_FMT_MJPEG,
+		.width	= 1280,
+		.height	= 720,
+	},
+	{
+		.fourcc	= V4L2_PIX_FMT_MJPEG,
 		.width	= 640,
 		.height	= 480,
 	},
@@ -634,10 +691,10 @@ static int mse_adapter_v4l2_playback_enum_fmt_vid_out_mplane(
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
-	if (fmt->index > MSE_ADAPTER_V4L2_OUTPUT_FORMAT_MAX_INDEX) {
-		pr_info("[%s]fmt->index(%d) is bigger than %d\n",
+	if (fmt->index >= ARRAY_SIZE(g_playback_formats)) {
+		pr_info("[%s]fmt->index(%d) is equal or bigger than %d\n",
 			__func__, fmt->index,
-			MSE_ADAPTER_V4L2_OUTPUT_FORMAT_MAX_INDEX);
+			(int)ARRAY_SIZE(g_playback_formats));
 		return -EINVAL;
 	}
 
@@ -651,7 +708,7 @@ static int mse_adapter_v4l2_playback_enum_fmt_vid_out_mplane(
 	strcpy(fmt->description, fmtdesc->description);
 	fmt->pixelformat = fmtdesc->pixelformat;
 
-	pr_debug("[%s]END\n", __func__);
+	pr_debug("[%s]END format: %s\n", __func__, fmtdesc->description);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
@@ -795,10 +852,10 @@ static int mse_adapter_v4l2_playback_enum_fmt_vid_out(struct file *filp,
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
-	if (fmt->index > MSE_ADAPTER_V4L2_OUTPUT_FORMAT_MAX_INDEX) {
-		pr_info("[%s]fmt->index(%d) is bigger than %d\n",
+	if (fmt->index >= ARRAY_SIZE(g_playback_formats)) {
+		pr_info("[%s]fmt->index(%d) is equal or bigger than %d\n",
 			__func__, fmt->index,
-			MSE_ADAPTER_V4L2_OUTPUT_FORMAT_MAX_INDEX);
+			(int)ARRAY_SIZE(g_playback_formats));
 		return -EINVAL;
 	}
 
@@ -812,7 +869,7 @@ static int mse_adapter_v4l2_playback_enum_fmt_vid_out(struct file *filp,
 	strcpy(fmt->description, fmtdesc->description);
 	fmt->pixelformat = fmtdesc->pixelformat;
 
-	pr_debug("[%s]END\n", __func__);
+	pr_debug("[%s]END format: %s\n", __func__, fmtdesc->description);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
@@ -1013,12 +1070,11 @@ static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 		new_buf = list_first_entry(&vadp_dev->buf_list,
 					   struct v4l2_adapter_buffer,
 					   list);
-		list_del(&new_buf->list);
 	}
 	spin_unlock_irqrestore(&vadp_dev->qlock, flags);
 
 	if (!new_buf) {
-		pr_info("[%s]new_buf is NULL\n", __func__);
+		pr_debug("[%s]new_buf is NULL\n", __func__);
 		return MSE_ADAPTER_V4L2_RTN_OK;
 	}
 
@@ -1029,7 +1085,6 @@ static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 	new_buf->vb.vb2_buf.timestamp = ktime_get_ns();
 	new_buf->vb.sequence = vadp_dev->sequence++;
 	new_buf->vb.field = vadp_dev->format.field;
-	vb2_buffer_done(&new_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 
 	err = mse_start_transmission(vadp_dev->index_instance,
 				     buf_to_send,
@@ -1097,6 +1152,8 @@ static int mse_adapter_v4l2_playback_callback(int index, int size)
 {
 	int err;
 	struct v4l2_adapter_device *vadp_dev = NULL;
+	unsigned long flags;
+	struct v4l2_adapter_buffer *buf = NULL;
 
 	err = mse_get_private_data(index, (void **)&vadp_dev);
 	if (err < MSE_ADAPTER_V4L2_RTN_OK || !vadp_dev) {
@@ -1105,6 +1162,22 @@ static int mse_adapter_v4l2_playback_callback(int index, int size)
 	}
 
 	pr_debug("[%s]START\n", __func__);
+
+	spin_lock_irqsave(&vadp_dev->qlock, flags);
+	if (!list_empty(&vadp_dev->buf_list)) {
+		buf = list_first_entry(&vadp_dev->buf_list,
+				       struct v4l2_adapter_buffer,
+				       list);
+		list_del(&buf->list);
+	}
+	spin_unlock_irqrestore(&vadp_dev->qlock, flags);
+
+	if (!buf) {
+		pr_err("[%s]buf is NULL\n", __func__);
+		return MSE_ADAPTER_V4L2_RTN_NG;
+	}
+
+	vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 
 	err = playback_send_first_buffer(vadp_dev);
 	if (err < MSE_ADAPTER_V4L2_RTN_OK)
@@ -1355,10 +1428,10 @@ static int mse_adapter_v4l2_capture_enum_fmt_vid_cap_mplane(
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
-	if (fmt->index > MSE_ADAPTER_V4L2_INPUT_FORMAT_MAX_INDEX) {
-		pr_info("[%s]fmt->index(%d) is bigger than %d\n",
+	if (fmt->index >= ARRAY_SIZE(g_capture_formats)) {
+		pr_info("[%s]fmt->index(%d) is equal or bigger than %d\n",
 			__func__, fmt->index,
-			MSE_ADAPTER_V4L2_INPUT_FORMAT_MAX_INDEX);
+			(int)ARRAY_SIZE(g_capture_formats));
 		return -EINVAL;
 	}
 
@@ -1372,7 +1445,7 @@ static int mse_adapter_v4l2_capture_enum_fmt_vid_cap_mplane(
 	strcpy(fmt->description, fmtdesc->description);
 	fmt->pixelformat = fmtdesc->pixelformat;
 
-	pr_debug("[%s]END\n", __func__);
+	pr_debug("[%s]END format: %s\n", __func__, fmtdesc->description);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
@@ -1514,10 +1587,10 @@ static int mse_adapter_v4l2_capture_enum_fmt_vid_cap(
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
-	if (fmt->index > MSE_ADAPTER_V4L2_INPUT_FORMAT_MAX_INDEX) {
-		pr_info("[%s]fmt->index(%d) is bigger than %d\n",
+	if (fmt->index >= ARRAY_SIZE(g_capture_formats)) {
+		pr_info("[%s]fmt->index(%d) is equal or bigger than %d\n",
 			__func__, fmt->index,
-			MSE_ADAPTER_V4L2_INPUT_FORMAT_MAX_INDEX);
+			(int)ARRAY_SIZE(g_capture_formats));
 		return -EINVAL;
 	}
 
@@ -1531,7 +1604,7 @@ static int mse_adapter_v4l2_capture_enum_fmt_vid_cap(
 	strcpy(fmt->description, fmtdesc->description);
 	fmt->pixelformat = fmtdesc->pixelformat;
 
-	pr_debug("[%s]END\n", __func__);
+	pr_debug("[%s]END format: %s\n", __func__, fmtdesc->description);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
@@ -1643,6 +1716,15 @@ static int mse_adapter_v4l2_capture_s_fmt_vid_cap(struct file *filp,
 	vadp_dev->format.bytesperline = pix->bytesperline;
 	vadp_dev->format.sizeimage = pix->sizeimage;
 	vadp_dev->format.field = pix->field;
+
+	pr_info("[%s]END format=%c%c%c%c, width=%d, height=%d\n",
+		__func__,
+		pix->pixelformat >> 0,
+		pix->pixelformat >> 8,
+		pix->pixelformat >> 16,
+		pix->pixelformat >> 24,
+		pix->width,
+		pix->height);
 
 	err = set_config_format(vadp_dev->index_instance, pix);
 	if (err < MSE_ADAPTER_V4L2_RTN_OK)
@@ -1817,7 +1899,7 @@ static int mse_adapter_v4l2_capture_callback(int index, int size)
 	spin_unlock_irqrestore(&vadp_dev->qlock, flags);
 
 	if (!buf) {
-		pr_err("[%s]buf is NULL\n", __func__);
+		pr_debug("[%s]buf is NULL\n", __func__);
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
@@ -1992,9 +2074,10 @@ static int mse_adapter_v4l2_playback_enum_framesizes(
 					void *priv,
 					struct v4l2_frmsizeenum *fsize)
 {
-	int index;
-	const struct v4l2_adapter_fmt *vadp_fmt;
+	int total_frame_sizes = 0;
+	const struct v4l2_adapter_fmt *vadp_fmt = NULL;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	int i;
 
 	pr_debug("[%s]START fsize->index=%d\n", __func__, fsize->index);
 
@@ -2003,19 +2086,35 @@ static int mse_adapter_v4l2_playback_enum_framesizes(
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
-	index = ARRAY_SIZE(g_mse_adapter_v4l2_common_fmt_sizes);
-	if (fsize->index >= index) {
+	/* get total frame sizes */
+	for (i = 0; i < ARRAY_SIZE(g_mse_adapter_v4l2_common_fmt_sizes); i++) {
+		if (g_mse_adapter_v4l2_common_fmt_sizes[i].fourcc ==
+						fsize->pixel_format) {
+			vadp_fmt = &g_mse_adapter_v4l2_common_fmt_sizes[i];
+			vadp_fmt++;
+			total_frame_sizes++;
+		}
+	}
+
+	if (fsize->index >= total_frame_sizes) {
 		pr_info("[%s]fsize->index(%d) is equal or bigger than %d\n",
-			__func__, fsize->index, index);
+			__func__, fsize->index, total_frame_sizes);
 		return -EINVAL;
 	}
 
-	vadp_fmt = &g_mse_adapter_v4l2_common_fmt_sizes[fsize->index];
+	vadp_fmt = vadp_fmt - (total_frame_sizes - fsize->index);
 	fsize->type = V4L2_FRMSIZE_TYPE_DISCRETE;
 	fsize->discrete.width = vadp_fmt->width;
 	fsize->discrete.height = vadp_fmt->height;
 
-	pr_debug("[%s]END\n", __func__);
+	pr_debug("[%s]END format=%c%c%c%c, width=%d, height=%d\n",
+		 __func__,
+		 vadp_fmt->fourcc >> 0,
+		 vadp_fmt->fourcc >> 8,
+		 vadp_fmt->fourcc >> 16,
+		 vadp_fmt->fourcc >> 24,
+		 vadp_fmt->width,
+		 vadp_fmt->height);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
@@ -2109,9 +2208,10 @@ static int mse_adapter_v4l2_capture_enum_framesizes(
 					void *priv,
 					struct v4l2_frmsizeenum *fsize)
 {
-	int index;
-	const struct v4l2_adapter_fmt *vadp_fmt;
+	int total_frame_sizes = 0;
+	const struct v4l2_adapter_fmt *vadp_fmt = NULL;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	int i;
 
 	pr_debug("[%s]START fsize->index=%d\n", __func__, fsize->index);
 
@@ -2120,19 +2220,35 @@ static int mse_adapter_v4l2_capture_enum_framesizes(
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
-	index = ARRAY_SIZE(g_mse_adapter_v4l2_common_fmt_sizes);
-	if (fsize->index >= index) {
+	/* get total frame sizes */
+	for (i = 0; i < ARRAY_SIZE(g_mse_adapter_v4l2_common_fmt_sizes); i++) {
+		if (g_mse_adapter_v4l2_common_fmt_sizes[i].fourcc ==
+						fsize->pixel_format) {
+			vadp_fmt = &g_mse_adapter_v4l2_common_fmt_sizes[i];
+			vadp_fmt++;
+			total_frame_sizes++;
+		}
+	}
+
+	if (fsize->index >= total_frame_sizes) {
 		pr_info("[%s]fsize->index(%d) is equal or bigger than %d\n",
-			__func__, fsize->index, index);
+			__func__, fsize->index, total_frame_sizes);
 		return -EINVAL;
 	}
 
-	vadp_fmt = &g_mse_adapter_v4l2_common_fmt_sizes[fsize->index];
+	vadp_fmt = vadp_fmt - (total_frame_sizes - fsize->index);
 	fsize->type = V4L2_FRMSIZE_TYPE_DISCRETE;
 	fsize->discrete.width = vadp_fmt->width;
 	fsize->discrete.height = vadp_fmt->height;
 
-	pr_debug("[%s]END\n", __func__);
+	pr_debug("[%s]format=%c%c%c%c, width=%d, height=%d\n",
+		 __func__,
+		 vadp_fmt->fourcc >> 0,
+		 vadp_fmt->fourcc >> 8,
+		 vadp_fmt->fourcc >> 16,
+		 vadp_fmt->fourcc >> 24,
+		 vadp_fmt->width,
+		 vadp_fmt->height);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
@@ -2328,6 +2444,7 @@ static const struct v4l2_adapter_init_info g_playback_init_info = {
 	.vfl_dir	= VFL_DIR_TX,
 	.type		= V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
 	.queue_ops	= &g_mse_adapter_v4l2_playback_queue_ops,
+	.adapter_name	= "Renesas MSE Adapter playback %d",
 };
 #else
 static const struct v4l2_adapter_init_info g_playback_init_info = {
@@ -2335,6 +2452,7 @@ static const struct v4l2_adapter_init_info g_playback_init_info = {
 	.vfl_dir	= VFL_DIR_TX,
 	.type		= V4L2_BUF_TYPE_VIDEO_OUTPUT,
 	.queue_ops	= &g_mse_adapter_v4l2_playback_queue_ops,
+	.adapter_name	= "Renesas MSE Adapter playback %d",
 };
 #endif
 
@@ -2345,6 +2463,7 @@ static const struct v4l2_adapter_init_info g_capture_init_info = {
 	.vfl_dir	= VFL_DIR_RX,
 	.type		= V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
 	.queue_ops	= &g_mse_adapter_v4l2_capture_queue_ops,
+	.adapter_name	= "Renesas MSE Adapter capture %d",
 };
 #else
 static const struct v4l2_adapter_init_info g_capture_init_info = {
@@ -2352,6 +2471,7 @@ static const struct v4l2_adapter_init_info g_capture_init_info = {
 	.vfl_dir	= VFL_DIR_RX,
 	.type		= V4L2_BUF_TYPE_VIDEO_CAPTURE,
 	.queue_ops	= &g_mse_adapter_v4l2_capture_queue_ops,
+	.adapter_name	= "Renesas MSE Adapter capture %d",
 };
 #endif
 
@@ -2368,10 +2488,25 @@ static int register_mse_core(struct v4l2_adapter_device *vadp_dev)
 {
 	int index_mse;
 	struct video_device *vdev = &vadp_dev->vdev;
+	char device_name[MSE_NAME_LEN_MAX];
+	enum MSE_DIRECTION inout;
+
+	sprintf(device_name, "/dev/%s", video_device_node_name(vdev));
+
+	if (vdev->vfl_dir == VFL_DIR_RX) {
+		inout = MSE_DIRECTION_OUTPUT;
+	} else if (vdev->vfl_dir == VFL_DIR_TX) {
+		inout = MSE_DIRECTION_INPUT;
+	} else {
+		pr_err("[%s] illegal vfl_dir=%d\n", __func__, vdev->vfl_dir);
+		return MSE_ADAPTER_V4L2_RTN_NG;
+	}
 
 	index_mse = mse_register_adapter_media(MSE_TYPE_ADAPTER_VIDEO_H264,
+					       inout,
 					       vdev->name,
-					       vadp_dev);
+					       vadp_dev,
+					       device_name);
 	if (index_mse < MSE_ADAPTER_V4L2_RTN_OK)
 		return MSE_ADAPTER_V4L2_RTN_NG;
 
@@ -2385,6 +2520,7 @@ static struct v4l2_adapter_device *g_v4l2_adapter[MSE_ADAPTER_V4L2_DEVICE_MAX];
 static int mse_adapter_v4l2_probe(int dev_num, unsigned int buf_type)
 {
 	int err;
+	static int reg_num;
 	struct v4l2_adapter_device *vadp_dev;
 	struct video_device *vdev;
 	struct v4l2_device *v4l2_dev;
@@ -2398,7 +2534,7 @@ static int mse_adapter_v4l2_probe(int dev_num, unsigned int buf_type)
 	if (!vadp_dev)
 		return MSE_ADAPTER_V4L2_RTN_NG;
 
-	g_v4l2_adapter[dev_num] = vadp_dev;
+	g_v4l2_adapter[reg_num++] = vadp_dev;
 	vadp_dev->index_mse = MSE_INDEX_UNDEFINED;
 	vadp_dev->index_instance = MSE_INDEX_UNDEFINED;
 
@@ -2406,7 +2542,7 @@ static int mse_adapter_v4l2_probe(int dev_num, unsigned int buf_type)
 
 	vdev = &vadp_dev->vdev;
 	snprintf(vdev->name, sizeof(vdev->name),
-		 "Renesas MSE Adapter %d", dev_num);
+		 init_info->adapter_name, dev_num);
 	vdev->release = video_device_release_empty;
 	vdev->fops = &g_mse_adapter_v4l2_fops;
 	vdev->vfl_type = VFL_TYPE_GRABBER;
@@ -2518,6 +2654,7 @@ static int mse_adapter_v4l2_free(void)
 
 static int mse_adapter_v4l2_init(void)
 {
+	int i;
 	int dev_num;
 	int err;
 	unsigned int type;
@@ -2525,19 +2662,22 @@ static int mse_adapter_v4l2_init(void)
 
 	pr_debug("Start v4l2 adapter\n");
 	mutex_init(&g_lock);
-	for (dev_num = 0; dev_num < MSE_ADAPTER_V4L2_DEVICE_MAX; dev_num++) {
-		if (dev_num < MSE_ADAPTER_V4L2_CAPTURE_DEVICE_MAX)
+	for (i = 0; i < MSE_ADAPTER_V4L2_DEVICE_MAX; i++) {
+		if (i < MSE_ADAPTER_V4L2_CAPTURE_DEVICE_MAX) {
+			dev_num = i;
 #ifdef V4L2_ADP_CAPTURE_MPLANE
 			type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 #else
 			type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 #endif
-		else
+		} else {
+			dev_num = i - MSE_ADAPTER_V4L2_CAPTURE_DEVICE_MAX;
 #ifdef V4L2_ADP_PLAYBACK_MPLANE
 			type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
 #else
 			type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
 #endif
+		}
 
 		err = mse_adapter_v4l2_probe(dev_num, type);
 		if (err) {

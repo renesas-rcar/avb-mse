@@ -13,10 +13,12 @@ mse_core-objs := mse_core_main.o \
                  mse_packet_ctrl.o \
                  mse_sysfs.o \
                  avtp.o \
+                 jpeg.o \
                  mse_packetizer.o \
                  mse_packetizer_aaf.o \
                  mse_packetizer_iec61883_6.o \
-                 mse_packetizer_cvf_h264.o
+                 mse_packetizer_cvf_h264.o \
+                 mse_packetizer_cvf_mjpeg.o
 obj-$(CONFIG_MSE_CORE) += mse_core.o
 
 # adapter

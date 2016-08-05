@@ -66,6 +66,7 @@
 #define MSE_PACKETIZER_NAME_STR_IEC61883_6      "iec61883-6"
 #define MSE_PACKETIZER_NAME_STR_CVF_H264_D13    "cvf_h264_d13"
 #define MSE_PACKETIZER_NAME_STR_CVF_H264        "cvf_h264"
+#define MSE_PACKETIZER_NAME_STR_CVF_MJPEG       "cvf_mjpeg"
 
 /* Audio Packetizer for AAF */
 extern struct mse_packetizer_ops mse_packetizer_audio_aaf_ops;
@@ -75,6 +76,8 @@ extern struct mse_packetizer_ops mse_packetizer_audio_iec61883_6_ops;
 extern struct mse_packetizer_ops mse_packetizer_video_cvf_h264_d13_ops;
 /* Video Packetizer for CVF H.264 */
 extern struct mse_packetizer_ops mse_packetizer_video_cvf_h264_ops;
+/* Video Packetizer for CVF MJPEG */
+extern struct mse_packetizer_ops mse_packetizer_video_cvf_mjpeg_ops;
 
 extern int mse_packetizer_init(void);
 extern void mse_packetizer_exit(void);

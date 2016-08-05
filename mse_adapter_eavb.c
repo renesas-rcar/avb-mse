@@ -163,13 +163,13 @@ static int mse_adapter_eavb_open(char *name)
 	if (err)
 		pr_err("[%s] error option_kernel code=%d\n", __func__, err);
 
-	eavb->entry = kcalloc(MSE_EAVB_ADAPTER_ENTRY_MAX,
+	eavb->entry = kcalloc(MSE_EAVB_ADAPTER_ENTRY_MAX * 2,
 			      sizeof(struct eavb_entry),
 			      GFP_KERNEL);
 	if (!eavb->entry)
 		return -ENOMEM;
 
-	eavb->num_entry = MSE_EAVB_ADAPTER_ENTRY_MAX;
+	eavb->num_entry = 0;
 
 	return index;
 }
@@ -373,26 +373,23 @@ static int mse_adapter_eavb_receive_prepare(int index,
 
 	/* entry queue */
 	eavb->entried = 0;
-	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
-		eavb->unentry = MSE_EAVB_ADAPTER_PACKET_MAX;
-		ret = eavb->ravb.write(eavb->ravb.handle,
-				       eavb->entry,
-				       MSE_EAVB_ADAPTER_PACKET_MAX);
-	} else {
-		eavb->unentry = 0;
-		ret = eavb->ravb.write(eavb->ravb.handle,
-				       eavb->entry,
-				       num_packets);
-	}
+	ret = eavb->ravb.write(eavb->ravb.handle,
+			       eavb->entry,
+			       MSE_EAVB_ADAPTER_ENTRY_MAX);
+	if (ret != MSE_EAVB_ADAPTER_ENTRY_MAX) {
+		pr_err("[%s] cannot entry packet %zu/%d\n",
+		       __func__, ret, MSE_EAVB_ADAPTER_ENTRY_MAX);
 
-	if (ret != num_packets) {
 		mse_adapter_eavb_check_receive(index);
 		if (ret < 0)
 			pr_err("[%s] write error %d\n", __func__, (int)ret);
 		else
 			pr_err("[%s] write is short %d/%d\n", __func__,
-			       (int)ret, num_packets);
+			       (int)ret, MSE_EAVB_ADAPTER_ENTRY_MAX);
+		return -EPERM;
 	}
+	eavb->unentry = MSE_EAVB_ADAPTER_ENTRY_MAX;
+	eavb->num_entry = num_packets;
 
 	return 0;
 }
@@ -425,9 +422,13 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 		pr_err("[%s] receive error %zd\n", __func__, ret);
 		return ret;
 	}
-
+	if (ret == 0) {
+		pr_debug("[%s] receive  %zd packet\n", __func__, ret);
+		return 0;
+	}
 	receive = ret;
 	eavb->entried = (eavb->entried + receive) % eavb->num_entry;
+
 	/* enqueue */
 	if (eavb->unentry + receive <= eavb->num_entry) {
 		ret = eavb->ravb.write(eavb->ravb.handle,
