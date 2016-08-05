@@ -1263,7 +1263,8 @@ int mse_close(int index)
 	instance = &mse->instance_table[index];
 	adapter = instance->media;
 
-	mutex_lock(&adapter->lock);
+	/* wait stop */
+	flush_work(&instance->wk_stop);
 
 	/* free packet memory */
 	mse_packet_ctrl_free(instance->packet_buffer);
@@ -1285,7 +1286,6 @@ int mse_close(int index)
 	instance->index_network = MSE_INDEX_UNDEFINED;
 	instance->index_packetizer = MSE_INDEX_UNDEFINED;
 
-	mutex_unlock(&adapter->lock);
 	return 0;
 }
 EXPORT_SYMBOL(mse_close);
