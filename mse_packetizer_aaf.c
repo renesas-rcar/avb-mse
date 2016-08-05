@@ -79,6 +79,9 @@
 #define CBS_ADJUSTMENT_NUMERATOR        (103)
 #define CBS_ADJUSTMENT_DENOMINATOR      (100)
 
+/* preamble + FCS + IGP */
+#define ETHERNET_SPECIAL        (8 + 4 + 12)
+
 #define PORT_TRANSMIT_RATE      (100000000) /* 100M [bit/sec] */
 #define CLASS_INTERVAL_FRAMES   (1000) /* class C */
 #define INTERVAL_FRAMES         (1)
@@ -319,12 +322,14 @@ static int mse_packetizer_audio_aaf_calc_cbs(int index,
 	}
 
 	bandwidth_fraction_numerator =
-		(ETHOVERHEAD_REAL + aaf->avtp_packet_size) * BYTE_TO_BIT *
+		(ETHERNET_SPECIAL + aaf->avtp_packet_size) * BYTE_TO_BIT *
 		class_interval_frames * INTERVAL_FRAMES *
 		CBS_ADJUSTMENT_NUMERATOR;
 
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
-	do_div(value, bandwidth_fraction_denominator);
+	/* divide denominator into 2 */
+	do_div(value, PORT_TRANSMIT_RATE);
+	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
 	if (value > UINT_MAX) {
 		pr_err("[%s] cbs error(too big)\n", __func__);
 		return -EPERM;
@@ -332,12 +337,16 @@ static int mse_packetizer_audio_aaf_calc_cbs(int index,
 	cbs->bandwidthFraction = value;
 
 	value = USHRT_MAX * bandwidth_fraction_numerator;
-	do_div(value, bandwidth_fraction_denominator);
+	/* divide denominator into 2 */
+	do_div(value, PORT_TRANSMIT_RATE);
+	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
 	cbs->sendSlope = value;
 
 	value = USHRT_MAX * (bandwidth_fraction_denominator -
 					 bandwidth_fraction_numerator);
-	do_div(value, bandwidth_fraction_denominator);
+	/* divide denominator into 2 */
+	do_div(value, PORT_TRANSMIT_RATE);
+	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
 	cbs->idleSlope = value;
 
 	return 0;
