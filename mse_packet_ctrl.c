@@ -68,6 +68,8 @@
 #include <linux/device.h>
 #include <linux/dma-mapping.h>
 #include <linux/ptp_clock.h>
+#include <linux/if_vlan.h>
+
 #include "mse_core.h"
 #include "mse_packet_ctrl.h"
 #include "mse_packetizer.h"
@@ -75,9 +77,9 @@
 #define MSE_DMA_BUF_RECEIVE_SIZE 10
 #define MSE_DMA_BUF_SEND_SIZE 10
 
-#define MSE_PACKET_SIZE_MIN 64
+#define MSE_PACKET_COUNT_MAX (128)
 
-inline int mse_packet_ctrl_check_packet_remain(struct mse_packet_ctrl *dma)
+int mse_packet_ctrl_check_packet_remain(struct mse_packet_ctrl *dma)
 {
 	return dma->write_p >= dma->read_p ? dma->write_p - dma->read_p
 				: dma->size + dma->write_p - dma->read_p;
@@ -178,16 +180,14 @@ int mse_packet_ctrl_make_packet(int index,
 				int tstamp_size,
 				unsigned int *tstamp,
 				struct mse_packet_ctrl *dma,
-				struct mse_packetizer_ops *ops)
+				struct mse_packetizer_ops *ops,
+				size_t *processed)
 {
 	int ret = 0;
-	size_t processed = 0;
 	size_t packet_size = 0;
 	int new_write_p;
 	int pcount = 0;
 	unsigned int timestamp, t;
-	static int packet_max;
-	static int pno;
 
 	if (!ops) {
 		pr_err("[%s] no packetizer\n", __func__);
@@ -195,17 +195,16 @@ int mse_packet_ctrl_make_packet(int index,
 	}
 	t  = 0;
 
-	while (!ret) {
+	while (!ret && pcount < MSE_PACKET_COUNT_MAX) {
 		new_write_p = (dma->write_p + 1) % dma->size;
 		if (new_write_p == dma->read_p) {
 			pr_err("make overrun r=%d w=%d nw=%d p=%zu/%zu\n",
 			       dma->read_p, dma->write_p, new_write_p,
-			       processed, size);
-			return processed;
+			       *processed, size);
+			return *processed;
 		}
-
 		memset(dma->packet_table[dma->write_p].vaddr, 0,
-		       dma->packet_table[dma->write_p].len);
+		       VLAN_ETH_ZLEN);
 		timestamp = tstamp[t++];
 
 		ret = ops->packetize(index,
@@ -213,30 +212,27 @@ int mse_packet_ctrl_make_packet(int index,
 				     &packet_size,
 				     data,
 				     size,
-				     &processed,
+				     processed,
 				     &timestamp);
 
 		if (ret >= 0) {
 			pcount++;
-			if (packet_size >= 64) {
+			if (packet_size >= VLAN_ETH_ZLEN)
 				dma->packet_table[dma->write_p].len =
 					packet_size;
-			} else {
-				dma->packet_table[dma->write_p].len = 64;
-			}
+			else
+				dma->packet_table[dma->write_p].len =
+				        VLAN_ETH_ZLEN;
+
 			dma->write_p = new_write_p;
 		} else {
 			break;
 		}
 	}
+	pr_debug("[%s] packetize %d %zu/%zu\n",
+		 __func__, pcount, *processed, size);
 
-	pr_debug("[%s] packet, %d, %d, %d, %zu\n",
-		 __func__, pno++, pcount, packet_max, processed);
-
-	pr_debug("[%s] dma buffer ok wp=%d, rp=%d, processed=%zu/%zu\n",
-		 __func__, dma->write_p, dma->read_p, processed, size);
-
-	return processed;
+	return *processed;
 }
 
 int mse_packet_ctrl_make_packet_crf(int index,
@@ -255,7 +251,7 @@ int mse_packet_ctrl_make_packet_crf(int index,
 		return -1;
 	}
 
-	memset(dma->packet_table[dma->write_p].vaddr, 0, 64);
+	memset(dma->packet_table[dma->write_p].vaddr, 0, VLAN_ETH_ZLEN);
 
 	/* CRF packetizer */
 	mse_packetizer_crf_tstamp_audio_ops.packetize(
@@ -268,20 +264,32 @@ int mse_packet_ctrl_make_packet_crf(int index,
 		NULL);
 
 	if (ret >= 0) {
-		if (packet_size < MSE_PACKET_SIZE_MIN)
-			packet_size = MSE_PACKET_SIZE_MIN;
-		dma->packet_table[dma->write_p].len = packet_size;
+		if (packet_size >= VLAN_ETH_ZLEN)
+			dma->packet_table[dma->write_p].len = packet_size;
+		else
+			dma->packet_table[dma->write_p].len = VLAN_ETH_ZLEN;
+
 		dma->write_p = new_write_p;
 	}
 
 	return 1;
 }
 
+int mse_packet_ctrl_send_prepare_packet(
+				int index,
+				struct mse_packet_ctrl *dma,
+				struct mse_adapter_network_ops *ops)
+{
+	return ops->send_prepare(index,
+				 dma->packet_table,
+				 dma->size);
+}
+
 int mse_packet_ctrl_send_packet(int index,
 				struct mse_packet_ctrl *dma,
 				struct mse_adapter_network_ops *ops)
 {
-	int new_read_p, now_write_p, ret;
+	int new_read_p, now_write_p, ret, send_size;
 
 	if (dma->write_p == dma->read_p) {
 		pr_err("[%s] no data\n", __func__);
@@ -292,33 +300,28 @@ int mse_packet_ctrl_send_packet(int index,
 		return -EINVAL;
 	}
 
-	while (dma->write_p != dma->read_p) {
-		now_write_p = dma->write_p;
-		if (now_write_p > dma->read_p) {
-			/* no wrap */
-			new_read_p = dma->read_p + MSE_DMA_BUF_SEND_SIZE;
-			if (new_read_p > now_write_p)
-				new_read_p = now_write_p;
-		} else {
-			/* wrap */
-			new_read_p = dma->read_p + MSE_DMA_BUF_SEND_SIZE;
-			if (new_read_p > dma->size)
-				new_read_p = dma->size;
-		}
+	now_write_p = dma->write_p;
+	send_size = now_write_p - dma->read_p;
+	if (send_size < 0)	    /* wrap */
+		send_size += dma->size;
 
-		ret = ops->send(index,
-				&dma->packet_table[dma->read_p],
-				new_read_p - dma->read_p);
-		if (ret < 0)
-			return -EPERM;
+	if (send_size <= 0)
+		return 0;
 
-		new_read_p = (dma->read_p + ret) % dma->size;
+	if (send_size > MSE_PACKET_COUNT_MAX)
+		return -EPERM;
 
-		pr_debug("[%s] %d packtets w=%d r=%d -> %d\n",
-			 __func__, ret, now_write_p, dma->read_p, new_read_p);
+	/* send packets */
+	ret = ops->send(index, dma->packet_table, send_size);
+	if (ret < 0)
+		return -EPERM;
 
-		dma->read_p = new_read_p;
-	}
+	new_read_p = (dma->read_p + ret) % dma->size;
+
+	pr_debug("[%s] %d packtets w=%d r=%d -> %d\n",
+		 __func__, ret, now_write_p, dma->read_p, new_read_p);
+
+	dma->read_p = new_read_p;
 
 	return 0;
 }
@@ -339,7 +342,8 @@ int mse_packet_ctrl_receive_packet(int index,
 				   struct mse_adapter_network_ops *ops)
 {
 	int new_write_p, ret;
-	int size;
+	int size = max_size;
+	int received = 0;
 
 	/* TODO: receive insufficient size */
 	if (!ops) {
@@ -350,8 +354,8 @@ int mse_packet_ctrl_receive_packet(int index,
 	pr_debug("[%s] network adapter=%s r=%d w=%d\n",
 		 __func__, ops->name, dma->read_p, dma->write_p);
 
-	while (1) {
-		size = 1;
+	received = mse_packet_ctrl_check_packet_remain(dma);
+	if (received < max_size) {
 		if (dma->read_p > dma->write_p &&
 		    dma->read_p < dma->write_p + size) {
 			pr_info("receive overrun r=%d w=%d size=%d/%d\n",
@@ -359,7 +363,7 @@ int mse_packet_ctrl_receive_packet(int index,
 			return -ENOSPC;
 		}
 
-		ret = ops->receive(index, size);
+		ret = ops->receive(index, max_size);
 		if (ret < 0) {
 			pr_err("[%s] receive error %d\n", __func__, ret);
 			return -EPERM;
@@ -371,20 +375,14 @@ int mse_packet_ctrl_receive_packet(int index,
 			 ret, dma->read_p, dma->write_p, new_write_p);
 
 		dma->write_p = new_write_p;
-
-		/* for cancel */
-		if (ret != size)
-			return -EINTR;
 	}
-
-	return 0;
+	return mse_packet_ctrl_check_packet_remain(dma);
 }
 
-
 int mse_packet_ctrl_receive_packet_crf(int index,
-				   int max_size,
-				   struct mse_packet_ctrl *dma,
-				   struct mse_adapter_network_ops *ops)
+				       int max_size,
+				       struct mse_packet_ctrl *dma,
+				       struct mse_adapter_network_ops *ops)
 {
 	int new_write_p, ret;
 	int size;
@@ -428,7 +426,6 @@ int mse_packet_ctrl_receive_packet_crf(int index,
 
 	return 0;
 }
-
 
 int mse_packet_ctrl_take_out_packet(int index,
 				    void *data,

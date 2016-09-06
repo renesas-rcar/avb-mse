@@ -85,7 +85,12 @@ extern int mse_packet_ctrl_make_packet(int index,
 				       int timestamp_size,
 				       unsigned int *timestamp,
 				       struct mse_packet_ctrl *dma,
-				       struct mse_packetizer_ops *ops);
+				       struct mse_packetizer_ops *ops,
+				       size_t *processed);
+extern int mse_packet_ctrl_send_prepare_packet(
+					int index,
+					struct mse_packet_ctrl *dma,
+					struct mse_adapter_network_ops *ops);
 extern int mse_packet_ctrl_send_packet(int index,
 				       struct mse_packet_ctrl *dma,
 				       struct mse_adapter_network_ops *ops);

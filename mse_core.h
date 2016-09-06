@@ -261,6 +261,10 @@ struct mse_adapter_network_ops {
 	int (*start)(int index);
 	/** @brief stop function pointer */
 	int (*stop)(int index);
+	/** @brief send prepare function pointer */
+	int (*send_prepare)(int index,
+			    struct mse_packet *packets,
+			    int num_packets);
 	/** @brief send function pointer */
 	int (*send)(int index,
 		    struct mse_packet *packets,

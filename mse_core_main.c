@@ -107,7 +107,7 @@
 
 #define MSE_DMA_MAX_PACKET         (128)
 #define MSE_DMA_MAX_PACKET_SIZE    (1526)
-#define MSE_DMA_MAX_RECEIVE_PACKET (100)
+#define MSE_DMA_MAX_RECEIVE_PACKET (64)
 #define MSE_DMA_MIN_RECEIVE_PACKET (60)
 
 #define MSE_VIDEO_START_CODE_LEN   (4)
@@ -927,20 +927,43 @@ static void mse_work_stream(struct work_struct *work)
 	if (instance->f_stopping)
 		return;
 
-	if (instance->inout == MSE_DIRECTION_INPUT)
+	if (instance->inout == MSE_DIRECTION_INPUT) {
 		/* request send packet */
 		err = mse_packet_ctrl_send_packet(
 			instance->index_network,
 			instance->packet_buffer,
 			instance->network);
-	else
+		/* continue packetize workqueue */
+		if (err >= 0 && instance->f_continue) {
+			queue_work(instance->wq_packet,
+				   &instance->wk_packetize);
+		} else {
+			instance->f_completion = true;
+			pr_debug("[%s] f_completion = true\n", __func__);
+		}
+	} else {
 		/* request receive packet */
-		err = mse_packet_ctrl_receive_packet(
-			instance->index_network,
-			MSE_DMA_MAX_RECEIVE_PACKET,
-			instance->packet_buffer,
-			instance->network);
-
+		while (err >= 0 && !instance->f_stopping) {
+			err = mse_packet_ctrl_receive_packet(
+				instance->index_network,
+				MSE_DMA_MAX_RECEIVE_PACKET,
+				instance->packet_buffer,
+				instance->network);
+			if (instance->f_stopping)
+				break;
+			if (err < 0) {
+				pr_err("[%s] receive error %d\n",
+				       __func__, err);
+				break;
+			}
+			if (!instance->f_depacketizing) {
+				instance->f_depacketizing = true;
+				queue_work(instance->wq_packet,
+					   &instance->wk_depacketize);
+			}
+		}
+		pr_err("[%s] stop streaming %d\n", __func__, err);
+	}
 	instance->f_streaming = false;
 }
 
@@ -1008,7 +1031,7 @@ static int tstamps_search_tstamp(
 		return -1;
 	*std_time = que->std_times[p];
 	pr_debug("[%s] found %lu t= %u avtp= %u\n",
-	       __func__,  *std_time, t, avtp_time);
+		 __func__,  *std_time, t, avtp_time);
 	return 0;
 }
 
@@ -1452,6 +1475,8 @@ static void mse_work_packetize(struct work_struct *work)
 	pr_debug("[%s]\n", __func__);
 
 	instance = container_of(work, struct mse_instance, wk_packetize);
+	if (instance->f_stopping)
+		return;
 
 	switch (MSE_TYPE_KING_GET(instance->media->type)) {
 	case MSE_TYPE_ADAPTER_AUDIO:
@@ -1464,18 +1489,22 @@ static void mse_work_packetize(struct work_struct *work)
 			instance->avtp_timestamps_size,
 			instance->avtp_timestamps,
 			instance->packet_buffer,
-			instance->packetizer);
+			instance->packetizer,
+			&instance->work_length);
 		if (ret < 0) {
 			pr_err("[%s] erorr=%d\n", __func__, ret);
 			return;
 		}
-
-		pr_debug("[%s] media_buffer=%p packetized=%d\n",
-			 __func__, instance->media_buffer, ret);
-
+		pr_debug("[%s] packetized=%d len=%zu\n",
+			 __func__, ret, instance->work_length);
 		/* start workqueue for streaming */
-		instance->f_streaming = true;
-		queue_work(instance->wq_stream, &instance->wk_stream);
+		instance->f_continue =
+			(instance->work_length < instance->media_buffer_size);
+
+		if (!instance->f_streaming) {
+			instance->f_streaming = true;
+			queue_work(instance->wq_stream, &instance->wk_stream);
+		}
 		break;
 
 	case MSE_TYPE_ADAPTER_VIDEO:
@@ -1483,7 +1512,6 @@ static void mse_work_packetize(struct work_struct *work)
 		getnstimeofday(&time);
 		instance->timestamp = time.tv_nsec;
 		/* make AVTP packet */
-		instance->work_length = 0;
 		ret = mse_packet_ctrl_make_packet(
 			instance->index_packetizer,
 			instance->media_buffer + instance->work_length,
@@ -1492,20 +1520,20 @@ static void mse_work_packetize(struct work_struct *work)
 			1,
 			&instance->timestamp,
 			instance->packet_buffer,
-			instance->packetizer);
-
+			instance->packetizer,
+			&instance->work_length);
 		if (ret < 0)
 			return;
-
 		pr_debug("[%s] media_buffer=%p packetized=%d\n",
 			 __func__, instance->media_buffer, ret);
-		instance->work_length += ret;
-
 		if (instance->use_temp_video_buffer_mjpeg)
 			instance->f_temp_video_buffer_rewind = true;
 
 		/* start workqueue for streaming */
-		queue_work(instance->wq_stream, &instance->wk_stream);
+		if (!instance->f_streaming) {
+			instance->f_streaming = true;
+			queue_work(instance->wq_stream, &instance->wk_stream);
+		}
 		break;
 
 	default:
@@ -1580,20 +1608,18 @@ static void mse_work_depacketize(struct work_struct *work)
 	case MSE_TYPE_ADAPTER_AUDIO:
 		/* get AVTP packet payload */
 		audio = &instance->media_config.audio;
-		if (received > MSE_DMA_MIN_RECEIVE_PACKET ||
-		    instance->first_f) {
+		while (!instance->f_stopping) {
 			/* get AVTP packet payload */
-			instance->work_length = 0;
 			ret = mse_packet_ctrl_take_out_packet(
-						instance->index_packetizer,
-						instance->temp_buffer[instance->temp_w],
-						instance->media_buffer_size,
-						timestamps,
-						ARRAY_SIZE(timestamps),
-						&t_stored,
-						instance->packet_buffer,
-						instance->packetizer,
-						&instance->work_length);
+				instance->index_packetizer,
+				instance->temp_buffer[instance->temp_w],
+				instance->media_buffer_size,
+				timestamps,
+				ARRAY_SIZE(timestamps),
+				&t_stored,
+				instance->packet_buffer,
+				instance->packetizer,
+				&instance->work_length);
 
 			/* samples per packet */
 			instance->packetizer->get_audio_info(
@@ -1613,28 +1639,13 @@ static void mse_work_depacketize(struct work_struct *work)
 				instance->temp_w = (instance->temp_w + 1) %
 					MSE_DECODE_BUFFER_NUM;
 				instance->work_length = 0;
+				continue;
 			}
-		}
-		pr_debug("[%s] media_buffer=%p received=%d depacketized=%d\n",
-			 __func__, instance->media_buffer, received, ret);
-		if (instance->f_stopping)
+			/* Not loop */
 			break;
-
-		if (MSE_TYPE_KING_GET(instance->media->type) ==
-		    MSE_TYPE_ADAPTER_AUDIO &&
-		    instance->inout == MSE_DIRECTION_OUTPUT) {
-			if (instance->temp_w != instance->temp_r &&
-			    is_presentable(instance)) {
-				memcpy(instance->media_buffer,
-				       instance->temp_buffer[instance->temp_r],
-				       instance->media_buffer_size);
-				instance->temp_r = (instance->temp_r + 1) %
-					MSE_DECODE_BUFFER_NUM;
-			}
 		}
-
-		/* complete callback */
-		instance->mse_completion(instance->index_media, 0);
+		pr_debug("[%s] received=%d depacketized=%zu ret=%d\n",
+			 __func__, received, instance->work_length, ret);
 		break;
 
 	case MSE_TYPE_ADAPTER_VIDEO:
@@ -1662,7 +1673,11 @@ static void mse_work_depacketize(struct work_struct *work)
 			instance->work_length = 0;
 		} else {
 			instance->timer_cnt++; /* ad-hoc */
-			queue_work(instance->wq_stream, &instance->wk_stream);
+			if (!instance->f_streaming) {
+				instance->f_streaming = true;
+				queue_work(instance->wq_stream,
+					   &instance->wk_stream);
+			}
 		}
 		break;
 
@@ -1671,18 +1686,36 @@ static void mse_work_depacketize(struct work_struct *work)
 		       __func__, instance->media->type);
 		break;
 	}
+	instance->f_depacketizing = false;
 }
 
+static bool is_audio_adapter(struct mse_adapter *adapter); /* todo move */
 static void mse_work_callback(struct work_struct *work)
 {
 	struct mse_instance *instance;
+	struct mse_adapter *adapter;
 
 	pr_debug("[%s]\n", __func__);
 
 	instance = container_of(work, struct mse_instance, wk_callback);
 	if (instance->f_stopping)
 		return;
+	adapter = instance->media;
 
+	if (instance->inout == MSE_DIRECTION_OUTPUT) {
+		if (is_audio_adapter(adapter)) {
+			if (instance->temp_w != instance->temp_r &&
+			    is_presentable(instance)) {
+				memcpy(instance->media_buffer,
+				       instance->temp_buffer[instance->temp_r],
+				       instance->media_buffer_size);
+				instance->temp_r = (instance->temp_r + 1) %
+					MSE_DECODE_BUFFER_NUM;
+			}
+		} else {
+			return;
+		}
+	}
 	/* complete callback anytime */
 	instance->mse_completion(instance->index_media, 0);
 }
@@ -1738,12 +1771,8 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 
 	mutex_unlock(&adapter->lock);
 
-	if (instance->inout == MSE_DIRECTION_INPUT)
-		/* start workqueue for completion */
-		queue_work(instance->wq_packet, &instance->wk_callback);
-	else
-		/* start workqueue for depacketize */
-		queue_work(instance->wq_packet, &instance->wk_depacketize);
+	/* start workqueue for completion */
+	queue_work(instance->wq_packet, &instance->wk_callback);
 
 	if (instance->ptp_clock == 0)
 		tstamps_store_ptp_timestamp(instance);
@@ -2274,6 +2303,12 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 				MSE_DMA_MAX_PACKET_SIZE);
 			if (!instance->crf_packet_buffer)
 				return -EINVAL;
+
+			/* prepare for send */
+			mse_packet_ctrl_send_prepare_packet(
+				instance->crf_index_network,
+				instance->crf_packet_buffer,
+				instance->network);
 		}
 	}
 
@@ -2309,7 +2344,7 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	/* get packet memory */
 	instance->packet_buffer = mse_packet_ctrl_alloc(
 						&mse->pdev->dev,
-						MSE_DMA_MAX_PACKET,
+						MSE_DMA_MAX_PACKET * 2,
 						MSE_DMA_MAX_PACKET_SIZE);
 
 	return 0;
@@ -2401,7 +2436,7 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 		/* get packet memory */
 		instance->packet_buffer = mse_packet_ctrl_alloc(
 			&mse->pdev->dev,
-			MSE_DMA_MAX_PACKET,
+			MSE_DMA_MAX_PACKET * 2,
 			MSE_DMA_MAX_PACKET_SIZE);
 	} else {
 		u8 streamid[AVTP_STREAMID_SIZE];
@@ -2849,9 +2884,18 @@ int mse_start_streaming(int index)
 						instance->index_network,
 						instance->packet_buffer,
 						instance->network);
+	else
+		mse_packet_ctrl_send_prepare_packet(
+						instance->index_network,
+						instance->packet_buffer,
+						instance->network);
+
 	instance->f_streaming = false;
 	instance->f_stopping = false;
 	instance->work_length = 0;
+	instance->f_trans_start = false;
+	instance->f_completion = false;
+
 	instance->temp_w = 0;
 	instance->temp_r = 0;
 
@@ -2999,13 +3043,13 @@ int mse_start_transmission(int index,
 		instance->f_trans_start = true;
 	}
 	instance->mse_completion = mse_completion;
-	instance->work_length = 0;
 
 	ret = instance->network->set_option(instance->index_network);
 	if (ret)
 		pr_err("[%s] failed set_option() ret=%d\n", __func__, ret);
 
 	if (instance->inout == MSE_DIRECTION_INPUT) {
+		instance->work_length = 0;
 		/* start workqueue for packetize */
 		instance->f_continue = false;
 

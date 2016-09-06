@@ -74,6 +74,8 @@
 #define MSE_EAVB_ADAPTER_PACKET_MAX (1024)
 #define MSE_EAVB_ADAPTER_ENTRY_MAX (128)
 
+#define MSE_EAVB_PACKET_LENGTH (1526)
+
 #define avb_compare_param_key(val, key) \
 	strncmp(val, key, strlen(key))
 
@@ -82,6 +84,7 @@ struct mse_adapter_eavb {
 	struct eavb_entry *entry;
 	int num_entry;
 	int entried, unentry;
+	int num_send;
 	struct ravb_streaming_kernel_if ravb;
 	struct eavb_entry read_entry[MSE_EAVB_ADAPTER_ENTRY_MAX];
 };
@@ -287,12 +290,49 @@ static int mse_adapter_eavb_check_receive(int index)
 	return en.completed;
 }
 
+static int mse_adapter_eavb_send_prepare(int index,
+					 struct mse_packet *packets,
+					 int num_packets)
+{
+	int i;
+	struct mse_adapter_eavb *eavb;
+
+	pr_debug("[%s] index=%d addr=%p num=%d\n",
+		 __func__, index, packets, num_packets);
+
+	if (index >= ARRAY_SIZE(eavb_table))
+		return -EPERM;
+
+	eavb = &eavb_table[index];
+
+	if (num_packets <= 0)
+		return -EPERM;
+
+	if (num_packets > MSE_EAVB_ADAPTER_PACKET_MAX) {
+		pr_err("[%s] too much packets %d\n", __func__, num_packets);
+		return -EPERM;
+	}
+
+	for (i = 0; i < num_packets; i++) {
+		(eavb->entry + i)->seq_no = i;
+		(eavb->entry + i)->vec[0].base = packets[i].paddr;
+		(eavb->entry + i)->vec[0].len = packets[i].len;
+	}
+
+	eavb->entried = 0;
+	eavb->unentry = 0;
+	eavb->num_send = 0;
+	eavb->num_entry = num_packets;
+
+	return 0;
+}
+
 static int mse_adapter_eavb_send(int index,
 				 struct mse_packet *packets,
 				 int num_packets)
 {
-	int i;
-	ssize_t wret, rret;
+	int num_dequeue, i, ofs;
+	ssize_t wret, rret = 0, wret2;
 	struct mse_adapter_eavb *eavb;
 
 	if (index >= ARRAY_SIZE(eavb_table))
@@ -303,43 +343,77 @@ static int mse_adapter_eavb_send(int index,
 	if (num_packets <= 0)
 		return -EPERM;
 
-	pr_debug("[%s] index=%d addr=%p num=%d\n",
-		 __func__, index, packets, num_packets);
+	pr_debug("[%s] index=%d num=%d\n",
+		 __func__, index, num_packets);
 
 	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
 		pr_err("[%s] too much packets\n", __func__);
 		return -EPERM;
 	}
 
-	for (i = 0; i < num_packets; i++) {
-		(eavb->entry + i)->seq_no = i;
-		(eavb->entry + i)->vec[0].base = packets[i].paddr;
-		(eavb->entry + i)->vec[0].len = packets[i].len;
+	num_dequeue = eavb->num_send + num_packets -
+		MSE_EAVB_ADAPTER_ENTRY_MAX;
+	if (num_dequeue > 0) {
+		/* dequeue before send */
+		rret = eavb->ravb.read(eavb->ravb.handle, eavb->read_entry,
+				       num_dequeue);
+		if (rret != num_dequeue) {
+			/* TODO: Error recover */
+			mse_adapter_eavb_check_receive(index);
+			if (rret < 0) {
+				pr_err("[%s] read error %d\n",
+				       __func__, (int)rret);
+				return rret;
+			}
+			pr_err("[%s] read is short %d/%d\n",
+			       __func__, (int)rret, num_dequeue);
+		}
+		eavb->entried = (eavb->entried + rret) % eavb->num_entry;
+		eavb->num_send -= rret;
 	}
 
-	/* entry queue */
-	wret = eavb->ravb.write(eavb->ravb.handle, eavb->entry, num_packets);
+	/* update packet size */
+	for (i = 0; i < num_packets; i++) {
+		ofs = (eavb->unentry + i) % eavb->num_entry;
+		(eavb->entry + ofs)->vec[0].len = packets[ofs].len;
+	}
+	/* enqueue */
+	if (eavb->unentry + num_packets <= eavb->num_entry) {
+		wret = eavb->ravb.write(eavb->ravb.handle,
+					eavb->entry + eavb->unentry,
+					num_packets);
+		if (wret < 0) {
+			pr_err("[%s] write error %d\n", __func__, (int)wret);
+			return wret;
+		}
+	} else {
+		wret = eavb->ravb.write(eavb->ravb.handle,
+					eavb->entry + eavb->unentry,
+					eavb->num_entry - eavb->unentry);
+		if (wret < 0) {
+			pr_err("[%s] write error %d\n", __func__, (int)wret);
+			return wret;
+		}
+		wret2 = eavb->ravb.write(
+				eavb->ravb.handle,
+				eavb->entry,
+				num_packets - eavb->num_entry + eavb->unentry);
+		if (wret2 < 0) {
+			pr_err("[%s] write error %d\n", __func__, (int)wret);
+			return wret2;
+		}
+		wret += wret2;
+	}
+
 	if (wret != num_packets) {
 		/* TODO: Error recover */
 		mse_adapter_eavb_check_receive(index);
-		if (wret < 0)
-			pr_err("[%s] write error %d\n", __func__, (int)wret);
-		else
-			pr_err("[%s] write is short %d/%d\n", __func__,
-			       (int)wret, num_packets);
+		pr_err("[%s] write is short %d/%d\n", __func__,
+		       (int)wret, num_packets);
 	}
-
-	/* dequeue */
-	rret = eavb->ravb.read(eavb->ravb.handle, eavb->entry, num_packets);
-	if (rret != num_packets) {
-		/* TODO: Error recover */
-		mse_adapter_eavb_check_receive(index);
-		if (rret < 0)
-			pr_err("[%s] read error %d\n", __func__, (int)rret);
-		else
-			pr_err("[%s] read is short %d/%d\n", __func__,
-			       (int)rret, num_packets);
-	}
+	eavb->unentry = (eavb->unentry + wret) % eavb->num_entry;
+	eavb->num_send += wret;
+	pr_debug("[%s] read %zd write %zd\n", __func__, rret, wret);
 
 	return (int)wret;
 }
@@ -391,14 +465,17 @@ static int mse_adapter_eavb_receive_prepare(int index,
 	eavb->unentry = MSE_EAVB_ADAPTER_ENTRY_MAX;
 	eavb->num_entry = num_packets;
 
+	mse_adapter_eavb_check_receive(index);
+
 	return 0;
 }
 
 static int mse_adapter_eavb_receive(int index, int num_packets)
 {
-	int receive;
+	int receive, i, ofs;
 	ssize_t ret;
 	struct mse_adapter_eavb *eavb;
+	int read_packets;
 
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
@@ -411,10 +488,16 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 		return -EPERM;
 	}
 
+	read_packets = mse_adapter_eavb_check_receive(index);
+	if (read_packets == 0)
+		read_packets = 1;
+	if (read_packets > num_packets)
+		read_packets = num_packets;
+
 	/* dequeue */
 	ret = eavb->ravb.read(eavb->ravb.handle,
 			      eavb->read_entry,
-			      num_packets);
+			      read_packets);
 	if (ret == -EINTR || ret == -EAGAIN) {
 		pr_info("[%s] receive error %zd\n", __func__, ret);
 		return ret;
@@ -429,6 +512,11 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 	receive = ret;
 	eavb->entried = (eavb->entried + receive) % eavb->num_entry;
 
+	/* update packet size */
+	for (i = 0; i < receive; i++) {
+		ofs = (eavb->unentry + i) % eavb->num_entry;
+		(eavb->entry + ofs)->vec[0].len = MSE_EAVB_PACKET_LENGTH;
+	}
 	/* enqueue */
 	if (eavb->unentry + receive <= eavb->num_entry) {
 		ret = eavb->ravb.write(eavb->ravb.handle,
@@ -488,6 +576,7 @@ static struct mse_adapter_network_ops mse_adapter_eavb_ops = {
 	.set_streamid = mse_adapter_eavb_set_streamid,
 	.start = mse_adapter_eavb_start,
 	.stop = mse_adapter_eavb_stop,
+	.send_prepare = mse_adapter_eavb_send_prepare,
 	.send = mse_adapter_eavb_send,
 	.receive_prepare = mse_adapter_eavb_receive_prepare,
 	.receive = mse_adapter_eavb_receive,
