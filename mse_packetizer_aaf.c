@@ -83,7 +83,7 @@
 #define ETHERNET_SPECIAL        (8 + 4 + 12)
 
 #define PORT_TRANSMIT_RATE      (100000000) /* 100M [bit/sec] */
-#define CLASS_INTERVAL_FRAMES   (1000) /* class C */
+#define CLASS_INTERVAL_FRAMES   (8000) /* class A */
 #define INTERVAL_FRAMES         (1)
 
 #define MSE_PACKETIZER_MAX      (10)
