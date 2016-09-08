@@ -82,7 +82,6 @@
 /* preamble + FCS + IGP */
 #define ETHERNET_SPECIAL        (8 + 4 + 12)
 
-#define PORT_TRANSMIT_RATE      (100000000) /* 100M [bit/sec] */
 #define CLASS_INTERVAL_FRAMES   (8000) /* class A */
 #define INTERVAL_FRAMES         (1)
 #define AM824_DATA_SIZE         (sizeof(u32))
@@ -326,8 +325,9 @@ static int mse_packetizer_audio_iec_calc_cbs(int index,
 	pr_debug("[%s] index=%d\n", __func__, index);
 	iec = &iec_packetizer_table[index];
 
-	bandwidth_fraction_denominator = (u64)PORT_TRANSMIT_RATE *
-					 (u64)CBS_ADJUSTMENT_DENOMINATOR;
+	bandwidth_fraction_denominator =
+				(u64)iec->net_config.port_transmit_rate *
+				(u64)CBS_ADJUSTMENT_DENOMINATOR;
 	if (!bandwidth_fraction_denominator) {
 		pr_err("[%s] cbs error(null)\n", __func__);
 		return -EPERM;
@@ -340,7 +340,7 @@ static int mse_packetizer_audio_iec_calc_cbs(int index,
 
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
 	/* divide denominator into 2 */
-	do_div(value, PORT_TRANSMIT_RATE);
+	do_div(value, iec->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
 	if (value > UINT_MAX) {
 		pr_err("[%s] cbs error(too big)\n", __func__);
@@ -350,14 +350,14 @@ static int mse_packetizer_audio_iec_calc_cbs(int index,
 
 	value = USHRT_MAX * bandwidth_fraction_numerator;
 	/* divide denominator into 2 */
-	do_div(value, PORT_TRANSMIT_RATE);
+	do_div(value, iec->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
 	cbs->sendSlope = value;
 
 	value = USHRT_MAX * (bandwidth_fraction_denominator -
 					 bandwidth_fraction_numerator);
 	/* divide denominator into 2 */
-	do_div(value, PORT_TRANSMIT_RATE);
+	do_div(value, iec->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
 	cbs->idleSlope = value;
 
