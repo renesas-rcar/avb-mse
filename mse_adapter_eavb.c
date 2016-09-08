@@ -565,6 +565,28 @@ static int mse_adapter_eavb_cancel(int index)
 	return eavb->ravb.blocking_cancel(eavb->ravb.handle);
 }
 
+static int mse_adapter_eavb_get_link_speed(int index)
+{
+	long link_speed;
+	struct mse_adapter_eavb *eavb;
+
+	if (index >= ARRAY_SIZE(eavb_table))
+		return -EPERM;
+
+	eavb = &eavb_table[index];
+
+	pr_debug("[%s] index=%d\n", __func__, index);
+
+	link_speed = eavb->ravb.get_linkspeed(eavb->ravb.handle);
+	if (link_speed < 0)
+		pr_err("[%s] error get link speed code=%ld\n",
+		       __func__,
+		       link_speed);
+
+	/* return speed as Mbps */
+	return link_speed;
+}
+
 static struct mse_adapter_network_ops mse_adapter_eavb_ops = {
 	.name = "ravb",
 	.type = MSE_TYPE_ADAPTER_NETWORK_EAVB,
@@ -582,6 +604,7 @@ static struct mse_adapter_network_ops mse_adapter_eavb_ops = {
 	.receive = mse_adapter_eavb_receive,
 	.check_receive = mse_adapter_eavb_check_receive,
 	.cancel = mse_adapter_eavb_cancel,
+	.get_link_speed = mse_adapter_eavb_get_link_speed,
 };
 
 static int adapter_index;
