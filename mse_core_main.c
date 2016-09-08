@@ -129,6 +129,8 @@
 #define MSE_DECODE_BUFFER_NUM_START_MAX (6)
 #define MAX_DECODE_SIZE       (8192) /* ALSA Period byte size */
 
+#define mbit_to_bit(mbit)     (mbit * 1000000)
+
 /** @brief mse state */
 enum MSE_STATE {
 	/** @brief state of close */
@@ -2466,6 +2468,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	int ret, i, j;
 	char name[MSE_NAME_LEN_MAX];
 	char eavbname[MSE_NAME_LEN_MAX];
+	long link_speed;
 
 	if ((index_media < 0) || (index_media >= MSE_ADAPTER_MEDIA_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n",
@@ -2600,6 +2603,20 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 		return ret;
 	}
 	instance->index_network = ret;
+
+	/* get speed link */
+	link_speed = network->get_link_speed(instance->index_network);
+	if (link_speed <= 0) {
+		pr_err("[%s] Link Down. ret=%ld\n", __func__, link_speed);
+		network->release(instance->index_network);
+		mutex_unlock(&adapter->lock);
+		return -ENETDOWN;
+	}
+
+	pr_debug("[%s] Link Speed=%ldMbps\n", __func__, link_speed);
+
+	instance->net_config.port_transmit_rate = mbit_to_bit(link_speed);
+	instance->crf_net_config.port_transmit_rate = mbit_to_bit(link_speed);
 
 	/* open paketizer */
 	ret = packetizer->open();

@@ -139,6 +139,8 @@ struct mse_network_config {
 	int uniqueid;
 	/** @brief AVTP timestamp offset */
 	unsigned long ts_offset;
+	/** @brief port transmit rate */
+	unsigned long port_transmit_rate;
 	/* if need, add more parameters */
 };
 
@@ -279,6 +281,8 @@ struct mse_adapter_network_ops {
 	int (*check_receive)(int index);
 	/** @brief cancel function pointer */
 	int (*cancel)(int index);
+	/** @brief get link speed function pointer */
+	int (*get_link_speed)(int index);
 };
 
 /**
