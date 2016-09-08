@@ -82,7 +82,6 @@
 #define AVTP_PAYLOAD_MIN_D13   (60 - AVTP_PAYLOAD_OFFSET)
 
 #define TRANSMIT_RATE_BASE     (1000000)
-#define PORT_TRANSMIT_RATE     (100000000) /* 100M [bit/sec] */
 
 #define MSE_PACKETIZER_MAX     (10)
 
@@ -351,7 +350,7 @@ static int mse_packetizer_video_cvf_h264_d13_calc_cbs(
 	h264 = &cvf_h264_packetizer_table[index];
 
 	bandwidth_fraction_denominator =
-		(u64)PORT_TRANSMIT_RATE / TRANSMIT_RATE_BASE;
+		(u64)h264->net_config.port_transmit_rate / TRANSMIT_RATE_BASE;
 	bandwidth_fraction_numerator = (u64)h264->cvf_config.bitrate *
 						(u64)ETHFRAMELEN_MAX_IPG;
 	do_div(bandwidth_fraction_numerator, TRANSMIT_RATE_BASE);
@@ -392,7 +391,7 @@ static int mse_packetizer_video_cvf_h264_calc_cbs(int index,
 	h264 = &cvf_h264_packetizer_table[index];
 
 	bandwidth_fraction_denominator =
-		(u64)PORT_TRANSMIT_RATE / TRANSMIT_RATE_BASE;
+		(u64)h264->net_config.port_transmit_rate / TRANSMIT_RATE_BASE;
 	bandwidth_fraction_numerator = (u64)h264->cvf_config.bitrate *
 						(u64)ETHFRAMELEN_MAX_IPG;
 	do_div(bandwidth_fraction_numerator, TRANSMIT_RATE_BASE);
