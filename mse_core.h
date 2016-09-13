@@ -187,8 +187,6 @@ struct mse_video_config {
 		/** @brief frame number */
 		int m;
 	} fps;
-	/** @brief buffer num  */
-	int buffers;
 	/** @brief height of the frame */
 	int height;
 	/** @brief width of the frame */
@@ -199,7 +197,6 @@ struct mse_video_config {
 	int interlaced;
 	/** @brief bytes per frame is data size in 1 ether frame */
 	int bytes_per_frame;
-	/* ... add more config */
 };
 
 /**

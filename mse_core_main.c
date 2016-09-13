@@ -2395,10 +2395,10 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 
 	pr_debug("[%s] index=%d data=%p\n", __func__, index, config);
 	pr_info("[%s]\n  format=%d bitrate=%d fps=%d/%d\n"
-		"  buffers=%d height=%d width=%d color_space=%d\n"
+		"  height=%d width=%d color_space=%d\n"
 		"  interlaced=%d bytes_per_frame=%d\n", __func__,
 		config->format, config->bitrate, config->fps.n, config->fps.m,
-		config->buffers, config->height, config->width,
+		config->height, config->width,
 		config->color_space, config->interlaced,
 		config->bytes_per_frame);
 
