@@ -137,6 +137,7 @@ struct v4l2_adapter_device {
 	int			index_mse;
 	/* index for MSE instance */
 	int			index_instance;
+	bool		f_mse_open;
 };
 
 /* Init information */
@@ -264,6 +265,9 @@ static int try_mse_open(struct v4l2_adapter_device *vadp_dev)
 	enum MSE_DIRECTION adp_direction;
 	int index;
 
+	if (vadp_dev->f_mse_open)
+		return MSE_ADAPTER_V4L2_RTN_OK;
+
 	/* probe is not finish yet */
 	if (vadp_dev->index_mse == MSE_INDEX_UNDEFINED) {
 		pr_info("[%s]probe is not finish yet\n", __func__);
@@ -280,6 +284,7 @@ static int try_mse_open(struct v4l2_adapter_device *vadp_dev)
 		return MSE_ADAPTER_V4L2_RTN_NG;
 
 	vadp_dev->index_instance = index;
+	vadp_dev->f_mse_open = true;
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
@@ -287,6 +292,9 @@ static int try_mse_open(struct v4l2_adapter_device *vadp_dev)
 static int try_mse_close(struct v4l2_adapter_device *vadp_dev)
 {
 	int err;
+
+	if (!vadp_dev->f_mse_open)
+		return MSE_ADAPTER_V4L2_RTN_OK;
 
 	/* probe is not finish yet */
 	if (vadp_dev->index_mse == MSE_INDEX_UNDEFINED) {
@@ -302,6 +310,8 @@ static int try_mse_close(struct v4l2_adapter_device *vadp_dev)
 	err = mse_close(vadp_dev->index_instance);
 	if (err < MSE_ADAPTER_V4L2_RTN_OK)
 		return MSE_ADAPTER_V4L2_RTN_NG;
+
+	vadp_dev->f_mse_open = false;
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
@@ -323,13 +333,6 @@ static int mse_adapter_v4l2_fop_open(struct file *filp)
 	err = v4l2_fh_open(filp);
 	if (err) {
 		pr_err("[%s]Failed v4l2_fh_open()\n", __func__);
-		mutex_unlock(&g_lock);
-		return MSE_ADAPTER_V4L2_RTN_NG;
-	}
-
-	err = try_mse_open(vadp_dev);
-	if (err) {
-		pr_err("[%s]Failed mse_open()\n", __func__);
 		mutex_unlock(&g_lock);
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
@@ -570,34 +573,6 @@ static int mse_adapter_v4l2_try_fmt_vid(
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
 
-static int set_config_format(int index_instance, struct v4l2_pix_format *pix)
-{
-	int err;
-	struct mse_video_config config;
-
-	err = mse_get_video_config(index_instance, &config);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
-		pr_err("[%s]Failed mse_get_video_config()\n", __func__);
-		return MSE_ADAPTER_V4L2_RTN_NG;
-	}
-
-	config.height = pix->height;
-	config.width = pix->width;
-	if (pix->field == V4L2_FIELD_INTERLACED)
-		config.interlaced = 1;
-	else
-		config.interlaced = 0;
-	config.bytes_per_frame = pix->sizeimage;
-
-	err = mse_set_video_config(index_instance, &config);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
-		pr_err("[%s]Failed mse_set_video_config()\n", __func__);
-		return MSE_ADAPTER_V4L2_RTN_NG;
-	}
-
-	return MSE_ADAPTER_V4L2_RTN_OK;
-}
-
 static int mse_adapter_v4l2_playback_enum_fmt_vid_out(struct file *filp,
 						      void *priv,
 						      struct v4l2_fmtdesc *fmt)
@@ -698,10 +673,6 @@ static int mse_adapter_v4l2_playback_s_fmt_vid_out(struct file *filp,
 	vadp_dev->format.bytesperline = pix->bytesperline;
 	vadp_dev->format.sizeimage = pix->sizeimage;
 	vadp_dev->format.field = pix->field;
-
-	err = set_config_format(vadp_dev->index_instance, pix);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK)
-		return MSE_ADAPTER_V4L2_RTN_NG;
 
 	pr_debug("[%s]END\n", __func__);
 
@@ -1184,10 +1155,6 @@ static int mse_adapter_v4l2_capture_s_fmt_vid_cap(struct file *filp,
 		pix->width,
 		pix->height);
 
-	err = set_config_format(vadp_dev->index_instance, pix);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK)
-		return MSE_ADAPTER_V4L2_RTN_NG;
-
 	pr_debug("[%s]END\n", __func__);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
@@ -1470,34 +1437,9 @@ static int mse_adapter_v4l2_playback_g_parm(struct file *filp,
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
 
-static int set_config_timerperframe(int index_instance,
-				    struct v4l2_fract *fract)
-{
-	int err;
-	struct mse_video_config config;
-
-	err = mse_get_video_config(index_instance, &config);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
-		pr_err("[%s]Failed mse_get_video_config()\n", __func__);
-		return MSE_ADAPTER_V4L2_RTN_NG;
-	}
-
-	config.fps.n = fract->numerator;
-	config.fps.m = fract->denominator;
-
-	err = mse_set_video_config(index_instance, &config);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
-		pr_err("[%s]Failed mse_set_video_config()\n", __func__);
-		return MSE_ADAPTER_V4L2_RTN_NG;
-	}
-
-	return MSE_ADAPTER_V4L2_RTN_OK;
-}
-
 static int mse_adapter_v4l2_s_parm(struct file *filp,
 				   struct v4l2_fract *fract)
 {
-	int err;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
 
 	pr_debug("[%s]START\n", __func__);
@@ -1509,10 +1451,6 @@ static int mse_adapter_v4l2_s_parm(struct file *filp,
 
 	vadp_dev->frameintervals.denominator = fract->denominator;
 	vadp_dev->frameintervals.numerator = fract->numerator;
-
-	err = set_config_timerperframe(vadp_dev->index_instance, fract);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK)
-		return MSE_ADAPTER_V4L2_RTN_NG;
 
 	pr_debug("[%s]END\n", __func__);
 
@@ -1727,6 +1665,60 @@ static int mse_adapter_v4l2_capture_enum_frameintervals(
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
 
+static int mse_adapter_v4l2_streamon(
+	struct file *filp,
+	void *priv,
+	enum v4l2_buf_type i)
+{
+	int err;
+	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	struct mse_video_config config;
+
+	pr_debug("[%s]START\n", __func__);
+
+	if (!vadp_dev) {
+		pr_err("[%s]Failed video_drvdata()\n", __func__);
+		return MSE_ADAPTER_V4L2_RTN_NG;
+	}
+
+	err = try_mse_open(vadp_dev);
+	if (err) {
+		pr_err("[%s]Failed mse_open()\n", __func__);
+		return MSE_ADAPTER_V4L2_RTN_NG;
+	}
+
+	err = mse_get_video_config(vadp_dev->index_instance, &config);
+	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
+		pr_err("[%s]Failed mse_get_video_config()\n", __func__);
+		return MSE_ADAPTER_V4L2_RTN_NG;
+	}
+
+	config.height = vadp_dev->format.height;
+	config.width = vadp_dev->format.width;
+	if (vadp_dev->format.field == V4L2_FIELD_INTERLACED)
+		config.interlaced = 1;
+	else
+		config.interlaced = 0;
+
+	if (vadp_dev->format.pixelformat > 0)
+		config.format = vadp_dev->format.pixelformat;
+
+	if (vadp_dev->frameintervals.numerator > 0 &&
+	    vadp_dev->frameintervals.denominator > 0) {
+		config.fps.n = vadp_dev->frameintervals.numerator;
+		config.fps.m = vadp_dev->frameintervals.denominator;
+	}
+
+	err = mse_set_video_config(vadp_dev->index_instance, &config);
+	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
+		pr_err("[%s]Failed mse_set_video_config()\n", __func__);
+		return MSE_ADAPTER_V4L2_RTN_NG;
+	}
+
+	pr_debug("[%s]END\n", __func__);
+	return vb2_ioctl_streamon(filp, priv, i);
+}
+
 static const struct vb2_ops g_mse_adapter_v4l2_capture_queue_ops = {
 	.queue_setup		= mse_adapter_v4l2_capture_queue_setup,
 	.wait_prepare		= vb2_ops_wait_prepare,
@@ -1763,7 +1755,7 @@ static const struct v4l2_ioctl_ops g_mse_adapter_v4l2_capture_ioctl_ops = {
 	.vidioc_expbuf			= vb2_ioctl_expbuf,
 	.vidioc_dqbuf			= vb2_ioctl_dqbuf,
 	.vidioc_create_bufs		= vb2_ioctl_create_bufs,
-	.vidioc_streamon		= vb2_ioctl_streamon,
+	.vidioc_streamon		= mse_adapter_v4l2_streamon,
 	.vidioc_streamoff		= vb2_ioctl_streamoff,
 	.vidioc_enum_input		= mse_adapter_v4l2_capture_enum_input,
 	.vidioc_g_input			= mse_adapter_v4l2_capture_g_input,
@@ -1791,7 +1783,7 @@ static const struct v4l2_ioctl_ops g_mse_adapter_v4l2_playback_ioctl_ops = {
 	.vidioc_expbuf			= vb2_ioctl_expbuf,
 	.vidioc_dqbuf			= vb2_ioctl_dqbuf,
 	.vidioc_create_bufs		= vb2_ioctl_create_bufs,
-	.vidioc_streamon		= vb2_ioctl_streamon,
+	.vidioc_streamon		= mse_adapter_v4l2_streamon,
 	.vidioc_streamoff		= vb2_ioctl_streamoff,
 	.vidioc_enum_output		=
 					mse_adapter_v4l2_playback_enum_output,
