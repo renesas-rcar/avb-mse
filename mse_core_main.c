@@ -2418,9 +2418,11 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 	pr_notice("[%s] timer_delay=%d\n", __func__, instance->timer_delay);
 
 	/* set AVTP header info */
-	instance->packetizer->set_network_config(0, &instance->net_config);
+	instance->packetizer->set_network_config(instance->index_packetizer,
+						 &instance->net_config);
 	/* init packet header */
-	instance->packetizer->set_video_config(0, config);
+	instance->packetizer->set_video_config(instance->index_packetizer,
+					       &instance->media_config.video);
 
 	if (instance->packet_buffer) {
 		mse_packet_ctrl_free(instance->packet_buffer);
@@ -2430,7 +2432,8 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 	if (instance->inout == MSE_DIRECTION_INPUT) {
 		struct eavb_cbsparam cbs;
 
-		instance->packetizer->calc_cbs(0, &cbs);
+		instance->packetizer->calc_cbs(instance->index_packetizer,
+					       &cbs);
 		instance->network->set_cbs_param(instance->index_network,
 						 &cbs);
 		pr_debug("[%s] bandwidth fraction = %08x\n",
