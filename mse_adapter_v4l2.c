@@ -215,22 +215,6 @@ static const struct v4l2_adapter_fmt g_mse_adapter_v4l2_common_fmt_sizes[] = {
 	},
 };
 
-static const struct v4l2_fract g_mse_adapter_v4l2_common_frame_intervals[] = {
-	{
-		.numerator = 1,
-		.denominator = 15,
-	},
-	{
-		.numerator = 1,
-		.denominator = 30,
-	},
-	{
-		.numerator = 1,
-		.denominator = 60,
-	},
-
-};
-
 /************/
 /* Function */
 /************/
@@ -1501,39 +1485,6 @@ static int mse_adapter_v4l2_playback_enum_framesizes(
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
 
-static int mse_adapter_v4l2_playback_enum_frameintervals(
-					struct file *filp,
-					void *priv,
-					struct v4l2_frmivalenum *fival)
-{
-	int index;
-	const struct v4l2_fract *fract;
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
-
-	pr_debug("[%s]START fival->index=%d\n", __func__, fival->index);
-
-	if (!vadp_dev) {
-		pr_err("[%s]Failed video_drvdata()\n", __func__);
-		return MSE_ADAPTER_V4L2_RTN_NG;
-	}
-
-	index = ARRAY_SIZE(g_mse_adapter_v4l2_common_frame_intervals);
-	if (fival->index >= index) {
-		pr_info("[%s]fival->index(%d) is equal or bigger than %d\n",
-			__func__, fival->index, index);
-		return -EINVAL;
-	}
-
-	fract = &g_mse_adapter_v4l2_common_frame_intervals[fival->index];
-	fival->type = V4L2_FRMIVAL_TYPE_DISCRETE;
-	fival->discrete.numerator = fract->numerator;
-	fival->discrete.denominator = fract->denominator;
-
-	pr_debug("[%s]END\n", __func__);
-
-	return MSE_ADAPTER_V4L2_RTN_OK;
-}
-
 static int mse_adapter_v4l2_capture_g_parm(struct file *filp,
 					   void *priv,
 					   struct v4l2_streamparm *sp)
@@ -1616,39 +1567,6 @@ static int mse_adapter_v4l2_capture_enum_framesizes(
 		 fsize->stepwise.min_height,
 		 fsize->stepwise.max_width,
 		 fsize->stepwise.max_height);
-
-	return MSE_ADAPTER_V4L2_RTN_OK;
-}
-
-static int mse_adapter_v4l2_capture_enum_frameintervals(
-					struct file *filp,
-					void *priv,
-					struct v4l2_frmivalenum *fival)
-{
-	int index;
-	const struct v4l2_fract *fract;
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
-
-	pr_debug("[%s]START fival->index=%d\n", __func__, fival->index);
-
-	if (!vadp_dev) {
-		pr_err("[%s]Failed video_drvdata()\n", __func__);
-		return MSE_ADAPTER_V4L2_RTN_NG;
-	}
-
-	index = ARRAY_SIZE(g_mse_adapter_v4l2_common_frame_intervals);
-	if (fival->index >= index) {
-		pr_info("[%s]fival->index(%d) is equal or bigger than %d\n",
-			__func__, fival->index, index);
-		return -EINVAL;
-	}
-
-	fract = &g_mse_adapter_v4l2_common_frame_intervals[fival->index];
-	fival->type = V4L2_FRMIVAL_TYPE_DISCRETE;
-	fival->discrete.numerator = fract->numerator;
-	fival->discrete.denominator = fract->denominator;
-
-	pr_debug("[%s]END\n", __func__);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
@@ -1752,8 +1670,6 @@ static const struct v4l2_ioctl_ops g_mse_adapter_v4l2_capture_ioctl_ops = {
 	.vidioc_s_parm			= mse_adapter_v4l2_capture_s_parm,
 	.vidioc_enum_framesizes		=
 			mse_adapter_v4l2_capture_enum_framesizes,
-	.vidioc_enum_frameintervals	=
-			mse_adapter_v4l2_capture_enum_frameintervals,
 };
 
 static const struct v4l2_ioctl_ops g_mse_adapter_v4l2_playback_ioctl_ops = {
@@ -1781,8 +1697,6 @@ static const struct v4l2_ioctl_ops g_mse_adapter_v4l2_playback_ioctl_ops = {
 	.vidioc_s_parm			= mse_adapter_v4l2_playback_s_parm,
 	.vidioc_enum_framesizes		=
 			mse_adapter_v4l2_playback_enum_framesizes,
-	.vidioc_enum_frameintervals	=
-			mse_adapter_v4l2_playback_enum_frameintervals,
 };
 
 static struct v4l2_file_operations g_mse_adapter_v4l2_fops = {
