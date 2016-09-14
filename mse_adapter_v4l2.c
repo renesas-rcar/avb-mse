@@ -152,8 +152,12 @@ struct v4l2_adapter_init_info {
 /* Format information */
 struct v4l2_adapter_fmt {
 	u32			fourcc;
-	unsigned int		width;
-	unsigned int		height;
+	unsigned int		min_width;
+	unsigned int		max_width;
+	unsigned int		step_width;
+	unsigned int		min_height;
+	unsigned int		max_height;
+	unsigned int		step_height;
 };
 
 static const struct v4l2_fmtdesc g_formats[] = {
@@ -173,65 +177,41 @@ static const struct v4l2_fmtdesc g_formats[] = {
 
 /* Playback, capture Common format sizes */
 static const struct v4l2_adapter_fmt g_mse_adapter_v4l2_common_fmt_sizes[] = {
+	/* limited H.264 picture size to range of
+	 * R-Car Hardware video decoder (VCP4).
+	 */
 	{
-		.fourcc	= V4L2_PIX_FMT_H264,
-		.width	= 1920,
-		.height	= 1080,
+		.fourcc		= V4L2_PIX_FMT_H264,
+		.min_width	= 80,
+		.max_width	= 3840,
+		.step_width	= 2,
+		.min_height	= 80,
+		.max_height	= 2160,
+		.step_height	= 2,
 	},
+	/* limited MPEG2-TS picture size to range of
+	 * R-Car Hardware video decoder (VCP4).
+	 */
 	{
-		.fourcc	= V4L2_PIX_FMT_H264,
-		.width	= 1280,
-		.height	= 960,
+		.fourcc		= V4L2_PIX_FMT_MPEG,
+		.min_width	= 80,
+		.max_width	= 3840,
+		.step_width	= 2,
+		.min_height	= 80,
+		.max_height	= 2160,
+		.step_height	= 2,
 	},
+	/* limited MJPEG picture size to range of
+	 * AVTP format(same as RTP), see RFC 2435 3.1.5,3.1.6
+	 */
 	{
-		.fourcc	= V4L2_PIX_FMT_H264,
-		.width	= 1280,
-		.height	= 720,
-	},
-	{
-		.fourcc	= V4L2_PIX_FMT_H264,
-		.width	= 640,
-		.height	= 480,
-	},
-	{
-		.fourcc	= V4L2_PIX_FMT_MPEG,
-		.width	= 1920,
-		.height	= 1080,
-	},
-	{
-		.fourcc	= V4L2_PIX_FMT_MPEG,
-		.width	= 1280,
-		.height	= 960,
-	},
-	{
-		.fourcc	= V4L2_PIX_FMT_MPEG,
-		.width	= 1280,
-		.height	= 720,
-	},
-	{
-		.fourcc	= V4L2_PIX_FMT_MPEG,
-		.width	= 640,
-		.height	= 480,
-	},
-	{
-		.fourcc	= V4L2_PIX_FMT_MJPEG,
-		.width	= 1920,
-		.height	= 1080,
-	},
-	{
-		.fourcc	= V4L2_PIX_FMT_MJPEG,
-		.width	= 1280,
-		.height	= 960,
-	},
-	{
-		.fourcc	= V4L2_PIX_FMT_MJPEG,
-		.width	= 1280,
-		.height	= 720,
-	},
-	{
-		.fourcc	= V4L2_PIX_FMT_MJPEG,
-		.width	= 640,
-		.height	= 480,
+		.fourcc		= V4L2_PIX_FMT_MJPEG,
+		.min_width	= 8,
+		.max_width	= 2040,
+		.step_width	= 8,
+		.min_height	= 8,
+		.max_height	= 2040,
+		.step_height	= 8,
 	},
 };
 
@@ -505,27 +485,32 @@ static const struct v4l2_fmtdesc *get_fmtdesc(
 	return NULL;
 }
 
-static const struct v4l2_adapter_fmt *get_fmt_sizes(
-				const struct v4l2_adapter_fmt *dflt_fmts,
-				int arr_size,
-				struct v4l2_format *fmt)
+static void get_fmt_sizes(const struct v4l2_adapter_fmt *dflt_fmts,
+			  int arr_size,
+			  struct v4l2_format *fmt)
 {
 	int i;
-	int last_one;
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
 
 	for (i = 0; i < arr_size; i++) {
 		if (pix->pixelformat != dflt_fmts[i].fourcc)
 			continue;
 
-		if (pix->width >= dflt_fmts[i].width &&
-		    pix->height >= dflt_fmts[i].height) {
-			return &dflt_fmts[i];
-		}
-	}
+		if (pix->width > dflt_fmts[i].max_width)
+			pix->width = dflt_fmts[i].max_width;
+		else if (pix->width < dflt_fmts[i].min_width)
+			pix->width = dflt_fmts[i].min_width;
+		else
+			pix->width -= (pix->width % dflt_fmts[i].step_width);
 
-	last_one = arr_size - 1;
-	return &dflt_fmts[last_one];
+		if (pix->height > dflt_fmts[i].max_height)
+			pix->height = dflt_fmts[i].max_height;
+		else if (pix->height < dflt_fmts[i].min_height)
+			pix->height = dflt_fmts[i].min_height;
+		else
+			pix->height -= (pix->height % dflt_fmts[i].step_height);
+		break;
+	}
 }
 
 static int mse_adapter_v4l2_try_fmt_vid(
@@ -534,7 +519,6 @@ static int mse_adapter_v4l2_try_fmt_vid(
 				struct v4l2_format *fmt)
 {
 	const struct v4l2_fmtdesc *fmtdesc;
-	const struct v4l2_adapter_fmt *vadp_fmt;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
 
@@ -559,12 +543,10 @@ static int mse_adapter_v4l2_try_fmt_vid(
 	    pix->field != V4L2_FIELD_INTERLACED)
 		pix->field = V4L2_FIELD_NONE;
 
-	vadp_fmt = get_fmt_sizes(
-			g_mse_adapter_v4l2_common_fmt_sizes,
-			ARRAY_SIZE(g_mse_adapter_v4l2_common_fmt_sizes),
-			fmt);
-	pix->width = vadp_fmt->width;
-	pix->height = vadp_fmt->height;
+	get_fmt_sizes(g_mse_adapter_v4l2_common_fmt_sizes,
+		      ARRAY_SIZE(g_mse_adapter_v4l2_common_fmt_sizes),
+		      fmt);
+
 	pix->bytesperline = pix->width * 2;
 	pix->sizeimage = pix->bytesperline * pix->height;
 
@@ -1471,7 +1453,6 @@ static int mse_adapter_v4l2_playback_enum_framesizes(
 					void *priv,
 					struct v4l2_frmsizeenum *fsize)
 {
-	int total_frame_sizes = 0;
 	const struct v4l2_adapter_fmt *vadp_fmt = NULL;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
 	int i;
@@ -1483,35 +1464,39 @@ static int mse_adapter_v4l2_playback_enum_framesizes(
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
-	/* get total frame sizes */
+	/* get frame sizes */
 	for (i = 0; i < ARRAY_SIZE(g_mse_adapter_v4l2_common_fmt_sizes); i++) {
 		if (g_mse_adapter_v4l2_common_fmt_sizes[i].fourcc ==
 						fsize->pixel_format) {
 			vadp_fmt = &g_mse_adapter_v4l2_common_fmt_sizes[i];
-			vadp_fmt++;
-			total_frame_sizes++;
+			break;
 		}
 	}
 
-	if (fsize->index >= total_frame_sizes) {
-		pr_info("[%s]fsize->index(%d) is equal or bigger than %d\n",
-			__func__, fsize->index, total_frame_sizes);
+	if (fsize->index > 0 || !vadp_fmt) {
+		pr_info("[%s]fsize->index(%d)\n", __func__, fsize->index);
 		return -EINVAL;
 	}
 
-	vadp_fmt = vadp_fmt - (total_frame_sizes - fsize->index);
-	fsize->type = V4L2_FRMSIZE_TYPE_DISCRETE;
-	fsize->discrete.width = vadp_fmt->width;
-	fsize->discrete.height = vadp_fmt->height;
+	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+	fsize->stepwise.min_width = vadp_fmt->min_width;
+	fsize->stepwise.max_width = vadp_fmt->max_width;
+	fsize->stepwise.step_width = vadp_fmt->step_width;
+	fsize->stepwise.min_height = vadp_fmt->min_height;
+	fsize->stepwise.max_height = vadp_fmt->max_height;
+	fsize->stepwise.step_height = vadp_fmt->step_height;
 
-	pr_debug("[%s]END format=%c%c%c%c, width=%d, height=%d\n",
+	pr_debug("[%s]END\n  format=%c%c%c%c, min_width=%d, min_height=%d\n"
+		 "  max_width=%d, max_height=%d\n",
 		 __func__,
 		 vadp_fmt->fourcc >> 0,
 		 vadp_fmt->fourcc >> 8,
 		 vadp_fmt->fourcc >> 16,
 		 vadp_fmt->fourcc >> 24,
-		 vadp_fmt->width,
-		 vadp_fmt->height);
+		 fsize->stepwise.min_width,
+		 fsize->stepwise.min_height,
+		 fsize->stepwise.max_width,
+		 fsize->stepwise.max_height);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
@@ -1587,7 +1572,6 @@ static int mse_adapter_v4l2_capture_enum_framesizes(
 					void *priv,
 					struct v4l2_frmsizeenum *fsize)
 {
-	int total_frame_sizes = 0;
 	const struct v4l2_adapter_fmt *vadp_fmt = NULL;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
 	int i;
@@ -1599,35 +1583,39 @@ static int mse_adapter_v4l2_capture_enum_framesizes(
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
-	/* get total frame sizes */
+	/* get frame sizes */
 	for (i = 0; i < ARRAY_SIZE(g_mse_adapter_v4l2_common_fmt_sizes); i++) {
 		if (g_mse_adapter_v4l2_common_fmt_sizes[i].fourcc ==
 						fsize->pixel_format) {
 			vadp_fmt = &g_mse_adapter_v4l2_common_fmt_sizes[i];
-			vadp_fmt++;
-			total_frame_sizes++;
+			break;
 		}
 	}
 
-	if (fsize->index >= total_frame_sizes) {
-		pr_info("[%s]fsize->index(%d) is equal or bigger than %d\n",
-			__func__, fsize->index, total_frame_sizes);
+	if (fsize->index > 0 || !vadp_fmt) {
+		pr_info("[%s]fsize->index(%d)\n", __func__, fsize->index);
 		return -EINVAL;
 	}
 
-	vadp_fmt = vadp_fmt - (total_frame_sizes - fsize->index);
-	fsize->type = V4L2_FRMSIZE_TYPE_DISCRETE;
-	fsize->discrete.width = vadp_fmt->width;
-	fsize->discrete.height = vadp_fmt->height;
+	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+	fsize->stepwise.min_width = vadp_fmt->min_width;
+	fsize->stepwise.max_width = vadp_fmt->max_width;
+	fsize->stepwise.step_width = vadp_fmt->step_width;
+	fsize->stepwise.min_height = vadp_fmt->min_height;
+	fsize->stepwise.max_height = vadp_fmt->max_height;
+	fsize->stepwise.step_height = vadp_fmt->step_height;
 
-	pr_debug("[%s]format=%c%c%c%c, width=%d, height=%d\n",
+	pr_debug("[%s]END\n  format=%c%c%c%c, min_width=%d, min_height=%d\n"
+		 "  max_width=%d, max_height=%d\n",
 		 __func__,
 		 vadp_fmt->fourcc >> 0,
 		 vadp_fmt->fourcc >> 8,
 		 vadp_fmt->fourcc >> 16,
 		 vadp_fmt->fourcc >> 24,
-		 vadp_fmt->width,
-		 vadp_fmt->height);
+		 fsize->stepwise.min_width,
+		 fsize->stepwise.min_height,
+		 fsize->stepwise.max_width,
+		 fsize->stepwise.max_height);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
