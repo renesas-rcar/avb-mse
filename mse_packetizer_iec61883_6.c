@@ -232,7 +232,7 @@ static int mse_packetizer_audio_iec_header_build(void *dst,
 
 	avtp_copy_iec61883_6_template(dst);
 	avtp_set_stream_id(dst, streamid);
-	avtp_set_stream_data_length(dst, len);
+	avtp_set_stream_data_length(dst, len + AVTP_CIP_HEADER_SIZE);
 	avtp_set_iec61883_dbs(dst, param->channels);
 	avtp_set_iec61883_fdf(dst,
 			      avtp_sample_rate_to_fdf(param->sample_rate));
@@ -437,7 +437,6 @@ static int mse_packetizer_audio_iec_packetize(int index,
 	/* variable header */
 	avtp_set_sequence_num(packet, iec->send_seq_num++);
 	avtp_set_timestamp(packet, (u32)*timestamp);
-	avtp_set_stream_data_length(packet, payload_len);
 	avtp_set_iec61883_dbc(packet, iec->local_total_samples);
 	iec->local_total_samples += iec->sample_per_packet;
 
@@ -458,7 +457,8 @@ static void mse_packetizer_audio_iec_data_convert(u16 *dst, void *packet)
 	int channels;
 	int i;
 
-	payload_size = avtp_get_stream_data_length(packet);
+	payload_size = avtp_get_stream_data_length(packet)
+		- AVTP_CIP_HEADER_SIZE;
 	channels = avtp_get_iec61883_dbs(packet);
 	samples_per_frame = payload_size / (AM824_DATA_SIZE * channels);
 	payload = packet + AVTP_IEC61883_6_PAYLOAD_OFFSET;
@@ -489,6 +489,7 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 	struct iec_packetizer *iec;
 	int seq_num;
 	int payload_size, piece_size = 0;
+	int channels;
 	int data_size;
 	char *buf, tmp_buffer[ETHFRAMEMTU_MAX] = {0};
 	unsigned long value;
@@ -512,7 +513,10 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 		iec->piece_data_len = 0;
 	}
 
-	payload_size = avtp_get_stream_data_length(packet);
+	payload_size = avtp_get_stream_data_length(packet)
+		- AVTP_CIP_HEADER_SIZE;
+	channels = avtp_get_iec61883_dbs(packet);
+
 	data_size = payload_size / AM824_DATA_SIZE *
 					iec->data_bytes_per_ch;
 	/* buffer over check */
@@ -561,9 +565,7 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 
 	*timestamp = avtp_get_timestamp(packet);
 
-	iec->sample_per_packet =
-		avtp_get_stream_data_length(packet) /
-		(AM824_DATA_SIZE * avtp_get_iec61883_dbs(packet));
+	iec->sample_per_packet = payload_size / (AM824_DATA_SIZE * channels);
 	value = NSEC * iec->sample_per_packet;
 	do_div(value,
 	       avtp_fdf_to_sample_rate(avtp_get_iec61883_fdf(packet)));
