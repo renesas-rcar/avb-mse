@@ -111,7 +111,7 @@ struct iec_packetizer {
 	int sample_per_packet;
 	int frame_interval_time;
 	int data_bytes_per_ch;
-	unsigned int local_total_samples;
+	u8 local_total_samples;
 	int piece_data_len;
 
 	unsigned char packet_template[ETHFRAMELEN_MAX];
@@ -438,7 +438,8 @@ static int mse_packetizer_audio_iec_packetize(int index,
 	avtp_set_sequence_num(packet, iec->send_seq_num++);
 	avtp_set_timestamp(packet, (u32)*timestamp);
 	avtp_set_stream_data_length(packet, payload_len);
-	avtp_set_iec61883_dbc(packet, 1 + iec->local_total_samples);
+	avtp_set_iec61883_dbc(packet, iec->local_total_samples);
+	iec->local_total_samples += iec->sample_per_packet;
 
 	/* buffer over check */
 	if (*buffer_processed >= buffer_size)
