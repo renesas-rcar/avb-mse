@@ -595,6 +595,8 @@ static int mse_adapter_alsa_free(struct alsa_device *chip)
 		pr_err("[%s] Failed unregister adapter err=%d\n",
 		       __func__, err);
 
+	device_del(&chip->dev);
+
 	kfree(chip);
 
 	return 0;
