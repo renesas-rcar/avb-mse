@@ -28,6 +28,7 @@ config MSE_CORE
 config MSE_ADAPTER_EAVB
 	tristate "MSE EAVB Adapter"
 	depends on MSE_CORE
+	depends on RAVB_STREAMING
 	default m
 	---help---
 	  Renesas Ethernet AVB software
