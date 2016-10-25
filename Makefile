@@ -9,6 +9,10 @@ CONFIG_MSE_ADAPTER_ALSA ?= m
 CONFIG_MSE_ADAPTER_V4L2 ?= m
 endif
 
+INCSHARED ?= drivers/staging/avb-streaming
+
+ccflags-y += -I$(INCSHARED)
+
 mse_core-objs := mse_core_main.o \
                  mse_packet_ctrl.o \
                  mse_sysfs.o \
