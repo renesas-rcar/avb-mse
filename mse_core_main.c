@@ -200,6 +200,10 @@ struct mse_instance {
 	struct work_struct wk_crf_send;
 	/** @brief crf receive queue */
 	struct work_struct wk_crf_receive;
+	/** @brief start streaming queue */
+	struct work_struct wk_start_stream;
+	/** @brief start transmission queue */
+	struct work_struct wk_start_trans;
 
 	/** @brief stream workqueue */
 	struct workqueue_struct *wq_stream;
@@ -209,6 +213,10 @@ struct mse_instance {
 	struct workqueue_struct *wq_tstamp;
 	/** @brief crf packet workqueue */
 	struct workqueue_struct *wq_crf_packet;
+
+	void *start_buffer;
+	size_t start_buffer_size;
+	int (*start_mse_completion)(int index, int size);
 
 	/** @brief timestamp processed flag */
 	bool is_tstamp_processed;
@@ -276,6 +284,7 @@ struct mse_instance {
 	bool f_depacketizing;
 	bool f_completion;
 	bool f_trans_start;
+	bool f_work_timestamp;
 
 	/** @brief network configuration */
 	struct mse_network_config net_config;
@@ -926,8 +935,10 @@ static void mse_work_stream(struct work_struct *work)
 	pr_debug("[%s]\n", __func__);
 
 	instance = container_of(work, struct mse_instance, wk_stream);
-	if (instance->f_stopping)
+	if (instance->f_stopping) {
+		instance->f_streaming = false;
 		return;
+	}
 
 	if (instance->inout == MSE_DIRECTION_INPUT) {
 		/* request send packet */
@@ -1307,8 +1318,10 @@ static void mse_work_timestamp(struct work_struct *work)
 	pr_debug("[%s]\n", __func__);
 
 	instance = container_of(work, struct mse_instance, wk_timestamp);
-	if (instance->f_stopping)
+	if (instance->f_stopping) {
+		instance->f_work_timestamp = false;
 		return;
+	}
 
 	/* capture timestamps */
 	if (instance->ptp_clock == 1) {
@@ -1320,6 +1333,7 @@ static void mse_work_timestamp(struct work_struct *work)
 		if (ret) {
 			pr_warn("[%s] could not get timestamps ret=%d\n",
 				__func__, ret);
+			instance->f_work_timestamp = false;
 			return;
 		}
 
@@ -1338,6 +1352,7 @@ static void mse_work_timestamp(struct work_struct *work)
 	}
 
 	instance->is_tstamp_processed = true;
+	instance->f_work_timestamp = false;
 }
 
 static int get_timestamps(struct timestamp_queue *que,
@@ -1600,6 +1615,7 @@ static void mse_work_depacketize(struct work_struct *work)
 	instance = container_of(work, struct mse_instance, wk_depacketize);
 	if (instance->f_stopping) {
 		pr_err("[%s]  depaketize stopping\n", __func__);
+		instance->f_depacketizing = false;
 		return;
 	}
 
@@ -1725,22 +1741,63 @@ static void mse_work_callback(struct work_struct *work)
 static void mse_work_stop(struct work_struct *work)
 {
 	struct mse_instance *instance;
+	struct mse_adapter *adapter;
+	struct mch_ops *m_ops;
 	int ret;
+	bool is_audio;
 
 	pr_debug("[%s]\n", __func__);
 
 	instance = container_of(work, struct mse_instance, wk_stop);
 
+	instance->state = MSE_STATE_OPEN;
+	adapter = instance->media;
+
 	ret = instance->network->cancel(instance->index_network);
 	if (ret)
 		pr_err("[%s] failed cancel() ret=%d\n", __func__, ret);
 
-	/* dequeue for packetize */
-	if (instance->inout == MSE_DIRECTION_OUTPUT)
-		flush_work(&instance->wk_depacketize);
+	if (instance->media_clock_recovery == 1 &&
+	    instance->media_clock_type == 1) {
+		ret = instance->network->cancel(instance->crf_index_network);
+		if (ret)
+			pr_err("[%s] failed cancel() ret=%d\n", __func__, ret);
+		flush_work(&instance->wk_crf_receive);
+	}
 
-	/* dequeue */
-	flush_work(&instance->wk_stream);
+	/* timer stop */
+	ret = hrtimer_try_to_cancel(&instance->timer);
+	if (ret)
+		pr_err("[%s] The timer was still in use...\n", __func__);
+
+	/* timestamp timer, crf timer stop */
+	is_audio = is_audio_adapter(adapter);
+	if (is_audio) {
+		ret = hrtimer_try_to_cancel(&instance->tstamp_timer);
+		if (ret)
+			pr_err("[%s] The tstamp_timer was still in use...\n",
+			       __func__);
+
+		ret = hrtimer_try_to_cancel(&instance->crf_timer);
+		if (ret)
+			pr_err("[%s] The crf_timer was still in use...\n",
+			       __func__);
+
+		if (instance->mch_index >= 0) {
+			m_ops = mse->mch_table[instance->mch_index];
+			ret = m_ops->close(instance->mch_dev_id);
+			if (ret < 0) {
+				pr_err("[%s]mch close error(%d).\n",
+				       __func__, ret);
+			}
+		}
+	}
+
+	if (instance->f_work_timestamp)
+		flush_work(&instance->wk_timestamp);
+
+	if (instance->f_streaming)
+		flush_work(&instance->wk_stream);
 }
 
 static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
@@ -1953,7 +2010,7 @@ static enum hrtimer_restart mse_timestamp_collect_callback(struct hrtimer *arg)
 		return HRTIMER_RESTART;
 
 	/* FIX need mutex unlock? */
-
+	instance->f_work_timestamp = true;
 	queue_work(instance->wq_tstamp, &instance->wk_timestamp);
 	instance->is_tstamp_processed = false;
 
@@ -1974,6 +2031,197 @@ static bool is_audio_adapter(struct mse_adapter *adapter)
 	}
 
 	return is_audio;
+}
+
+static void mse_work_start_streaming(struct work_struct *work)
+{
+	struct mse_instance *instance;
+	ktime_t ktime;
+	ktime_t ktime_ts;
+	ktime_t ktime_crf;
+	struct timespec time;
+	struct mse_adapter *adapter;
+	int ret = 0;
+	int remainder = 0;
+
+	instance = container_of(work, struct mse_instance, wk_start_stream);
+
+	adapter = instance->media;
+
+	/* Check bytes per frame */
+	if (instance->media_config.audio.bytes_per_frame) {
+		remainder = instance->media_config.audio.bytes_per_frame %
+				(instance->media_config.audio.channels *
+					sizeof(unsigned short));
+		if (remainder) {
+			pr_err("[%s] bytes per frame error\n", __func__);
+			return;
+		}
+	}
+
+	/* get timestamp(nsec) */
+	getnstimeofday(&time);
+	instance->timestamp = time.tv_nsec;
+	instance->timer_cnt = 0;
+
+	/* prepare std clock time */
+	if (instance->ptp_clock) {
+		instance->add_std_time =
+			NSEC_SCALE / instance->ptp_capture_freq;
+		instance->add_crf_std_time =
+			NSEC_SCALE / instance->ptp_capture_freq;
+	} else {
+		instance->add_std_time = instance->timer_delay;
+		instance->add_crf_std_time = instance->timer_delay;
+	}
+
+	instance->std_time_counter = 0;
+	instance->std_time_avtp = 0;
+	instance->std_time_crf = 0;
+
+	instance->f_present = false;
+	instance->remain = 0;
+
+	/* start streaming */
+	instance->network->start(instance->index_network);
+
+	/* start timer */
+	ktime = ktime_set(0, instance->timer_delay);
+	hrtimer_start(&instance->timer, ktime, HRTIMER_MODE_REL);
+
+	if (is_audio_adapter(adapter)) {
+		/* capture timestamps */
+		if (instance->ptp_clock == 1) {
+			int count, i;
+			/* get timestamps */
+			ret = mse_ptp_get_timestamps(instance->ptp_dev_id,
+						     instance->ptp_clock_ch,
+						     &count,
+						     instance->timestamps);
+			if (ret) {
+				pr_debug("[%s] could not get timestamps ret=%d\n",
+					 __func__, ret);
+				count = 0;
+			}
+
+			/* store timestamps */
+			for (i = 0; i < count; i++) {
+				tstamps_enq_tstamps(&instance->tstamp_que,
+						    instance->std_time_counter,
+						    &instance->timestamps[i]);
+				instance->std_time_counter +=
+					instance->add_std_time;
+			}
+		}
+
+		/* ptp_clock is capture or media_clock_recovery is enable */
+		if (instance->ptp_clock == 1 ||
+		    instance->media_clock_recovery == 1) {
+			ktime_ts = ktime_set(0, instance->tstamp_timer_delay);
+			hrtimer_start(&instance->tstamp_timer,
+				      ktime_ts, HRTIMER_MODE_REL);
+		}
+
+		/* send clock using CRF */
+		if (instance->send_clock) {
+			ktime_crf = ktime_set(0, instance->crf_timer_delay);
+			hrtimer_start(&instance->crf_timer,
+				      ktime_crf,
+				      HRTIMER_MODE_REL);
+		}
+
+		/* receive clcok using CRF */
+		if (instance->media_clock_recovery == 1 &&
+		    instance->media_clock_type == 1) {
+			queue_work(instance->wq_crf_packet,
+				   &instance->wk_crf_receive);
+		}
+	}
+
+	instance->f_streaming = false;
+	instance->f_stopping = false;
+	instance->work_length = 0;
+	instance->f_trans_start = false;
+	instance->f_completion = false;
+
+	instance->temp_w = 0;
+	instance->temp_r = 0;
+}
+
+static bool check_mjpeg(struct mse_instance *instance); /* tobe move */
+static void mse_work_start_transmission(struct work_struct *work)
+{
+	struct mse_instance *instance;
+	struct mse_adapter *adapter;
+	void *buffer;
+	size_t buffer_size;
+	int (*mse_completion)(int index, int size);
+
+	instance = container_of(work, struct mse_instance, wk_start_trans);
+
+	adapter = instance->media;
+
+	buffer = instance->start_buffer;
+	buffer_size = instance->start_buffer_size;
+	mse_completion = instance->start_mse_completion;
+
+	/* TODO: to be move v4l2 adapter */
+	if (instance->use_temp_video_buffer_mjpeg) {
+		if (instance->f_temp_video_buffer_rewind) {
+			memcpy(instance->temp_video_buffer,
+			       instance->temp_video_buffer +
+			       instance->eoi_pos + 2,
+			       instance->temp_vw - instance->eoi_pos - 2);
+			instance->temp_vw -= instance->eoi_pos + 2;
+			instance->eoi_pos = 0;
+			instance->f_temp_video_buffer_rewind = false;
+		}
+		if (!instance->f_first_vframe) {
+			memcpy(instance->temp_video_buffer + instance->temp_vw,
+			       instance->start_buffer,
+			       instance->start_buffer_size);
+			instance->temp_vw += buffer_size;
+		}
+		instance->f_first_vframe = false;
+		if (check_mjpeg(instance)) {
+			instance->state = MSE_STATE_EXECUTE;
+			instance->media_buffer = instance->temp_video_buffer;
+			instance->media_buffer_size = instance->eoi_pos + 2;
+			instance->f_trans_start = true;
+		} else {
+			/* not EOI */
+			(*mse_completion)(instance->index_media, 0);
+
+			return;
+		}
+	} else {
+		instance->state = MSE_STATE_EXECUTE;
+		instance->media_buffer = (unsigned char *)buffer;
+		instance->media_buffer_size = buffer_size;
+		instance->f_trans_start = true;
+	}
+	instance->mse_completion = mse_completion;
+
+	if (instance->inout == MSE_DIRECTION_INPUT) {
+		instance->work_length = 0;
+		/* start workqueue for packetize */
+		instance->f_continue = false;
+
+		if (is_audio_adapter(adapter))
+			create_avtp_timestamps(instance);
+
+		queue_work(instance->wq_packet, &instance->wk_packetize);
+	} else {
+		memset(buffer, 0, buffer_size);
+
+		/* start workqueue for streaming */
+		if (!instance->f_streaming) {
+			instance->f_streaming = true;
+			queue_work(instance->wq_stream, &instance->wk_stream);
+		}
+	}
+
+	instance->timer_cnt++;
 }
 
 /* External function */
@@ -2232,7 +2480,6 @@ EXPORT_SYMBOL(mse_get_audio_config);
 
 int mse_set_audio_config(int index, struct mse_audio_config *config)
 {
-	struct mse_packetizer_ops *crf = &mse_packetizer_crf_tstamp_audio_ops;
 	struct mse_instance *instance;
 	u64 timer;
 	struct mse_adapter *adapter;
@@ -2280,38 +2527,6 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 		instance->crf_timer_delay = CRF_DELAY;
 		pr_notice("[%s] crf_timer_delay=%d\n",
 			  __func__, instance->crf_timer_delay);
-
-		/* send clock using CRF */
-		if (instance->send_clock) {
-			int ret;
-			struct eavb_cbsparam cbs;
-
-			ret = instance->network->open(
-				instance->network_device_name_tx);
-			if (ret < 0)
-				return -EINVAL;
-
-			instance->crf_index_network = ret;
-
-			crf->calc_cbs(instance->crf_index, &cbs);
-			instance->network->set_cbs_param(
-				instance->crf_index_network,
-				&cbs);
-
-			/* get packet memory */
-			instance->crf_packet_buffer = mse_packet_ctrl_alloc(
-				&mse->pdev->dev,
-				MSE_DMA_MAX_PACKET,
-				MSE_DMA_MAX_PACKET_SIZE);
-			if (!instance->crf_packet_buffer)
-				return -EINVAL;
-
-			/* prepare for send */
-			mse_packet_ctrl_send_prepare_packet(
-				instance->crf_index_network,
-				instance->crf_packet_buffer,
-				instance->network);
-		}
 	}
 
 	/* set AVTP header info */
@@ -2342,12 +2557,6 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	if (instance->send_clock || (instance->media_clock_recovery == 1 &&
 				     instance->media_clock_type == 1))
 		mse_initialize_crf_packetizer(instance);
-
-	/* get packet memory */
-	instance->packet_buffer = mse_packet_ctrl_alloc(
-						&mse->pdev->dev,
-						MSE_DMA_MAX_PACKET * 2,
-						MSE_DMA_MAX_PACKET_SIZE);
 
 	return 0;
 }
@@ -2424,11 +2633,6 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 	instance->packetizer->set_video_config(instance->index_packetizer,
 					       &instance->media_config.video);
 
-	if (instance->packet_buffer) {
-		mse_packet_ctrl_free(instance->packet_buffer);
-		instance->packet_buffer = NULL;
-	}
-
 	if (instance->inout == MSE_DIRECTION_INPUT) {
 		struct eavb_cbsparam cbs;
 
@@ -2438,11 +2642,6 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 						 &cbs);
 		pr_debug("[%s] bandwidth fraction = %08x\n",
 			 __func__, cbs.bandwidthFraction);
-		/* get packet memory */
-		instance->packet_buffer = mse_packet_ctrl_alloc(
-			&mse->pdev->dev,
-			MSE_DMA_MAX_PACKET * 2,
-			MSE_DMA_MAX_PACKET_SIZE);
 	} else {
 		u8 streamid[AVTP_STREAMID_SIZE];
 
@@ -2451,11 +2650,6 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 				  instance->net_config.uniqueid);
 		instance->network->set_streamid(instance->index_network,
 						streamid);
-		/* get packet memory */
-		instance->packet_buffer = mse_packet_ctrl_alloc(
-			&mse->pdev->dev,
-			MSE_DMA_MAX_PACKET * 2,
-			MSE_DMA_MAX_PACKET_SIZE);
 	}
 
 	return 0;
@@ -2472,6 +2666,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	char name[MSE_NAME_LEN_MAX];
 	char eavbname[MSE_NAME_LEN_MAX];
 	long link_speed;
+	struct mch_ops *m_ops;
 
 	if ((index_media < 0) || (index_media >= MSE_ADAPTER_MEDIA_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n",
@@ -2607,6 +2802,10 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	}
 	instance->index_network = ret;
 
+	ret = network->set_option(instance->index_network);
+	if (ret)
+		pr_err("[%s] failed set_option() ret=%d\n", __func__, ret);
+
 	/* get speed link */
 	link_speed = network->get_link_speed(instance->index_network);
 	if (link_speed <= 0) {
@@ -2649,6 +2848,8 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	INIT_WORK(&instance->wk_crf_send, mse_work_crf_send);
 	INIT_WORK(&instance->wk_crf_receive, mse_work_crf_receive);
 	INIT_WORK(&instance->wk_timestamp, mse_work_timestamp);
+	INIT_WORK(&instance->wk_start_stream, mse_work_start_streaming);
+	INIT_WORK(&instance->wk_start_trans, mse_work_start_transmission);
 
 	instance->wq_stream = create_singlethread_workqueue("mse_streamq");
 	instance->wq_packet = create_singlethread_workqueue("mse_packetq");
@@ -2683,39 +2884,85 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	if (ret < 0)
 		pr_err("[%s] cannot get configurations\n", __func__);
 
+	instance->mch_index = -1;
+	if (instance->media_clock_recovery == 1) {
+		for (i = 0; i < MSE_MCH_MAX; i++) {
+			m_ops = mse->mch_table[i];
+			if (m_ops) {
+				instance->mch_index = i;
+				break;
+			}
+		}
+		if (instance->mch_index < 0) {
+			pr_err("[%s] mch is not registered.\n", __func__);
+			return -EINVAL;
+		}
+
+		ret = m_ops->open(&instance->mch_dev_id);
+		if (ret < 0) {
+			pr_err("[%s] mch open error(%d).\n", __func__, ret);
+			instance->mch_index = -1;
+			return -EINVAL;
+		}
+	}
+
+	/* get packet memory */
+	instance->packet_buffer = mse_packet_ctrl_alloc(
+						&mse->pdev->dev,
+						MSE_DMA_MAX_PACKET * 2,
+						MSE_DMA_MAX_PACKET_SIZE);
+
+	if (instance->inout == MSE_DIRECTION_OUTPUT)
+		mse_packet_ctrl_receive_prepare_packet(
+						instance->index_network,
+						instance->packet_buffer,
+						instance->network);
+	else
+		mse_packet_ctrl_send_prepare_packet(
+						instance->index_network,
+						instance->packet_buffer,
+						instance->network);
+
+	/* send clock using CRF */
+	if (instance->send_clock) {
+		int ret;
+		struct eavb_cbsparam cbs;
+		struct mse_packetizer_ops *crf =
+			&mse_packetizer_crf_tstamp_audio_ops;
+
+		ret = instance->network->open(
+			instance->network_device_name_tx);
+		if (ret < 0)
+			return -EINVAL;
+
+		instance->crf_index_network = ret;
+
+		crf->calc_cbs(instance->crf_index, &cbs);
+		instance->network->set_cbs_param(
+			instance->crf_index_network,
+			&cbs);
+
+		/* get packet memory */
+		instance->crf_packet_buffer = mse_packet_ctrl_alloc(
+			&mse->pdev->dev,
+			MSE_DMA_MAX_PACKET,
+			MSE_DMA_MAX_PACKET_SIZE);
+		if (!instance->crf_packet_buffer)
+			return -EINVAL;
+
+		/* prepare for send */
+		mse_packet_ctrl_send_prepare_packet(
+			instance->crf_index_network,
+			instance->crf_packet_buffer,
+			instance->network);
+	}
+
+	/* init paketizer */
+	instance->packetizer->init(instance->index_packetizer);
+
 	return i;
 }
 EXPORT_SYMBOL(mse_open);
-
-static int close_mch(struct mch_ops *m_ops, struct mse_instance *instance)
-{
-	int ret;
-
-	if (!m_ops)
-		return -EINVAL;
-
-	ret = m_ops->close(instance->mch_dev_id);
-	if (ret < 0)
-		pr_err("[%s]mch open error(%d).\n", __func__, ret);
-
-	return ret;
-}
-
-static int open_mch(struct mch_ops *m_ops, struct mse_instance *instance)
-{
-	int ret;
-
-	if (!m_ops)
-		return -EINVAL;
-
-	ret = m_ops->open(&instance->mch_dev_id);
-	if (ret < 0) {
-		pr_err("[%s]mch open error(%d).\n", __func__, ret);
-		return ret;
-	}
-
-	return 0;
-}
 
 int mse_close(int index)
 {
@@ -2774,14 +3021,6 @@ EXPORT_SYMBOL(mse_close);
 int mse_start_streaming(int index)
 {
 	struct mse_instance *instance;
-	ktime_t ktime;
-	ktime_t ktime_ts;
-	ktime_t ktime_crf;
-	struct timespec time;
-	struct mse_adapter *adapter;
-	struct mch_ops *m_ops;
-	int ret = 0, i;
-	int remainder = 0;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
@@ -2789,135 +3028,9 @@ int mse_start_streaming(int index)
 	}
 
 	pr_debug("[%s] index=%d\n", __func__, index);
-
 	instance = &mse->instance_table[index];
-	instance->first_f = false;
-	adapter = instance->media;
-	instance->mch_index = -1;
-	for (i = 0; i < MSE_MCH_MAX; i++) {
-		m_ops = mse->mch_table[i];
-		if (m_ops) {
-			instance->mch_index = i;
-			break;
-		}
-	}
-
-	/* Check bytes per frame */
-	if (instance->media_config.audio.bytes_per_frame) {
-		remainder = instance->media_config.audio.bytes_per_frame %
-				(instance->media_config.audio.channels *
-					sizeof(unsigned short));
-		if (remainder) {
-			pr_err("[%s] bytes per frame error\n", __func__);
-			return -EINVAL;
-		}
-	}
-
-	/* get timestamp(nsec) */
-	getnstimeofday(&time);
-	instance->timestamp = time.tv_nsec;
-	instance->timer_cnt = 0;
-
-	/* prepare std clock time */
-	if (instance->ptp_clock) {
-		instance->add_std_time =
-			NSEC_SCALE / instance->ptp_capture_freq;
-		instance->add_crf_std_time =
-			NSEC_SCALE / instance->ptp_capture_freq;
-	} else {
-		instance->add_std_time = instance->timer_delay;
-		instance->add_crf_std_time = instance->timer_delay;
-	}
-
-	instance->std_time_counter = 0;
-	instance->std_time_avtp = 0;
-	instance->std_time_crf = 0;
-
-	instance->f_present = false;
-	instance->remain = 0;
-
-	/* start streaming */
-	instance->network->start(instance->index_network);
-
-	/* init paketizer */
-	instance->packetizer->init(instance->index_packetizer);
-
-	/* start timer */
-	ktime = ktime_set(0, instance->timer_delay);
-	hrtimer_start(&instance->timer, ktime, HRTIMER_MODE_REL);
-
-	if (is_audio_adapter(adapter)) {
-		/* capture timestamps */
-		if (instance->ptp_clock == 1) {
-			int count, i;
-			/* get timestamps */
-			ret = mse_ptp_get_timestamps(instance->ptp_dev_id,
-						     instance->ptp_clock_ch,
-						     &count,
-						     instance->timestamps);
-			if (ret) {
-				pr_debug("[%s] could not get timestamps ret=%d\n",
-					 __func__, ret);
-				count = 0;
-			}
-
-			/* store timestamps */
-			for (i = 0; i < count; i++) {
-				tstamps_enq_tstamps(&instance->tstamp_que,
-						    instance->std_time_counter,
-						    &instance->timestamps[i]);
-				instance->std_time_counter +=
-					instance->add_std_time;
-			}
-		}
-
-		/* media_clock_recovery is enable */
-		if (instance->media_clock_recovery == 1)
-			ret = open_mch(m_ops, instance);
-
-		/* ptp_clock is capture or media_clock_recovery is enable */
-		if (instance->ptp_clock == 1 ||
-		    instance->media_clock_recovery == 1) {
-			ktime_ts = ktime_set(0, instance->tstamp_timer_delay);
-			hrtimer_start(&instance->tstamp_timer,
-				      ktime_ts, HRTIMER_MODE_REL);
-		}
-
-		/* send clock using CRF */
-		if (instance->send_clock) {
-			ktime_crf = ktime_set(0, instance->crf_timer_delay);
-			hrtimer_start(&instance->crf_timer,
-				      ktime_crf,
-				      HRTIMER_MODE_REL);
-		}
-
-		/* receive clcok using CRF */
-		if (instance->media_clock_recovery == 1 &&
-		    instance->media_clock_type == 1) {
-			queue_work(instance->wq_crf_packet,
-				   &instance->wk_crf_receive);
-		}
-	}
-
-	if (instance->inout == MSE_DIRECTION_OUTPUT)
-		mse_packet_ctrl_receive_prepare_packet(
-						instance->index_network,
-						instance->packet_buffer,
-						instance->network);
-	else
-		mse_packet_ctrl_send_prepare_packet(
-						instance->index_network,
-						instance->packet_buffer,
-						instance->network);
-
-	instance->f_streaming = false;
-	instance->f_stopping = false;
-	instance->work_length = 0;
-	instance->f_trans_start = false;
-	instance->f_completion = false;
-
-	instance->temp_w = 0;
-	instance->temp_r = 0;
+	queue_work(instance->wq_packet,
+		   &instance->wk_start_stream);
 
 	return 0;
 }
@@ -2926,66 +3039,20 @@ EXPORT_SYMBOL(mse_start_streaming);
 int mse_stop_streaming(int index)
 {
 	struct mse_instance *instance;
-	struct mse_adapter *adapter;
-	int ret;
-	bool is_audio;
-	struct mch_ops *m_ops = NULL;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
 		return -EINVAL;
 	}
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	pr_err("[%s] index=%d\n", __func__, index);
+	instance = &mse->instance_table[index];
+
+	instance->f_stopping = true;
 
 	instance = &mse->instance_table[index];
-	instance->state = MSE_STATE_OPEN;
-	instance->f_stopping = true;
-	adapter = instance->media;
-	if (instance->mch_index >= 0)
-		m_ops = mse->mch_table[instance->mch_index];
-
-	if (MSE_TYPE_KING_GET(adapter->type) == MSE_TYPE_ADAPTER_VIDEO &&
-	    (instance->inout == MSE_DIRECTION_OUTPUT)) {
-		ret = instance->network->cancel(instance->index_network);
-		if (ret)
-			pr_err("[%s] failed cancel() ret=%d\n", __func__, ret);
-	}
-
-	if (instance->media_clock_recovery == 1 &&
-	    instance->media_clock_type == 1) {
-		ret = instance->network->cancel(instance->crf_index_network);
-	}
-
-	/* timer stop */
-	ret = hrtimer_try_to_cancel(&instance->timer);
-	if (ret)
-		pr_err("[%s] The timer was still in use...\n", __func__);
-
-	/* timestamp timer, crf timer stop */
-	is_audio = is_audio_adapter(adapter);
-	if (is_audio) {
-		ret = hrtimer_try_to_cancel(&instance->tstamp_timer);
-		if (ret)
-			pr_err("[%s] The tstamp_timer was still in use...\n",
-			       __func__);
-
-		ret = hrtimer_try_to_cancel(&instance->crf_timer);
-		if (ret)
-			pr_err("[%s] The crf_timer was still in use...\n",
-			       __func__);
-
-		if (instance->media_clock_recovery == 1 &&
-		    close_mch(m_ops, instance))
-			pr_err("[%s] close mch erro\n", __func__);
-	}
-
-	/* start workqueue for stop */
-	queue_work(instance->wq_packet, &instance->wk_stop);
-	if (is_audio) {
-		queue_work(instance->wq_tstamp, &instance->wk_stop);
-		queue_work(instance->wq_crf_packet, &instance->wk_stop);
-	}
+	queue_work(instance->wq_packet,
+		   &instance->wk_stop);
 
 	return 0;
 }
@@ -3015,8 +3082,6 @@ int mse_start_transmission(int index,
 			   int (*mse_completion)(int index, int size))
 {
 	struct mse_instance *instance;
-	struct mse_adapter *adapter;
-	int ret;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
@@ -3027,68 +3092,13 @@ int mse_start_transmission(int index,
 		 __func__, index, buffer, buffer_size);
 
 	instance = &mse->instance_table[index];
-	adapter = instance->media;
 
-	if (instance->use_temp_video_buffer_mjpeg) {
-		if (instance->f_temp_video_buffer_rewind) {
-			memcpy(instance->temp_video_buffer,
-			       instance->temp_video_buffer +
-			       instance->eoi_pos + 2,
-			       instance->temp_vw - instance->eoi_pos - 2);
-			instance->temp_vw -= instance->eoi_pos + 2;
-			instance->eoi_pos = 0;
-			instance->f_temp_video_buffer_rewind = false;
-		}
-		if (!instance->f_first_vframe) {
-			memcpy(instance->temp_video_buffer + instance->temp_vw,
-			       buffer, buffer_size);
-			instance->temp_vw += buffer_size;
-		}
-		instance->f_first_vframe = false;
-		if (check_mjpeg(instance)) {
-			instance->state = MSE_STATE_EXECUTE;
-			instance->media_buffer = instance->temp_video_buffer;
-			instance->media_buffer_size = instance->eoi_pos + 2;
-			instance->f_trans_start = true;
-		} else {
-			/* not EOI */
-			(*mse_completion)(instance->index_media, 0);
+	instance->start_buffer = buffer;
+	instance->start_buffer_size = buffer_size;
+	instance->start_mse_completion = mse_completion;
 
-			return 0;
-		}
-	} else {
-		instance->state = MSE_STATE_EXECUTE;
-		instance->media_buffer = (unsigned char *)buffer;
-		instance->media_buffer_size = buffer_size;
-		instance->f_trans_start = true;
-	}
-	instance->mse_completion = mse_completion;
-
-	ret = instance->network->set_option(instance->index_network);
-	if (ret)
-		pr_err("[%s] failed set_option() ret=%d\n", __func__, ret);
-
-	if (instance->inout == MSE_DIRECTION_INPUT) {
-		instance->work_length = 0;
-		/* start workqueue for packetize */
-		instance->f_continue = false;
-
-		if (is_audio_adapter(adapter))
-			create_avtp_timestamps(instance);
-
-		queue_work(instance->wq_packet, &instance->wk_packetize);
-	} else {
-		memset(buffer, 0, buffer_size);
-
-		/* start workqueue for streaming */
-		if (!instance->f_streaming) {
-			instance->f_streaming = true;
-			queue_work(instance->wq_stream, &instance->wk_stream);
-			pr_debug("[%s] start streaming\n", __func__);
-		}
-	}
-
-	instance->timer_cnt++;
+	queue_work(instance->wq_packet,
+		   &instance->wk_start_trans);
 
 	return 0;
 }
