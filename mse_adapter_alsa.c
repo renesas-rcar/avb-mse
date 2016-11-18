@@ -99,8 +99,7 @@ struct alsa_device {
 	struct snd_card			*card;
 	struct snd_pcm			*pcm;
 	int				adapter_index;
-	/* spin lock */
-	spinlock_t			lock;
+
 	struct alsa_stream		playback;
 	struct alsa_stream		capture;
 };
