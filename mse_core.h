@@ -182,6 +182,13 @@ struct mse_audio_info {
 	int frame_interval_time;
 };
 
+enum MSE_MPEG2TS_TYPE {
+	/** @brief TS */
+	MSE_MPEG2TS_TYPE_TS,
+	/** @brief M2TS */
+	MSE_MPEG2TS_TYPE_M2TS,
+};
+
 /**
  * @brief video stream configuration
  */
@@ -207,6 +214,18 @@ struct mse_video_config {
 	int interlaced;
 	/** @brief bytes per frame is data size in 1 ether frame */
 	int bytes_per_frame;
+};
+
+/**
+ * @brief video stream configuration
+ */
+struct mse_mpeg2ts_config {
+	/** @brief bitrate [Mbps] */
+	int bitrate;
+	/** @brief bytes per frame is data size in 1 ether frame */
+	int bytes_per_frame;
+	/** @brief mpeg2ts type */
+	enum MSE_MPEG2TS_TYPE mpeg2ts_type;
 };
 
 /**
@@ -316,6 +335,9 @@ struct mse_packetizer_ops {
 	int (*set_audio_config)(int index, struct mse_audio_config *config);
 	/** @brief set video config function pointer */
 	int (*set_video_config)(int index, struct mse_video_config *config);
+	/** @brief set mpeg2ts config function pointer */
+	int (*set_mpeg2ts_config)(int index,
+				  struct mse_mpeg2ts_config *config);
 	/** @brief get audio info function pointer */
 	int (*get_audio_info)(int index, struct mse_audio_info *info);
 
@@ -485,6 +507,30 @@ extern int mse_get_video_config(int index, struct mse_video_config *config);
  * @retval <0 Error
  */
 extern int mse_set_video_config(int index, struct mse_video_config *config);
+
+/**
+ * @brief get mpeg2ts configuration
+ *
+ * @param[in] index MSE instance ID
+ * @param[out] config mpeg2ts configuration
+ *
+ * @retval 0 Success
+ * @retval <0 Error
+ */
+extern int mse_get_mpeg2ts_config(int index,
+				  struct mse_mpeg2ts_config *config);
+
+/**
+ * @brief set mpeg2ts configuration
+ *
+ * @param[in] index MSE instance ID
+ * @param[in] config mpeg2ts configuration
+ *
+ * @retval 0 Success
+ * @retval <0 Error
+ */
+extern int mse_set_mpeg2ts_config(int index,
+				  struct mse_mpeg2ts_config *config);
 
 /**
  * @brief MSE open

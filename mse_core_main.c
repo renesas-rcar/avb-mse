@@ -128,6 +128,17 @@
 
 #define mbit_to_bit(mbit)     (mbit * 1000000)
 
+#define MPEG2TS_TIMER_NS        (10000000)           /* 10 msec */
+
+#define MPEG2TS_TS_SIZE         (188)
+#define MPEG2TS_SYNC            (0x47)
+#define MPEG2TS_M2TS_OFFSET     (4)
+#define MPEG2TS_M2TS_SIZE       (MPEG2TS_M2TS_OFFSET + MPEG2TS_TS_SIZE)
+#define MPEG2TS_CLOCK_N         (9)                   /* 90kHz / 10K */
+#define MPEG2TS_CLOCK_D         (100000)              /* 10^9(NSEC) / 10K */
+#define MPEG2TS_PCR90K_BITS     (33)
+#define MPEG2TS_PCR90K_INVALID  (BIT(MPEG2TS_PCR90K_BITS))
+
 /** @brief mse state */
 enum MSE_STATE {
 	/** @brief state of close */
@@ -286,9 +297,10 @@ struct mse_instance {
 	struct mse_network_config crf_net_config;
 
 	/** @brief media specific configuration */
-	union mse_media_config {
+	struct mse_media_config {
 		struct mse_audio_config audio;
 		struct mse_video_config video;
+		struct mse_mpeg2ts_config mpeg2ts;
 	} media_config;
 	struct mse_audio_info audio_info;
 
@@ -323,9 +335,12 @@ struct mse_instance {
 	/** @brief video buffer  */
 	bool f_first_vframe;
 	bool use_temp_video_buffer_mjpeg;
+	bool use_temp_video_buffer_mpeg2ts;
 	bool f_temp_video_buffer_rewind;
 	int parsed;
 	int stored;
+	u64 mpeg2ts_pcr_90k;
+	u64 mpeg2ts_clock_90k;
 	unsigned char temp_video_buffer[128 * 1024];
 	/** @brief audio buffer  */
 	int temp_w;
@@ -605,6 +620,14 @@ static struct mse_sysfs_config mse_sysfs_config_video[] = {
 	}
 };
 
+static bool compare_pcr(u64 a, u64 b)
+{
+	u64 diff;
+
+	diff = (a - b) & (BIT(MPEG2TS_PCR90K_BITS) - 1);
+	return (diff < BIT(MPEG2TS_PCR90K_BITS - 1));
+}
+
 static int sysfs_name_cmp(char *defname, char *sysfsname)
 {
 	int ret = 0;
@@ -745,6 +768,7 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 	struct mse_network_config *crf_network = &instance->crf_net_config;
 	struct mse_video_config *video = &instance->media_config.video;
 	struct mse_audio_config *audio = &instance->media_config.audio;
+	struct mse_mpeg2ts_config *mpeg2ts = &instance->media_config.mpeg2ts;
 
 	err = mse_sysfs_get_config_str(index,
 				       MSE_SYSFS_NAME_STR_DST_MAC,
@@ -825,6 +849,19 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 			pr_err("[%s] undefined bitrate\n", __func__);
 			ret = -EPERM;
 		}
+
+		err = mse_sysfs_get_config_int(
+					index,
+					MSE_SYSFS_NAME_STR_BYTES_PER_FRAME,
+					&video->bytes_per_frame);
+		if (err < 0) {
+			pr_err("[%s] undefined payload size\n", __func__);
+			ret = -EPERM;
+		}
+
+		/* reflect shared params info into mpeg2ts config */
+		mpeg2ts->bitrate = video->bitrate;
+		mpeg2ts->bytes_per_frame = video->bytes_per_frame;
 		break;
 
 	case MSE_TYPE_ADAPTER_AUDIO:
@@ -1503,9 +1540,11 @@ static void mse_work_packetize(struct work_struct *work)
 	struct mse_instance *instance;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
-
 	instance = container_of(work, struct mse_instance, wk_packetize);
+
+	pr_debug("[%s] trans size=%zu\n", __func__,
+		 instance->media_buffer_size);
+
 	if (instance->f_stopping)
 		return;
 
@@ -1554,7 +1593,9 @@ static void mse_work_packetize(struct work_struct *work)
 			return;
 		pr_debug("[%s] media_buffer=%p packetized=%d\n",
 			 __func__, instance->media_buffer, ret);
-		if (instance->use_temp_video_buffer_mjpeg)
+
+		if (instance->use_temp_video_buffer_mjpeg ||
+		    instance->use_temp_video_buffer_mpeg2ts)
 			instance->f_temp_video_buffer_rewind = true;
 
 		/* start workqueue for streaming */
@@ -1616,7 +1657,6 @@ static bool check_presentation_time(struct mse_instance *instance)
 static void mse_work_depacketize(struct work_struct *work)
 {
 	struct mse_instance *instance;
-	int timestamp = 0;
 	int received, ret;
 	unsigned int timestamps[128];
 	int t_stored, i;
@@ -1685,8 +1725,8 @@ static void mse_work_depacketize(struct work_struct *work)
 						instance->index_packetizer,
 						instance->media_buffer,
 						instance->media_buffer_size,
-						&timestamp,
-						1,
+						timestamps,
+						ARRAY_SIZE(timestamps),
 						&t_stored,
 						instance->packet_buffer,
 						instance->packetizer,
@@ -1726,16 +1766,33 @@ static void mse_work_callback(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
+	unsigned long flags;
 
 	pr_debug("[%s]\n", __func__);
 
 	instance = container_of(work, struct mse_instance, wk_callback);
 	if (instance->f_stopping)
 		return;
+
 	adapter = instance->media;
 
 	if (instance->ptp_clock == 0)
 		tstamps_store_ptp_timestamp(instance);
+
+	if (instance->use_temp_video_buffer_mpeg2ts) {
+		pr_debug("[%s] mpeg2ts_clock_90k time=%llu pcr=%llu\n",
+			 __func__,
+			 instance->mpeg2ts_clock_90k,
+			 instance->mpeg2ts_pcr_90k);
+
+		if (compare_pcr(instance->mpeg2ts_pcr_90k,
+				instance->mpeg2ts_clock_90k)) {
+			spin_lock_irqsave(&instance->lock_timer, flags);
+			instance->timer_cnt++;
+			spin_unlock_irqrestore(&instance->lock_timer, flags);
+			return;
+		}
+	}
 
 	if (instance->inout == MSE_DIRECTION_OUTPUT) {
 		if (IS_MSE_TYPE_KIND_AUDIO(adapter->type)) {
@@ -1751,6 +1808,7 @@ static void mse_work_callback(struct work_struct *work)
 			return;
 		}
 	}
+
 	/* complete callback anytime */
 	instance->mse_completion(instance->index_media, 0);
 }
@@ -1828,6 +1886,12 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 	if (instance->f_stopping) {
 		pr_err("[%s] stopping ...\n", __func__);
 		return HRTIMER_NORESTART;
+	}
+
+	if (instance->mpeg2ts_clock_90k != MPEG2TS_PCR90K_INVALID) {
+		instance->mpeg2ts_clock_90k +=
+			(instance->timer_delay * MPEG2TS_CLOCK_N) /
+			MPEG2TS_CLOCK_D;
 	}
 
 	/* timer update */
@@ -2132,6 +2196,87 @@ static void mse_work_start_streaming(struct work_struct *work)
 	instance->temp_r = 0;
 }
 
+static inline bool is_mpeg2ts_ts(u8 *tsp)
+{
+	if (tsp[0] == MPEG2TS_SYNC &&
+	    tsp[MPEG2TS_TS_SIZE] == MPEG2TS_SYNC &&
+	    tsp[MPEG2TS_TS_SIZE * 2] == MPEG2TS_SYNC) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+static inline bool is_mpeg2ts_m2ts(u8 *tsp)
+{
+	if (tsp[MPEG2TS_M2TS_OFFSET] == MPEG2TS_SYNC &&
+	    tsp[MPEG2TS_M2TS_OFFSET + MPEG2TS_M2TS_SIZE] == MPEG2TS_SYNC &&
+	    tsp[MPEG2TS_M2TS_OFFSET + MPEG2TS_M2TS_SIZE * 2] == MPEG2TS_SYNC) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+static bool check_mpeg2ts_pcr(struct mse_instance *instance)
+{
+	u8 *tsp;
+	u8 afc, afc_len, pcr_flag;
+	u16 pid;
+	u64 pcr;
+	int psize, offset;
+
+	if (instance->media_config.mpeg2ts.mpeg2ts_type ==
+	    MSE_MPEG2TS_TYPE_TS) {
+		psize = MPEG2TS_TS_SIZE;
+		offset = 0;
+	} else {
+		psize = MPEG2TS_M2TS_SIZE;
+		offset = MPEG2TS_M2TS_OFFSET;
+	}
+
+	while (instance->parsed + psize < instance->stored) {
+		tsp = instance->temp_video_buffer +
+			instance->parsed + offset;
+		instance->parsed += psize;
+
+		pid = (((u16)tsp[1] << 8) + (u16)tsp[2]) & 0x1fff;
+		afc = (tsp[3] & 0x30) >> 4;
+		afc_len = tsp[4];
+		pcr_flag = (tsp[5] & 0x10) >> 4;
+
+		/* Adaptation Field Control = 0b10 or 0b11 and  */
+		/* afc_len >= 7 and pcr_flag = 1 */
+		if ((afc & 0x2) && (afc_len >= 7) && pcr_flag) {
+			/* PCR base: 90KHz, 33bits (32+1bits) */
+			pcr = ((u64)tsp[6] << 25) |
+			      ((u64)tsp[7] << 17) |
+			      ((u64)tsp[8] << 9) |
+			      ((u64)tsp[9] << 1) |
+			      (((u64)tsp[10] & 0x80) >> 7);
+
+			/*
+			 * PCR extension: 27MHz, 9bits (8+1bits)
+			 * Note: MSE is ignore PCR extension.
+			 *
+			 * pcr_ext = ((tsp[10] & 0x1) << 9) | tsp[11];
+			 */
+
+			if (compare_pcr(pcr, instance->mpeg2ts_clock_90k)) {
+				if (instance->mpeg2ts_clock_90k ==
+				    MPEG2TS_PCR90K_INVALID)
+					instance->mpeg2ts_clock_90k = pcr;
+
+				instance->mpeg2ts_pcr_90k = pcr;
+
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
 static bool check_mjpeg(struct mse_instance *instance); /* tobe move */
 static void mse_work_start_transmission(struct work_struct *work)
 {
@@ -2175,6 +2320,52 @@ static void mse_work_start_transmission(struct work_struct *work)
 			instance->f_trans_start = true;
 		} else {
 			/* not EOI */
+			(*mse_completion)(instance->index_media, 0);
+
+			return;
+		}
+	} else if (instance->use_temp_video_buffer_mpeg2ts) {
+		if (instance->f_temp_video_buffer_rewind) {
+			memcpy(instance->temp_video_buffer,
+			       instance->temp_video_buffer +
+			       instance->parsed,
+			       instance->stored - instance->parsed);
+			instance->stored -= instance->parsed;
+			instance->parsed = 0;
+			instance->f_temp_video_buffer_rewind = false;
+		}
+
+		if (instance->f_first_vframe) {
+			/* check sync byte */
+			enum MSE_MPEG2TS_TYPE ts_type;
+
+			if (is_mpeg2ts_ts(buffer))
+				ts_type = MSE_MPEG2TS_TYPE_TS;
+			else if (is_mpeg2ts_m2ts(buffer))
+				ts_type = MSE_MPEG2TS_TYPE_M2TS;
+			else
+				return;
+
+			pr_debug("mpeg2ts_type=%d\n", ts_type);
+			instance->media_config.mpeg2ts.mpeg2ts_type = ts_type;
+
+			instance->packetizer->set_mpeg2ts_config(
+				instance->index_packetizer,
+				&instance->media_config.mpeg2ts);
+		} else {
+			memcpy(instance->temp_video_buffer + instance->stored,
+			       buffer, buffer_size);
+			instance->stored += buffer_size;
+		}
+
+		instance->f_first_vframe = false;
+
+		if (check_mpeg2ts_pcr(instance)) {
+			instance->state = MSE_STATE_EXECUTE;
+			instance->media_buffer = instance->temp_video_buffer;
+			instance->media_buffer_size = instance->parsed;
+			instance->f_temp_video_buffer_rewind = true;
+		} else {
 			(*mse_completion)(instance->index_media, 0);
 
 			return;
@@ -2621,6 +2812,88 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 }
 EXPORT_SYMBOL(mse_set_video_config);
 
+int mse_get_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
+{
+	struct mse_instance *instance;
+
+	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
+		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		return -EINVAL;
+	}
+
+	if (!config) {
+		pr_err("[%s] invalid argument. config\n", __func__);
+		return -EINVAL;
+	}
+
+	pr_debug("[%s] index=%d data=%p\n", __func__, index, config);
+
+	instance = &mse->instance_table[index];
+
+	/* get config */
+	memcpy(config, &instance->media_config.mpeg2ts, sizeof(*config));
+
+	return 0;
+}
+EXPORT_SYMBOL(mse_get_mpeg2ts_config);
+
+int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
+{
+	struct mse_instance *instance;
+
+	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
+		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		return -EINVAL;
+	}
+
+	if (!config) {
+		pr_err("[%s] invalid argument. config\n", __func__);
+		return -EINVAL;
+	}
+
+	instance = &mse->instance_table[index];
+
+	/* set config */
+	memcpy(&instance->media_config.mpeg2ts, config, sizeof(*config));
+
+	instance->timer_delay = MPEG2TS_TIMER_NS;
+	pr_notice("[%s] timer_delay=%d\n", __func__, instance->timer_delay);
+
+	/* set AVTP header info */
+	instance->packetizer->set_network_config(
+		instance->index_packetizer,
+		&instance->net_config);
+
+	/* init packet header */
+	instance->packetizer->set_mpeg2ts_config(
+		instance->index_packetizer,
+		&instance->media_config.mpeg2ts);
+
+	if (instance->inout == MSE_DIRECTION_INPUT) {
+		struct eavb_cbsparam cbs;
+
+		instance->packetizer->calc_cbs(
+			instance->index_packetizer, &cbs);
+		instance->network->set_cbs_param(
+			instance->index_network, &cbs);
+		pr_debug("[%s] bandwidth fraction = %08x\n",
+			 __func__, cbs.bandwidthFraction);
+	} else {
+		u8 streamid[AVTP_STREAMID_SIZE];
+
+		mse_make_streamid(
+			streamid,
+			instance->net_config.source_addr,
+			instance->net_config.uniqueid);
+		instance->network->set_streamid(
+			instance->index_network,
+			streamid);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(mse_set_mpeg2ts_config);
+
 int mse_open(int index_media, enum MSE_DIRECTION inout)
 {
 	struct mse_instance *instance;
@@ -2717,8 +2990,16 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	/* if mjpeg input */
 	if (sysfs_name_cmp(MSE_PACKETIZER_NAME_STR_CVF_MJPEG, name) == 0 &&
 	    inout == MSE_DIRECTION_INPUT) {
-		pr_err("[%s] use mjpeg\n",  __func__);
+		pr_debug("[%s] use mjpeg\n",  __func__);
 		instance->use_temp_video_buffer_mjpeg = true;
+		instance->f_first_vframe = true;
+	}
+
+	/* if mpeg2-ts input */
+	if (sysfs_name_cmp(MSE_PACKETIZER_NAME_STR_IEC61883_4, name) == 0 &&
+	    inout == MSE_DIRECTION_INPUT) {
+		pr_err("[%s] use mpeg2-ts\n",  __func__);
+		instance->use_temp_video_buffer_mpeg2ts = true;
 		instance->f_first_vframe = true;
 	}
 
@@ -2999,6 +3280,8 @@ int mse_start_streaming(int index)
 	instance = &mse->instance_table[index];
 	queue_work(instance->wq_packet,
 		   &instance->wk_start_stream);
+
+	instance->mpeg2ts_clock_90k = MPEG2TS_PCR90K_INVALID;
 
 	return 0;
 }
