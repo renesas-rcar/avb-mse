@@ -995,7 +995,7 @@ static int tstamps_calc_tstamp(struct timestamp_queue *que,
 	u64 std2, std1,  t2, t1, t;
 
 	if (que->head == que->tail) {
-		pr_debug("[%s] error\n", __func__);
+		pr_debug("[%s] time stamp queue is not updated\n", __func__);
 		return -1;
 	}
 
@@ -1008,8 +1008,8 @@ static int tstamps_calc_tstamp(struct timestamp_queue *que,
 	}
 
 	if (p == que->head) {
-		pr_debug("[%s] error %lu range %lu - %lu\n", __func__,
-			 std_time, que->std_times[que->head],
+		pr_debug("[%s] std_time %lu is over adjust range %lu - %lu\n",
+			 __func__, std_time, que->std_times[que->head],
 			 que->std_times[(que->tail - 1) % PTP_TIMESTAMPS_MAX]);
 		return -1;
 	}
@@ -1035,7 +1035,7 @@ static int tstamps_search_tstamp(
 	unsigned int t, t_d;
 
 	if (que->head == que->tail) {
-		pr_debug("[%s] error no data\n", __func__);
+		pr_debug("[%s] time stamp queue is not updated\n", __func__);
 		return -1;
 	}
 	for (p = que->head; p != que->tail;
@@ -1227,9 +1227,10 @@ static int media_clock_recovery(struct mse_instance *instance)
 				&instance->tstamp_que,
 				instance->mch_std_time,
 				&device_time);
-			if (ret < 0)
+			if (ret < 0) {
+				pr_debug("[%s] skip recovery\n", __func__);
 				continue;
-
+			}
 			instance->master_timestamps[out] = avtp_time;
 			instance->device_timestamps[out] = device_time;
 			out++;
@@ -1255,8 +1256,8 @@ static int media_clock_recovery(struct mse_instance *instance)
 					&instance->mch_std_time,
 					crf_time);
 				if (ret < 0) {
-					pr_err("[%s] error\n",
-					       __func__);
+					pr_debug("[%s] skip recovery\n",
+						 __func__);
 					continue;
 				}
 				instance->f_match_ptp_clock = true;
@@ -1549,9 +1550,6 @@ static void mse_work_packetize(struct work_struct *work)
 		break;
 
 	case MSE_TYPE_ADAPTER_VIDEO:
-		/* get timestamp(nsec) */
-		getnstimeofday(&time);
-		instance->timestamp = time.tv_nsec;
 		/* make AVTP packet */
 		ret = mse_packet_ctrl_make_packet(
 			instance->index_packetizer,
@@ -1749,6 +1747,9 @@ static void mse_work_callback(struct work_struct *work)
 		return;
 	adapter = instance->media;
 
+	if (instance->ptp_clock == 0)
+		tstamps_store_ptp_timestamp(instance);
+
 	if (instance->inout == MSE_DIRECTION_OUTPUT) {
 		if (is_audio_adapter(adapter)) {
 			if (instance->temp_w != instance->temp_r &&
@@ -1862,9 +1863,6 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 
 	/* start workqueue for completion */
 	queue_work(instance->wq_packet, &instance->wk_callback);
-
-	if (instance->ptp_clock == 0)
-		tstamps_store_ptp_timestamp(instance);
 
 	return HRTIMER_RESTART;
 }
@@ -2005,12 +2003,6 @@ static enum hrtimer_restart mse_crf_callback(struct hrtimer *arg)
 		return HRTIMER_NORESTART;
 	}
 
-	/* start workqueue for send */
-	if (!instance->f_crf_sending) {
-		instance->f_crf_sending = true;
-		queue_work(instance->wq_crf_packet, &instance->wk_crf_send);
-	}
-
 	/* timer update */
 	ktime = ktime_set(0, instance->crf_timer_delay);
 	hrtimer_forward(&instance->crf_timer,
@@ -2021,6 +2013,12 @@ static enum hrtimer_restart mse_crf_callback(struct hrtimer *arg)
 		return HRTIMER_RESTART;
 
 	instance->is_crf_processed = false;
+
+	/* start workqueue for send */
+	if (!instance->f_crf_sending) {
+		instance->f_crf_sending = true;
+		queue_work(instance->wq_crf_packet, &instance->wk_crf_send);
+	}
 
 	return HRTIMER_RESTART;
 }
@@ -2079,10 +2077,10 @@ static void mse_work_start_streaming(struct work_struct *work)
 	ktime_t ktime;
 	ktime_t ktime_ts;
 	ktime_t ktime_crf;
-	struct timespec time;
 	struct mse_adapter *adapter;
 	int ret = 0;
 	int remainder = 0;
+	struct ptp_clock_time now;
 	unsigned long flags;
 
 	instance = container_of(work, struct mse_instance, wk_start_stream);
@@ -2101,8 +2099,8 @@ static void mse_work_start_streaming(struct work_struct *work)
 	}
 
 	/* get timestamp(nsec) */
-	getnstimeofday(&time);
-	instance->timestamp = time.tv_nsec;
+	mse_ptp_get_time(instance->ptp_dev_id, &now);
+	instance->timestamp = (unsigned long)now.sec * NSEC_SCALE + now.nsec;
 	instance->timer_cnt = 0;
 
 	/* prepare std clock time */
@@ -3087,6 +3085,7 @@ int mse_start_streaming(int index)
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 	instance = &mse->instance_table[index];
+
 	queue_work(instance->wq_packet,
 		   &instance->wk_start_stream);
 
