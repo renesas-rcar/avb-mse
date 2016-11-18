@@ -127,6 +127,8 @@ enum MSE_TYPE {
 	MSE_TYPE_PACKETIZER_VIDEO_H264,
 	/** @brief Packetizer for Video MJPEG */
 	MSE_TYPE_PACKETIZER_VIDEO_MJPEG,
+	/** @brief Packetizer for System MPEG2TS */
+	MSE_TYPE_PACKETIZER_SYSTEM_MPEG2TS,
 	/** @brief Packetizer for control protocol CRF  */
 	MSE_TYPE_PACKETIZER_CTRL_CRF,
 };
