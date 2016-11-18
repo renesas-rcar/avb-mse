@@ -219,17 +219,12 @@ struct mse_adapter {
 	bool used_f;
 	/** @brief adapter name */
 	char name[MSE_NAME_LEN_MAX];
-
 	/** @brief direction of adapter */
 	enum MSE_DIRECTION inout;
 	/** @brief type of Adapter */
 	enum MSE_TYPE type;
-	/** @brief mutex lock */
-	struct mutex lock;
-
 	/** @brief adapter's private data */
 	void *private_data;
-
 	/** @brief sysfs index */
 	int index_sysfs;
 	/** @brief sysfs data */

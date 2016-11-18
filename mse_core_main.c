@@ -228,6 +228,9 @@ struct mse_instance {
 	int timer_delay;
 	int timer_cnt;
 
+	/** @brief spin lock for timer count */
+	spinlock_t lock_timer;
+
 	/** @brief timestamp timer handler */
 	struct hrtimer tstamp_timer;
 	int tstamp_timer_delay;
@@ -255,6 +258,7 @@ struct mse_instance {
 	unsigned long start_present_time;
 
 	/* @brief timestamp ptp|capture */
+	spinlock_t lock_ques;
 	struct timestamp_queue tstamp_que;
 	struct crf_queue crf_que;
 	struct avtp_queue avtp_que;
@@ -343,7 +347,9 @@ struct mse_device {
 	/** @brief device */
 	struct platform_device *pdev;
 	/** @brief device lock */
-	spinlock_t lock;
+	spinlock_t lock_tables;           /* lock for talbes */
+	/** @brief mutex lock for open */
+	struct mutex mutex_open;
 
 	struct mse_packetizer_ops *packetizer_table[MSE_PACKETIZER_MAX];
 	struct mse_adapter_network_ops *network_table[MSE_ADAPTER_NETWORK_MAX];
@@ -1182,6 +1188,7 @@ static int media_clock_recovery(struct mse_instance *instance)
 	unsigned long device_time;
 	unsigned long std_time;
 	u64 crf_time;
+	unsigned long flags;
 	unsigned int d_t;
 
 	ret = 0;
@@ -1193,6 +1200,7 @@ static int media_clock_recovery(struct mse_instance *instance)
 		d_t = instance->audio_info.frame_interval_time;
 		if (!instance->f_present)
 			return -1;
+		spin_lock_irqsave(&instance->lock_ques, flags);
 		count = tstamps_get_avtp_size(&instance->avtp_que);
 		for (i = 0; i < count; i++) {
 			device_time = 0;
@@ -1229,8 +1237,10 @@ static int media_clock_recovery(struct mse_instance *instance)
 			if (out >= ARRAY_SIZE(instance->master_timestamps))
 				break;
 		}
+		spin_unlock_irqrestore(&instance->lock_ques, flags);
 	} else {
 		/* crf */
+		spin_lock_irqsave(&instance->lock_ques, flags);
 		d_t = instance->crf_audio_info.frame_interval_time;
 		count = tstamps_get_crf_size(&instance->crf_que);
 		for (i = 0; i < count; i++) {
@@ -1269,6 +1279,7 @@ static int media_clock_recovery(struct mse_instance *instance)
 			if (out >= ARRAY_SIZE(instance->master_timestamps))
 				break;
 		}
+		spin_unlock_irqrestore(&instance->lock_ques, flags);
 	}
 
 	if (out <= 0) {
@@ -1325,6 +1336,8 @@ static void mse_work_timestamp(struct work_struct *work)
 
 	/* capture timestamps */
 	if (instance->ptp_clock == 1) {
+		unsigned long flags;
+
 		/* get timestamps */
 		ret = mse_ptp_get_timestamps(instance->ptp_dev_id,
 					     instance->ptp_clock_ch,
@@ -1338,12 +1351,14 @@ static void mse_work_timestamp(struct work_struct *work)
 		}
 
 		/* store timestamps */
+		spin_lock_irqsave(&instance->lock_ques, flags);
 		for (i = 0; i < count; i++) {
 			tstamps_enq_tstamps(&instance->tstamp_que,
 					    instance->std_time_counter,
 					    &instance->timestamps[i]);
 			instance->std_time_counter += instance->add_std_time;
 		}
+		spin_unlock_irqrestore(&instance->lock_ques, flags);
 	}
 
 	if (instance->media_clock_recovery == 1) {
@@ -1379,11 +1394,18 @@ static int get_timestamps(struct timestamp_queue *que,
 static int tstamps_store_ptp_timestamp(struct mse_instance *instance)
 {
 	struct ptp_clock_time now;
+	unsigned long flags;
 
 	/* get now time form ptp and save */
 	mse_ptp_get_time(instance->ptp_dev_id, &now);
+
+	spin_lock_irqsave(&instance->lock_ques, flags);
+
 	tstamps_enq_tstamps(&instance->tstamp_que,
 			    instance->std_time_counter, &now);
+
+	spin_unlock_irqrestore(&instance->lock_ques, flags);
+
 	instance->std_time_counter += instance->add_std_time;
 
 	return 0;
@@ -1396,6 +1418,7 @@ static int create_avtp_timestamps(struct mse_instance *instance)
 	unsigned int d_t;
 	struct mse_audio_config *audio = &instance->media_config.audio;
 	unsigned int offset;
+	unsigned long flags;
 
 	instance->packetizer->get_audio_info(
 		instance->index_packetizer,
@@ -1420,7 +1443,9 @@ static int create_avtp_timestamps(struct mse_instance *instance)
 	}
 	pr_debug("[%s] create %d\n", __func__, num_t);
 	d_t = instance->audio_info.frame_interval_time;
+	spin_lock_irqsave(&instance->lock_ques, flags);
 	size = tstamps_get_tstamps_size(&instance->tstamp_que);
+	spin_unlock_irqrestore(&instance->lock_ques, flags);
 	if (size < 2) {
 		struct ptp_clock_time now;
 		u64 t;
@@ -1437,8 +1462,7 @@ static int create_avtp_timestamps(struct mse_instance *instance)
 		return 0;
 	}
 	/* get timestamps from private table */
-
-	spin_lock(&mse->lock);
+	spin_lock_irqsave(&instance->lock_ques, flags);
 
 	for (i = 0; i < num_t; i++) {
 		unsigned long avtp_timestamp = 0;
@@ -1451,7 +1475,7 @@ static int create_avtp_timestamps(struct mse_instance *instance)
 	}
 	instance->avtp_timestamps_size = num_t;
 
-	spin_unlock(&mse->lock);
+	spin_unlock_irqrestore(&instance->lock_ques, flags);
 
 	return 0;
 }
@@ -1564,10 +1588,12 @@ static int tstamps_store_avtp_timestamp(struct mse_instance *instance,
 					unsigned long std_time,
 					unsigned int timestamp)
 {
+	unsigned long flags;
+
 	/* save avtp timestamp */
-	spin_lock(&mse->lock);
+	spin_lock_irqsave(&instance->lock_ques, flags);
 	tstamps_enq_avtp(&instance->avtp_que, std_time, timestamp);
-	spin_unlock(&mse->lock);
+	spin_unlock_irqrestore(&instance->lock_ques, flags);
 
 	return 0;
 }
@@ -1609,6 +1635,7 @@ static void mse_work_depacketize(struct work_struct *work)
 	int t_stored, i;
 	unsigned int d_t;
 	struct mse_audio_config *audio;
+	unsigned long flags;
 
 	pr_debug("[%s]\n", __func__);
 
@@ -1690,7 +1717,9 @@ static void mse_work_depacketize(struct work_struct *work)
 			instance->mse_completion(instance->index_media, ret);
 			instance->work_length = 0;
 		} else {
-			instance->timer_cnt++; /* ad-hoc */
+			spin_lock_irqsave(&instance->lock_timer, flags);
+			instance->timer_cnt++;
+			spin_unlock_irqrestore(&instance->lock_timer, flags);
 			if (!instance->f_streaming) {
 				instance->f_streaming = true;
 				queue_work(instance->wq_stream,
@@ -1805,6 +1834,7 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
 	ktime_t ktime;
+	unsigned long flags;
 
 	instance = container_of(arg, struct mse_instance, timer);
 	adapter = instance->media;
@@ -1814,21 +1844,21 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 		return HRTIMER_NORESTART;
 	}
 
-	mutex_lock(&adapter->lock);
-
 	/* timer update */
 	ktime = ktime_set(0, instance->timer_delay);
 	hrtimer_forward(&instance->timer,
 			hrtimer_get_expires(&instance->timer),
 			ktime);
 
+	spin_lock_irqsave(&instance->lock_timer, flags);
 	if (!instance->timer_cnt) {
-		mutex_unlock(&adapter->lock);
+		spin_unlock_irqrestore(&instance->lock_timer, flags);
+		pr_debug("[%s] timer_cnt error\n", __func__);
 		return HRTIMER_RESTART;
 	}
 	instance->timer_cnt--;
 
-	mutex_unlock(&adapter->lock);
+	spin_unlock_irqrestore(&instance->lock_timer, flags);
 
 	/* start workqueue for completion */
 	queue_work(instance->wq_packet, &instance->wk_callback);
@@ -1844,6 +1874,7 @@ static void mse_work_crf_send(struct work_struct *work)
 	struct mse_instance *instance;
 	int err, tsize, size;
 	struct ptp_clock_time timestamps[6];
+	unsigned long flags;
 
 	pr_debug("[%s]\n", __func__);
 
@@ -1851,12 +1882,15 @@ static void mse_work_crf_send(struct work_struct *work)
 
 	tsize = instance->ptp_clock == 0 ?
 		CRF_PTP_TIMESTAMPS : CRF_AUDIO_TIMESTAMPS;
+	spin_lock_irqsave(&instance->lock_ques, flags);
 	size = tstamps_get_tstamps_size(&instance->tstamp_que);
-
+	spin_unlock_irqrestore(&instance->lock_ques, flags);
 	while (size >= tsize) {
 		/* get Timestamps */
 		pr_debug("[%s] size %d tsize %d\n", __func__, size, tsize);
+		spin_lock_irqsave(&instance->lock_ques, flags);
 		get_timestamps(&instance->tstamp_que, tsize, timestamps);
+		spin_unlock_irqrestore(&instance->lock_ques, flags);
 
 		/* create CRF packets */
 		err = mse_packet_ctrl_make_packet_crf(
@@ -1871,7 +1905,9 @@ static void mse_work_crf_send(struct work_struct *work)
 			instance->crf_packet_buffer,
 			instance->network);
 
+		spin_lock_irqsave(&instance->lock_ques, flags);
 		size = tstamps_get_tstamps_size(&instance->tstamp_que);
+		spin_unlock_irqrestore(&instance->lock_ques, flags);
 	}
 
 	instance->f_crf_sending = false;
@@ -1883,6 +1919,8 @@ static void mse_work_crf_receive(struct work_struct *work)
 	u8 streamid[AVTP_STREAMID_SIZE];
 	int ret, err, count, i;
 	u64 ptimes[6];
+	unsigned long flags;
+
 	struct mse_packetizer_ops *crf = &mse_packetizer_crf_tstamp_audio_ops;
 
 	/* int timestamp = 0; */
@@ -1939,6 +1977,7 @@ static void mse_work_crf_receive(struct work_struct *work)
 			instance->crf_index,
 			&instance->crf_audio_info);
 
+		spin_lock_irqsave(&instance->lock_ques, flags);
 		for (i = 0; i < count; i++) {
 			tstamps_enq_crf(&instance->crf_que,
 					&instance->std_time_crf,
@@ -1946,6 +1985,7 @@ static void mse_work_crf_receive(struct work_struct *work)
 			instance->std_time_crf +=
 				instance->crf_audio_info.frame_interval_time;
 		}
+		spin_unlock_irqrestore(&instance->lock_ques, flags);
 	}
 
 	instance->network->release(instance->crf_index_network);
@@ -2043,6 +2083,7 @@ static void mse_work_start_streaming(struct work_struct *work)
 	struct mse_adapter *adapter;
 	int ret = 0;
 	int remainder = 0;
+	unsigned long flags;
 
 	instance = container_of(work, struct mse_instance, wk_start_stream);
 
@@ -2105,6 +2146,7 @@ static void mse_work_start_streaming(struct work_struct *work)
 			}
 
 			/* store timestamps */
+			spin_lock_irqsave(&instance->lock_ques, flags);
 			for (i = 0; i < count; i++) {
 				tstamps_enq_tstamps(&instance->tstamp_que,
 						    instance->std_time_counter,
@@ -2112,6 +2154,7 @@ static void mse_work_start_streaming(struct work_struct *work)
 				instance->std_time_counter +=
 					instance->add_std_time;
 			}
+			spin_unlock_irqrestore(&instance->lock_ques, flags);
 		}
 
 		/* ptp_clock is capture or media_clock_recovery is enable */
@@ -2156,6 +2199,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 	void *buffer;
 	size_t buffer_size;
 	int (*mse_completion)(int index, int size);
+	unsigned long flags;
 
 	instance = container_of(work, struct mse_instance, wk_start_trans);
 
@@ -2221,7 +2265,9 @@ static void mse_work_start_transmission(struct work_struct *work)
 		}
 	}
 
+	spin_lock_irqsave(&instance->lock_timer, flags);
 	instance->timer_cnt++;
+	spin_unlock_irqrestore(&instance->lock_timer, flags);
 }
 
 /* External function */
@@ -2232,6 +2278,7 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 			       char *device_name)
 {
 	int i, err;
+	unsigned long flags;
 
 	/* check argument */
 	if (!name) {
@@ -2253,7 +2300,7 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 	}
 
 	pr_debug("[%s] type=%d name=%s\n", __func__, type, name);
-	spin_lock(&mse->lock);
+	spin_lock_irqsave(&mse->lock_tables, flags);
 
 	/* register table */
 	for (i = 0; i < ARRAY_SIZE(mse->media_table); i++) {
@@ -2265,26 +2312,23 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 			mse->media_table[i].private_data = data;
 			strncpy(mse->media_table[i].name, name,
 				MSE_NAME_LEN_MAX);
+
+			spin_unlock_irqrestore(&mse->lock_tables, flags);
+
 			/* create control device */
 			err = mse_create_config_device(i,
 						       &mse->media_table[i],
 						       device_name);
-			if (err < 0) {
-				spin_unlock(&mse->lock);
+			if (err < 0)
 				return -EPERM;
-			}
-
 			pr_debug("[%s] registered index=%d\n", __func__, i);
-
-			spin_unlock(&mse->lock);
-
 			return i;
 		}
 	}
 
 	pr_err("[%s] %s was unregistered\n", __func__, name);
 
-	spin_unlock(&mse->lock);
+	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
 	return -EBUSY;
 }
@@ -2293,6 +2337,7 @@ EXPORT_SYMBOL(mse_register_adapter_media);
 int mse_unregister_adapter_media(int index_media)
 {
 	int i;
+	unsigned long flags;
 
 	if ((index_media < 0) || (index_media >= MSE_ADAPTER_MEDIA_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n",
@@ -2301,30 +2346,30 @@ int mse_unregister_adapter_media(int index_media)
 	}
 
 	pr_debug("[%s] index=%d\n", __func__, index_media);
-	spin_lock(&mse->lock);
 
 	if (!mse->media_table[index_media].used_f) {
 		pr_err("[%s] %d was unregistered\n", __func__, index_media);
-		spin_unlock(&mse->lock);
 		return 0;
-	}
-
-	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
-		if (mse->instance_table[i].index_media == index_media) {
-			pr_err("[%s] module is in use. instance=%d\n",
-			       __func__, i);
-			spin_unlock(&mse->lock);
-			return -EPERM;
-		}
 	}
 
 	/* delete control device */
 	mse_delete_config_device(&mse->media_table[index_media]);
 
+	spin_lock_irqsave(&mse->lock_tables, flags);
+
+	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
+		if (mse->instance_table[i].index_media == index_media) {
+			pr_err("[%s] module is in use. instance=%d\n",
+			       __func__, i);
+			spin_unlock(&mse->lock_tables);
+			return -EPERM;
+		}
+	}
+
 	/* table delete */
 	memset(&mse->media_table[index_media], 0, sizeof(struct mse_adapter));
 	pr_debug("[%s] unregistered\n", __func__);
-	spin_unlock(&mse->lock);
+	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
 	return 0;
 }
@@ -2333,6 +2378,7 @@ EXPORT_SYMBOL(mse_unregister_adapter_media);
 int mse_register_adapter_network(struct mse_adapter_network_ops *ops)
 {
 	int i;
+	unsigned long flags;
 
 	/* check argument */
 	if (!ops) {
@@ -2353,21 +2399,21 @@ int mse_register_adapter_network(struct mse_adapter_network_ops *ops)
 	}
 
 	pr_debug("[%s] type=%d name=%s\n", __func__, ops->type, ops->name);
-	spin_lock(&mse->lock);
+	spin_lock_irqsave(&mse->lock_tables, flags);
 
 	/* register table */
 	for (i = 0; i < ARRAY_SIZE(mse->network_table); i++) {
 		if (!mse->network_table[i]) {
 			mse->network_table[i] = ops;
 			pr_debug("[%s] registered index=%d\n", __func__, i);
-			spin_unlock(&mse->lock);
+			spin_unlock_irqrestore(&mse->lock_tables, flags);
 			return i;
 		}
 	}
 
 	pr_err("[%s] %s was unregistered\n", __func__, ops->name);
 
-	spin_unlock(&mse->lock);
+	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
 	return -EPERM;
 }
@@ -2375,17 +2421,19 @@ EXPORT_SYMBOL(mse_register_adapter_network);
 
 int mse_unregister_adapter_network(int index)
 {
+	unsigned long flags;
+
 	if ((index < 0) || (index >= MSE_ADAPTER_NETWORK_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
 		return -EINVAL;
 	}
 
 	pr_debug("[%s] index=%d\n", __func__, index);
-	spin_lock(&mse->lock);
+	spin_lock_irqsave(&mse->lock_tables, flags);
 
 	mse->network_table[index] = NULL;
 
-	spin_unlock(&mse->lock);
+	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
 	return 0;
 }
@@ -2394,6 +2442,7 @@ EXPORT_SYMBOL(mse_unregister_adapter_network);
 int mse_register_packetizer(struct mse_packetizer_ops *ops)
 {
 	int i;
+	unsigned long flags;
 
 	/* check argument */
 	if (!ops) {
@@ -2415,21 +2464,21 @@ int mse_register_packetizer(struct mse_packetizer_ops *ops)
 
 	pr_debug("[%s] type=%d name=%s\n", __func__, ops->type, ops->name);
 
-	spin_lock(&mse->lock);
+	spin_lock_irqsave(&mse->lock_tables, flags);
 
 	/* register table */
 	for (i = 0; i < ARRAY_SIZE(mse->packetizer_table); i++) {
 		if (!mse->packetizer_table[i]) {
 			mse->packetizer_table[i] = ops;
 			pr_debug("[%s] registered index=%d\n", __func__, i);
-			spin_unlock(&mse->lock);
+			spin_unlock_irqrestore(&mse->lock_tables, flags);
 			return i;
 		}
 	}
 
 	pr_err("[%s] %s was unregistered\n", __func__, ops->name);
 
-	spin_unlock(&mse->lock);
+	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
 	return -EPERM;
 }
@@ -2437,6 +2486,8 @@ EXPORT_SYMBOL(mse_register_packetizer);
 
 int mse_unregister_packetizer(int index)
 {
+	unsigned long flags;
+
 	if ((index < 0) || (index >= MSE_PACKETIZER_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
 		return -EINVAL;
@@ -2444,11 +2495,11 @@ int mse_unregister_packetizer(int index)
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 
-	spin_lock(&mse->lock);
+	spin_lock_irqsave(&mse->lock_tables, flags);
 
 	mse->packetizer_table[index] = NULL;
 
-	spin_unlock(&mse->lock);
+	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
 	return 0;
 }
@@ -2667,6 +2718,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	char eavbname[MSE_NAME_LEN_MAX];
 	long link_speed;
 	struct mch_ops *m_ops;
+	unsigned long flags;
 
 	if ((index_media < 0) || (index_media >= MSE_ADAPTER_MEDIA_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n",
@@ -2677,12 +2729,12 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	pr_debug("[%s] index=%d inout=%d\n", __func__, index_media, inout);
 
 	adapter = &mse->media_table[index_media];
-	mutex_lock(&adapter->lock);
+	mutex_lock(&mse->mutex_open);
 
 	if (!adapter->used_f) {
 		pr_err("[%s] undefined media adapter index=%d\n",
 		       __func__, index_media);
-		mutex_unlock(&adapter->lock);
+		mutex_unlock(&mse->mutex_open);
 		return -ENODEV;
 	}
 
@@ -2693,11 +2745,16 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 
 	if (ARRAY_SIZE(mse->instance_table) <= i) {
 		pr_err("[%s] resister instance full!\n", __func__);
-		mutex_unlock(&adapter->lock);
+		mutex_unlock(&mse->mutex_open);
 		return -EBUSY;
 	}
 
 	instance = &mse->instance_table[i];
+	instance->used_f = true;
+	spin_lock_init(&instance->lock_timer);
+	spin_lock_init(&instance->lock_ques);
+
+	mutex_unlock(&mse->mutex_open);
 
 	/* get sysfs value */
 	memset(eavbname, 0, MSE_NAME_LEN_MAX);
@@ -2707,7 +2764,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 				       MSE_NAME_LEN_MAX);
 	if (ret < 0) {
 		pr_err("[%s] undefined network adapter name\n", __func__);
-		mutex_unlock(&adapter->lock);
+		instance->used_f = false;
 		return -EPERM;
 	}
 
@@ -2724,7 +2781,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	if (j >= ARRAY_SIZE(mse->network_table)) {
 		pr_err("[%s] network adapter module is not loaded\n",
 		       __func__);
-		mutex_unlock(&adapter->lock);
+		instance->used_f = false;
 		return -ENODEV;
 	}
 
@@ -2739,7 +2796,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 				       MSE_NAME_LEN_MAX);
 	if (ret < 0) {
 		pr_err("[%s] undefined packetizer name\n", __func__);
-		mutex_unlock(&adapter->lock);
+		instance->used_f = false;
 		return -EPERM;
 	}
 
@@ -2763,7 +2820,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 
 	if (j >= ARRAY_SIZE(mse->packetizer_table)) {
 		pr_err("[%s] packetizer not found\n", __func__);
-		mutex_unlock(&adapter->lock);
+		instance->used_f = false;
 		return -ENODEV;
 	}
 	pr_debug("[%s] packetizer index=%d name=%s\n",
@@ -2773,7 +2830,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	ret = mse_ptp_open(&instance->ptp_dev_id);
 	if (ret < 0) {
 		pr_err("[%s] cannot mse_ptp_open()\n", __func__);
-		mutex_unlock(&adapter->lock);
+		instance->used_f = false;
 		return ret;
 	}
 
@@ -2797,7 +2854,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	if (ret < 0) {
 		pr_err("[%s] cannot open network adapter ret=%d\n",
 		       __func__, ret);
-		mutex_unlock(&adapter->lock);
+		instance->used_f = false;
 		return ret;
 	}
 	instance->index_network = ret;
@@ -2811,7 +2868,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	if (link_speed <= 0) {
 		pr_err("[%s] Link Down. ret=%ld\n", __func__, link_speed);
 		network->release(instance->index_network);
-		mutex_unlock(&adapter->lock);
+		instance->used_f = false;
 		return -ENETDOWN;
 	}
 
@@ -2825,13 +2882,12 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	if (ret < 0) {
 		pr_err("[%s] cannot open packetizer ret=%d\n", __func__, ret);
 		network->release(instance->index_network);
-		mutex_unlock(&adapter->lock);
+		instance->used_f = false;
 		return ret;
 	}
 	instance->index_packetizer = ret;
 
 	/* set selector */
-	instance->used_f = true;
 	instance->inout = inout;
 	instance->state = MSE_STATE_OPEN;
 	instance->media = adapter;
@@ -2860,7 +2916,10 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	/* for timestamp */
 	instance->wq_tstamp = create_singlethread_workqueue("mse_tstampq");
 	if (is_audio_adapter(adapter)) {
+		spin_lock_irqsave(&instance->lock_ques, flags);
 		tstamps_clear_tstamps(&instance->tstamp_que);
+		spin_unlock_irqrestore(&instance->lock_ques, flags);
+
 		hrtimer_init(&instance->tstamp_timer,
 			     CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 		instance->tstamp_timer_delay = PTP_DELAY;
@@ -2877,8 +2936,6 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 		instance->crf_timer.function = &mse_crf_callback;
 		instance->is_crf_processed = false;
 	}
-
-	mutex_unlock(&adapter->lock);
 
 	ret = mse_get_default_config(adapter->index_sysfs, instance);
 	if (ret < 0)
@@ -3009,6 +3066,7 @@ int mse_close(int index)
 
 	/* set table */
 	memset(instance, 0, sizeof(*instance));
+	instance->used_f = false;
 	instance->state = MSE_STATE_CLOSE;
 	instance->index_media = MSE_INDEX_UNDEFINED;
 	instance->index_network = MSE_INDEX_UNDEFINED;
@@ -3143,27 +3201,28 @@ EXPORT_SYMBOL(mse_get_inout);
 int mse_register_mch(struct mch_ops *ops)
 {
 	int i;
+	unsigned long flags;
 
 	if (!ops) {
 		pr_err("[%s] invalid argument. ops\n", __func__);
 		return -EINVAL;
 	}
 
-	spin_lock(&mse->lock);
+	spin_lock_irqsave(&mse->lock_tables, flags);
 
 	for (i = 0; i < ARRAY_SIZE(mse->mch_table); i++) {
 		if (!mse->mch_table[i]) {
 			/* init table */
 			mse->mch_table[i] = ops;
 			pr_debug("[%s] registered index=%d\n", __func__, i);
-			spin_unlock(&mse->lock);
+			spin_unlock_irqrestore(&mse->lock_tables, flags);
 			return i;
 		}
 	}
 
 	pr_err("[%s] ops was unregistered\n", __func__);
 
-	spin_unlock(&mse->lock);
+	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
 	return -EBUSY;
 }
@@ -3171,6 +3230,8 @@ EXPORT_SYMBOL(mse_register_mch);
 
 int mse_unregister_mch(int index)
 {
+	unsigned long flags;
+
 	if ((index < 0) || (index >= MSE_MCH_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
 		return -EINVAL;
@@ -3178,9 +3239,9 @@ int mse_unregister_mch(int index)
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 
-	spin_lock(&mse->lock);
+	spin_lock_irqsave(&mse->lock_tables, flags);
 	mse->mch_table[index] = NULL;
-	spin_unlock(&mse->lock);
+	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
 	return 0;
 }
@@ -3197,6 +3258,9 @@ static int mse_probe(void)
 	mse = kzalloc(sizeof(*mse), GFP_KERNEL);
 	if (!mse)
 		return -ENOMEM;
+
+	spin_lock_init(&mse->lock_tables);
+	mutex_init(&mse->mutex_open);
 
 	/* register platform device */
 	mse->pdev = platform_device_register_simple("mse", -1, NULL, 0);
@@ -3220,10 +3284,8 @@ static int mse_probe(void)
 		mse->instance_table[i].index_network = MSE_INDEX_UNDEFINED;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(mse->media_table); i++) {
-		mutex_init(&mse->media_table[i].lock);
+	for (i = 0; i < ARRAY_SIZE(mse->media_table); i++)
 		mse->media_table[i].index_sysfs = MSE_INDEX_UNDEFINED;
-	}
 
 	pr_debug("[%s] success\n", __func__);
 
