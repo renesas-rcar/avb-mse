@@ -144,35 +144,6 @@ void mse_packet_ctrl_free(struct mse_packet_ctrl *dma)
 	kfree(dma);
 }
 
-#if 0
-static int calculate_timestamp(unsigned int *timestamp,
-			       int ptp_clock,
-			       int tstamp_size,
-			       unsigned int *tstamp)
-{
-	/* TODO: calculate! */
-	switch (ptp_clock) {
-	case 0:
-		/* ptp */
-		*timestamp = tstamp[tstamp_size - 1] +
-			    ((tstamp[tstamp_size - 1] +
-			    tstamp[tstamp_size - 2]) / 2);
-		break;
-	case 1:
-		/* timestamp */
-		*timestamp = tstamp[tstamp_size - 1] +
-			    ((tstamp[tstamp_size - 1] +
-			    tstamp[tstamp_size - 2]) / 2);
-		break;
-	default:
-		*timestamp = tstamp[tstamp_size - 1];
-		break;
-	}
-
-	return 0;
-}
-#endif
-
 int mse_packet_ctrl_make_packet(int index,
 				void *data,
 				size_t size,
@@ -222,7 +193,7 @@ int mse_packet_ctrl_make_packet(int index,
 					packet_size;
 			else
 				dma->packet_table[dma->write_p].len =
-				        VLAN_ETH_ZLEN;
+					VLAN_ETH_ZLEN;
 
 			dma->write_p = new_write_p;
 		} else {

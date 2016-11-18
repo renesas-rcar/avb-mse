@@ -324,8 +324,8 @@ struct mse_instance {
 	bool f_first_vframe;
 	bool use_temp_video_buffer_mjpeg;
 	bool f_temp_video_buffer_rewind;
-	int eoi_pos;
-	int temp_vw;
+	int parsed;
+	int stored;
 	unsigned char temp_video_buffer[128 * 1024];
 	/** @brief audio buffer  */
 	int temp_w;
@@ -2155,23 +2155,23 @@ static void mse_work_start_transmission(struct work_struct *work)
 		if (instance->f_temp_video_buffer_rewind) {
 			memcpy(instance->temp_video_buffer,
 			       instance->temp_video_buffer +
-			       instance->eoi_pos + 2,
-			       instance->temp_vw - instance->eoi_pos - 2);
-			instance->temp_vw -= instance->eoi_pos + 2;
-			instance->eoi_pos = 0;
+			       instance->parsed + 2,
+			       instance->stored - instance->parsed - 2);
+			instance->stored -= instance->parsed + 2;
+			instance->parsed = 0;
 			instance->f_temp_video_buffer_rewind = false;
 		}
 		if (!instance->f_first_vframe) {
-			memcpy(instance->temp_video_buffer + instance->temp_vw,
+			memcpy(instance->temp_video_buffer + instance->stored,
 			       instance->start_buffer,
 			       instance->start_buffer_size);
-			instance->temp_vw += buffer_size;
+			instance->stored += buffer_size;
 		}
 		instance->f_first_vframe = false;
 		if (check_mjpeg(instance)) {
 			instance->state = MSE_STATE_EXECUTE;
 			instance->media_buffer = instance->temp_video_buffer;
-			instance->media_buffer_size = instance->eoi_pos + 2;
+			instance->media_buffer_size = instance->parsed + 2;
 			instance->f_trans_start = true;
 		} else {
 			/* not EOI */
@@ -3030,13 +3030,13 @@ static bool check_mjpeg(struct mse_instance *instance)
 {
 	int i;
 
-	if (instance->eoi_pos > 0)
+	if (instance->parsed > 0)
 		return false;
 
-	for (i = 0; i < instance->temp_vw - 1; i++) {
+	for (i = 0; i < instance->stored - 1; i++) {
 		if (instance->temp_video_buffer[i] == 0xFF &&
 		    instance->temp_video_buffer[i + 1] == 0xD9) {
-			instance->eoi_pos = i;
+			instance->parsed = i;
 			return true;
 		}
 	}

@@ -344,17 +344,16 @@ struct mch_ops {
 				  int *value);
 };
 
-#define GET_UPPER_16BIT(id) (((id) & 0xFF00) >> 8)
-#define GET_LOWER_16BIT(id) ((id) & 0x00FF)
-
-extern inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
+static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
 {
-	int len = MSE_MAC_LEN_MAX;
-
-	/* Create Stream ID SrcMAC + U-ID */
-	memcpy(streamid, mac, len);
-	streamid[len++] = (u8)GET_UPPER_16BIT(uid);
-	streamid[len] = (u8)GET_LOWER_16BIT(uid);
+	streamid[0] = mac[0];
+	streamid[1] = mac[1];
+	streamid[2] = mac[2];
+	streamid[3] = mac[3];
+	streamid[4] = mac[4];
+	streamid[5] = mac[5];
+	streamid[6] = (u8)((uid & 0xff00) >> 8);
+	streamid[7] = (u8)((uid & 0x00ff));
 }
 
 /**
