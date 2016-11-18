@@ -61,6 +61,7 @@
 
 #ifndef __RAVB_MSE_KERNEL_H__
 #define __RAVB_MSE_KERNEL_H__
+#ifdef __KERNEL__
 
 #include "ravb_eavb.h"
 
@@ -569,4 +570,5 @@ extern int mse_register_mch(struct mch_ops *ops);
  */
 extern int mse_unregister_mch(int index);
 
+#endif /* __KERNEL__ */
 #endif /* __RAVB_MSE_KERNEL_H__ */
