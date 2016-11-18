@@ -2415,7 +2415,7 @@ int mse_register_adapter_network(struct mse_adapter_network_ops *ops)
 
 	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
-	return -EPERM;
+	return -EBUSY;
 }
 EXPORT_SYMBOL(mse_register_adapter_network);
 
@@ -2480,7 +2480,7 @@ int mse_register_packetizer(struct mse_packetizer_ops *ops)
 
 	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
-	return -EPERM;
+	return -EBUSY;
 }
 EXPORT_SYMBOL(mse_register_packetizer);
 
