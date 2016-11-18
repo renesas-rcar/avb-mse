@@ -219,6 +219,7 @@ int mse_sysfs_init(struct mse_sysfs_config *config)
 		mse_attr->show = mse_show;
 		mse_attr->store = mse_store;
 		mse_attrs[j] = (struct attribute *)mse_attr;
+		sysfs_attr_init(mse_attrs[j]);
 	}
 	mse_attr_group->attrs = mse_attrs;
 
