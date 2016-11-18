@@ -145,18 +145,19 @@ static enum hrtimer_restart ptp_timestamp_callbak(struct hrtimer *arg)
 	ktime_t ktime;
 	struct ptp_queue *queue;
 	struct ptp_clock_time *clock_time;
+	unsigned long flags;
 	int ret;
 
 	dev = container_of(arg, struct ptp_device, timer);
 
-	spin_lock(&dev->qlock);
+	spin_lock_irqsave(&dev->qlock, flags);
 
 	ktime = ktime_set(0, dev->timer_delay);
 	hrtimer_forward(&dev->timer,
 			hrtimer_get_expires(&dev->timer),
 			ktime);
 
-	clock_time = kzalloc(sizeof(*clock_time), GFP_KERNEL);
+	clock_time = kzalloc(sizeof(*clock_time), GFP_ATOMIC);
 	if (!clock_time) {
 		pr_warn("[%s] failed allocate clock_time\n", __func__);
 		spin_unlock(&dev->qlock);
@@ -174,7 +175,7 @@ static enum hrtimer_restart ptp_timestamp_callbak(struct hrtimer *arg)
 	queue = &dev->que;
 	enqueue(queue, clock_time);
 
-	spin_unlock(&dev->qlock);
+	spin_unlock_irqrestore(&dev->qlock, flags);
 
 	return HRTIMER_RESTART;
 }

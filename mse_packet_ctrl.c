@@ -387,7 +387,6 @@ int mse_packet_ctrl_receive_packet_crf(int index,
 	int new_write_p, ret;
 	int size;
 
-	/* TODO: receive insufficient size */
 	if (!ops) {
 		pr_err("[%s] no network adapter\n", __func__);
 		return -EINVAL;

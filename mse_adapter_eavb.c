@@ -253,24 +253,6 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 	return 0;
 }
 
-static int mse_adapter_eavb_start(int index)
-{
-	pr_debug("[%s] index=%d\n", __func__, index);
-
-	/* do nothing */
-
-	return 0;
-}
-
-static int mse_adapter_eavb_stop(int index)
-{
-	pr_debug("[%s] index=%d\n", __func__, index);
-
-	/* todo streaming stop */
-
-	return 0;
-}
-
 static int mse_adapter_eavb_check_receive(int index)
 {
 	long err;
@@ -465,8 +447,6 @@ static int mse_adapter_eavb_receive_prepare(int index,
 	eavb->unentry = MSE_EAVB_ADAPTER_ENTRY_MAX;
 	eavb->num_entry = num_packets;
 
-	mse_adapter_eavb_check_receive(index);
-
 	return 0;
 }
 
@@ -596,8 +576,6 @@ static struct mse_adapter_network_ops mse_adapter_eavb_ops = {
 	.set_option = mse_adapter_eavb_set_option,
 	.set_cbs_param = mse_adapter_eavb_set_cbs_param,
 	.set_streamid = mse_adapter_eavb_set_streamid,
-	.start = mse_adapter_eavb_start,
-	.stop = mse_adapter_eavb_stop,
 	.send_prepare = mse_adapter_eavb_send_prepare,
 	.send = mse_adapter_eavb_send,
 	.receive_prepare = mse_adapter_eavb_receive_prepare,
