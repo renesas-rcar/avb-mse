@@ -59,8 +59,8 @@
  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */ /*************************************************************************/
 
-#ifndef __MSE_CORE_H__
-#define __MSE_CORE_H__
+#ifndef __RAVB_MSE_KERNEL_H__
+#define __RAVB_MSE_KERNEL_H__
 
 #include "ravb_eavb.h"
 
@@ -569,4 +569,4 @@ extern int mse_register_mch(struct mch_ops *ops);
  */
 extern int mse_unregister_mch(int index);
 
-#endif /* __MSE_CORE_H__ */
+#endif /* __RAVB_MSE_KERNEL_H__ */

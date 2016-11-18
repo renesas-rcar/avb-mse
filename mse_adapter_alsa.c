@@ -73,7 +73,7 @@
 #include <sound/initval.h>
 #include <sound/pcm.h>
 
-#include "mse_core.h"
+#include "ravb_mse_kernel.h"
 
 #define MSE_ADAPTER_ALSA_DEVICE_MAX	(2)
 #define MSE_ADAPTER_ALSA_PAGE_SIZE	(64 * 1024)
