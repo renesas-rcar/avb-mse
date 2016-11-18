@@ -93,7 +93,15 @@ enum MSE_DIRECTION {
 /**
  * @brief Get kind of MSE
  */
-#define MSE_TYPE_KING_GET(type) ((type) & 0xFFFF0000)
+#define MSE_TYPE_KIND_GET(type) ((type) & 0xFFFF0000)
+#define IS_MSE_TYPE_KIND_AUDIO(type) \
+	(((type) & 0xFFFF0000) == MSE_TYPE_ADAPTER_AUDIO)
+#define IS_MSE_TYPE_KIND_VIDEO(type) \
+	(((type) & 0xFFFF0000) == MSE_TYPE_ADAPTER_VIDEO)
+#define IS_MSE_TYPE_KIND_NETWORK(type) \
+	(((type) & 0xFFFF0000) == MSE_TYPE_ADAPTER_NETWORK)
+#define IS_MSE_TYPE_KIND_PACKETIZER(type) \
+	(((type) & 0xFFFF0000) == MSE_TYPE_PACKETIZER)
 
 /**
  * @brief type of MSE
@@ -251,10 +259,6 @@ struct mse_adapter_network_ops {
 	int (*set_cbs_param)(int index, struct eavb_cbsparam *cbs);
 	/** @brief set Stream ID config function pointer */
 	int (*set_streamid)(int index, u8 streamid[8]);
-	/** @brief start function pointer */
-	int (*start)(int index);
-	/** @brief stop function pointer */
-	int (*stop)(int index);
 	/** @brief send prepare function pointer */
 	int (*send_prepare)(int index,
 			    struct mse_packet *packets,

@@ -90,9 +90,6 @@
 #define MSE_RADIX_HEXADECIMAL   (16)
 #define MSE_DEFAULT_BITRATE     (50000000) /* 50Mbps */
 #define MSE_DEFAULT_TIMER       (100000000) /* 100msec */
-#ifdef DEBUG_TIMER
-#define DEBUG_TIMER_INTERVAL    (50000000) /* 50msec */
-#endif
 
 /** @brief MSE's media adapter max */
 #define MSE_ADAPTER_MEDIA_MAX   (10)
@@ -166,7 +163,6 @@ struct avtp_queue {
 struct mse_instance {
 	/** @brief instance used flag */
 	bool used_f;
-	bool first_f;
 
 	/** @brief instance direction */
 	enum MSE_DIRECTION inout;
@@ -217,11 +213,6 @@ struct mse_instance {
 	void *start_buffer;
 	size_t start_buffer_size;
 	int (*start_mse_completion)(int index, int size);
-
-	/** @brief timestamp processed flag */
-	bool is_tstamp_processed;
-	/** @brief crf processed flag */
-	bool is_crf_processed;
 
 	/** @brief timer handler */
 	struct hrtimer timer;
@@ -650,7 +641,7 @@ static int mse_create_config_device(int index_media,
 
 	pr_debug("[%s]\n", __func__);
 
-	switch (MSE_TYPE_KING_GET(adapter->type)) {
+	switch (MSE_TYPE_KIND_GET(adapter->type)) {
 	case MSE_TYPE_ADAPTER_AUDIO:
 		adapter->sysfs_config = kzalloc(sizeof(mse_sysfs_config_audio),
 						GFP_KERNEL);
@@ -809,7 +800,7 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 		ret = -EPERM;
 	}
 
-	switch (MSE_TYPE_KING_GET(instance->media->type)) {
+	switch (MSE_TYPE_KIND_GET(instance->media->type)) {
 	case MSE_TYPE_ADAPTER_VIDEO:
 		err = mse_sysfs_get_config_int(index,
 					       MSE_SYSFS_NAME_STR_FPS_SECONDS,
@@ -1324,7 +1315,7 @@ static void mse_work_timestamp(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	int count;
-	int ret = -1;
+	int ret;
 	int i;
 
 	pr_debug("[%s]\n", __func__);
@@ -1367,7 +1358,6 @@ static void mse_work_timestamp(struct work_struct *work)
 		media_clock_recovery(instance);
 	}
 
-	instance->is_tstamp_processed = true;
 	instance->f_work_timestamp = false;
 }
 
@@ -1512,7 +1502,6 @@ static void mse_work_packetize(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	int ret;
-	struct timespec time;
 
 	pr_debug("[%s]\n", __func__);
 
@@ -1520,7 +1509,7 @@ static void mse_work_packetize(struct work_struct *work)
 	if (instance->f_stopping)
 		return;
 
-	switch (MSE_TYPE_KING_GET(instance->media->type)) {
+	switch (MSE_TYPE_KIND_GET(instance->media->type)) {
 	case MSE_TYPE_ADAPTER_AUDIO:
 		/* make AVTP packet */
 		ret = mse_packet_ctrl_make_packet(
@@ -1596,7 +1585,7 @@ static int tstamps_store_avtp_timestamp(struct mse_instance *instance,
 	return 0;
 }
 
-static bool is_presentable(struct mse_instance *instance)
+static bool check_presentation_time(struct mse_instance *instance)
 {
 	struct ptp_clock_time now;
 	unsigned int t = 0, t_d = 0;
@@ -1628,7 +1617,7 @@ static void mse_work_depacketize(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	int timestamp = 0;
-	int received, ret = -1;
+	int received, ret;
 	unsigned int timestamps[128];
 	int t_stored, i;
 	unsigned int d_t;
@@ -1647,7 +1636,7 @@ static void mse_work_depacketize(struct work_struct *work)
 	received = mse_packet_ctrl_check_packet_remain(
 						instance->packet_buffer);
 
-	switch (MSE_TYPE_KING_GET(instance->media->type)) {
+	switch (MSE_TYPE_KIND_GET(instance->media->type)) {
 	case MSE_TYPE_ADAPTER_AUDIO:
 		/* get AVTP packet payload */
 		audio = &instance->media_config.audio;
@@ -1676,7 +1665,6 @@ static void mse_work_depacketize(struct work_struct *work)
 					timestamps[i]);
 				instance->std_time_avtp += d_t;
 			}
-			instance->first_f = true;
 			if (instance->work_length >=
 			    instance->media_buffer_size) {
 				instance->temp_w = (instance->temp_w + 1) %
@@ -1734,7 +1722,6 @@ static void mse_work_depacketize(struct work_struct *work)
 	instance->f_depacketizing = false;
 }
 
-static bool is_audio_adapter(struct mse_adapter *adapter); /* todo move */
 static void mse_work_callback(struct work_struct *work)
 {
 	struct mse_instance *instance;
@@ -1751,9 +1738,9 @@ static void mse_work_callback(struct work_struct *work)
 		tstamps_store_ptp_timestamp(instance);
 
 	if (instance->inout == MSE_DIRECTION_OUTPUT) {
-		if (is_audio_adapter(adapter)) {
+		if (IS_MSE_TYPE_KIND_AUDIO(adapter->type)) {
 			if (instance->temp_w != instance->temp_r &&
-			    is_presentable(instance)) {
+			    check_presentation_time(instance)) {
 				memcpy(instance->media_buffer,
 				       instance->temp_buffer[instance->temp_r],
 				       instance->media_buffer_size);
@@ -1774,7 +1761,6 @@ static void mse_work_stop(struct work_struct *work)
 	struct mse_adapter *adapter;
 	struct mch_ops *m_ops;
 	int ret;
-	bool is_audio;
 
 	pr_debug("[%s]\n", __func__);
 
@@ -1801,8 +1787,7 @@ static void mse_work_stop(struct work_struct *work)
 		pr_err("[%s] The timer was still in use...\n", __func__);
 
 	/* timestamp timer, crf timer stop */
-	is_audio = is_audio_adapter(adapter);
-	if (is_audio) {
+	if (IS_MSE_TYPE_KIND_AUDIO(adapter->type)) {
 		ret = hrtimer_try_to_cancel(&instance->tstamp_timer);
 		if (ret)
 			pr_err("[%s] The tstamp_timer was still in use...\n",
@@ -1921,9 +1906,6 @@ static void mse_work_crf_receive(struct work_struct *work)
 
 	struct mse_packetizer_ops *crf = &mse_packetizer_crf_tstamp_audio_ops;
 
-	/* int timestamp = 0; */
-	/* int received = 0, ret = -1; */
-
 	instance = container_of(work, struct mse_instance, wk_crf_receive);
 
 	pr_debug("[%s]\n", __func__);
@@ -2009,11 +1991,6 @@ static enum hrtimer_restart mse_crf_callback(struct hrtimer *arg)
 			hrtimer_get_expires(&instance->crf_timer),
 			ktime);
 
-	if (!instance->is_crf_processed)
-		return HRTIMER_RESTART;
-
-	instance->is_crf_processed = false;
-
 	/* start workqueue for send */
 	if (!instance->f_crf_sending) {
 		instance->f_crf_sending = true;
@@ -2031,7 +2008,6 @@ static enum hrtimer_restart mse_timestamp_collect_callback(struct hrtimer *arg)
 	instance = container_of(arg, struct mse_instance, tstamp_timer);
 
 	pr_debug("[%s]\n", __func__);
-	/* FIX need mutex lock? */
 
 	if (instance->f_stopping) {
 		pr_err("[%s] stopping ...\n", __func__);
@@ -2044,31 +2020,13 @@ static enum hrtimer_restart mse_timestamp_collect_callback(struct hrtimer *arg)
 			hrtimer_get_expires(&instance->tstamp_timer),
 			ktime);
 
-	if (!instance->is_tstamp_processed)
+	if (instance->f_work_timestamp)
 		return HRTIMER_RESTART;
 
-	/* FIX need mutex unlock? */
 	instance->f_work_timestamp = true;
 	queue_work(instance->wq_tstamp, &instance->wk_timestamp);
-	instance->is_tstamp_processed = false;
 
 	return HRTIMER_RESTART;
-}
-
-static bool is_audio_adapter(struct mse_adapter *adapter)
-{
-	bool is_audio = false;
-
-	switch (MSE_TYPE_KING_GET(adapter->type)) {
-	case MSE_TYPE_ADAPTER_AUDIO:
-	case MSE_TYPE_ADAPTER_AUDIO_PCM:
-		is_audio = true;
-		break;
-	default:
-		break;
-	}
-
-	return is_audio;
 }
 
 static void mse_work_start_streaming(struct work_struct *work)
@@ -2079,24 +2037,12 @@ static void mse_work_start_streaming(struct work_struct *work)
 	ktime_t ktime_crf;
 	struct mse_adapter *adapter;
 	int ret = 0;
-	int remainder = 0;
 	struct ptp_clock_time now;
 	unsigned long flags;
 
 	instance = container_of(work, struct mse_instance, wk_start_stream);
 
 	adapter = instance->media;
-
-	/* Check bytes per frame */
-	if (instance->media_config.audio.bytes_per_frame) {
-		remainder = instance->media_config.audio.bytes_per_frame %
-				(instance->media_config.audio.channels *
-					sizeof(unsigned short));
-		if (remainder) {
-			pr_err("[%s] bytes per frame error\n", __func__);
-			return;
-		}
-	}
 
 	/* get timestamp(nsec) */
 	mse_ptp_get_time(instance->ptp_dev_id, &now);
@@ -2121,14 +2067,11 @@ static void mse_work_start_streaming(struct work_struct *work)
 	instance->f_present = false;
 	instance->remain = 0;
 
-	/* start streaming */
-	instance->network->start(instance->index_network);
-
 	/* start timer */
 	ktime = ktime_set(0, instance->timer_delay);
 	hrtimer_start(&instance->timer, ktime, HRTIMER_MODE_REL);
 
-	if (is_audio_adapter(adapter)) {
+	if (IS_MSE_TYPE_KIND_AUDIO(adapter->type)) {
 		/* capture timestamps */
 		if (instance->ptp_clock == 1) {
 			int count, i;
@@ -2249,7 +2192,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 		/* start workqueue for packetize */
 		instance->f_continue = false;
 
-		if (is_audio_adapter(adapter))
+		if (IS_MSE_TYPE_KIND_AUDIO(adapter->type))
 			create_avtp_timestamps(instance);
 
 		queue_work(instance->wq_packet, &instance->wk_packetize);
@@ -2288,7 +2231,7 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 		return -EINVAL;
 	}
 
-	switch (MSE_TYPE_KING_GET(type)) {
+	switch (MSE_TYPE_KIND_GET(type)) {
 	case MSE_TYPE_ADAPTER_AUDIO:
 	case MSE_TYPE_ADAPTER_VIDEO:
 		break;
@@ -2388,10 +2331,7 @@ int mse_register_adapter_network(struct mse_adapter_network_ops *ops)
 		return -EINVAL;
 	}
 
-	switch (MSE_TYPE_KING_GET(ops->type)) {
-	case MSE_TYPE_ADAPTER_NETWORK:
-		break;
-	default:
+	if (!IS_MSE_TYPE_KIND_NETWORK(ops->type)) {
 		pr_err("[%s] unknown type=%d\n", __func__, ops->type);
 		return -EINVAL;
 	}
@@ -2452,10 +2392,7 @@ int mse_register_packetizer(struct mse_packetizer_ops *ops)
 		return -EINVAL;
 	}
 
-	switch (MSE_TYPE_KING_GET(ops->type)) {
-	case MSE_TYPE_PACKETIZER:
-		break;
-	default:
+	if (!IS_MSE_TYPE_KIND_PACKETIZER(ops->type)) {
 		pr_err("[%s] unknown type=%d\n", __func__, ops->type);
 		return -EINVAL;
 	}
@@ -2556,27 +2493,10 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	memcpy(&instance->media_config.audio, config, sizeof(*config));
 
 	/* calc timer value */
-#ifdef DEBUG_TIMER
-	timer = DEBUG_TIMER_INTERVAL;
-#else /* DEBUG_TIMER */
 	timer = NSEC_SCALE * (u64)config->period_size;
 	do_div(timer, config->sample_rate);
-#endif /* DEBUG_TIMER */
 	instance->timer_delay = timer;
 	pr_notice("[%s] timer_delay=%d\n", __func__, instance->timer_delay);
-
-	if (is_audio_adapter(adapter)) {
-		if (instance->ptp_clock == 1 ||
-		    instance->media_clock_recovery == 1) {
-			instance->tstamp_timer_delay = PTP_DELAY;
-			pr_notice("[%s] tstamp_timer_delay=%d\n",
-				  __func__, instance->tstamp_timer_delay);
-		}
-
-		instance->crf_timer_delay = CRF_DELAY;
-		pr_notice("[%s] crf_timer_delay=%d\n",
-			  __func__, instance->crf_timer_delay);
-	}
 
 	/* set AVTP header info */
 	instance->packetizer->set_network_config(
@@ -2666,12 +2586,8 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 	memcpy(&instance->media_config.video, config, sizeof(*config));
 
 	/* calc timer value */
-#ifdef DEBUG_TIMER
-	framerate = DEBUG_TIMER_INTERVAL;
-#else /* DEBUG_TIMER */
 	framerate = NSEC_SCALE * (u64)config->fps.n;
 	do_div(framerate, config->fps.m);
-#endif /* DEBUG_TIMER */
 	instance->timer_delay = framerate;
 	pr_notice("[%s] timer_delay=%d\n", __func__, instance->timer_delay);
 
@@ -2913,7 +2829,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 
 	/* for timestamp */
 	instance->wq_tstamp = create_singlethread_workqueue("mse_tstampq");
-	if (is_audio_adapter(adapter)) {
+	if (IS_MSE_TYPE_KIND_AUDIO(adapter->type)) {
 		spin_lock_irqsave(&instance->lock_ques, flags);
 		tstamps_clear_tstamps(&instance->tstamp_que);
 		spin_unlock_irqrestore(&instance->lock_ques, flags);
@@ -2923,7 +2839,6 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 		instance->tstamp_timer_delay = PTP_DELAY;
 		instance->tstamp_timer.function =
 					&mse_timestamp_collect_callback;
-		instance->is_tstamp_processed = true;
 
 		/* for crf */
 		instance->wq_crf_packet =
@@ -2932,7 +2847,6 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 			     CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 		instance->crf_timer_delay = CRF_DELAY;
 		instance->crf_timer.function = &mse_crf_callback;
-		instance->is_crf_processed = false;
 	}
 
 	ret = mse_get_default_config(adapter->index_sysfs, instance);
@@ -3024,7 +2938,6 @@ int mse_close(int index)
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
 	int ret;
-	bool is_audio;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
@@ -3048,8 +2961,7 @@ int mse_close(int index)
 	destroy_workqueue(instance->wq_stream);
 
 	destroy_workqueue(instance->wq_tstamp);
-	is_audio = is_audio_adapter(adapter);
-	if (is_audio)
+	if (IS_MSE_TYPE_KIND_AUDIO(adapter->type))
 		destroy_workqueue(instance->wq_crf_packet);
 
 	/* release network adapter */
@@ -3085,7 +2997,6 @@ int mse_start_streaming(int index)
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 	instance = &mse->instance_table[index];
-
 	queue_work(instance->wq_packet,
 		   &instance->wk_start_stream);
 
