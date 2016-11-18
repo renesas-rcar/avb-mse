@@ -417,7 +417,7 @@ static int mse_packetizer_audio_aaf_packetize(int index,
 	if (aaf->piece_f) {
 		aaf->piece_data_len = data_len + piece_len;
 		memcpy(aaf->packet_piece, packet, *packet_size);
-		return -1;
+		return MSE_PACKETIZE_STATUS_NOT_ENOUGH;
 	}
 
 	/* variable header */
@@ -427,9 +427,9 @@ static int mse_packetizer_audio_aaf_packetize(int index,
 
 	/* buffer over check */
 	if (*buffer_processed >= buffer_size)
-		return 1; /* end of buffer */
+		return MSE_PACKETIZE_STATUS_COMPLETE;
 	else
-		return 0; /* continue */
+		return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
 #define AAF_32BIT_OFFSET (16)
@@ -623,9 +623,9 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 
 	/* buffer over check */
 	if (*buffer_processed >= buffer_size)
-		return 1; /* end of buffer */
+		return MSE_PACKETIZE_STATUS_COMPLETE;
 
-	return 0; /* continue */
+	return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
 struct mse_packetizer_ops mse_packetizer_audio_aaf_ops = {

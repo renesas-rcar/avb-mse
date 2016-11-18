@@ -282,6 +282,16 @@ struct mse_adapter_network_ops {
 };
 
 /**
+ * @brief packetizer status
+ */
+enum MSE_PACKETIZE_STATUS  {
+	MSE_PACKETIZE_STATUS_CONTINUE,
+	MSE_PACKETIZE_STATUS_COMPLETE,
+	MSE_PACKETIZE_STATUS_MAY_COMPLETE,
+	MSE_PACKETIZE_STATUS_NOT_ENOUGH,
+};
+
+/**
  * @brief registered operations for packetizer
  */
 struct mse_packetizer_ops {

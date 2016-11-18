@@ -154,7 +154,7 @@ int mse_packet_ctrl_make_packet(int index,
 				struct mse_packetizer_ops *ops,
 				size_t *processed)
 {
-	int ret = 0;
+	int ret = MSE_PACKETIZE_STATUS_CONTINUE;
 	size_t packet_size = 0;
 	int new_write_p;
 	int pcount = 0;
@@ -166,7 +166,8 @@ int mse_packet_ctrl_make_packet(int index,
 	}
 	t  = 0;
 
-	while (!ret && pcount < MSE_PACKET_COUNT_MAX) {
+	while ((ret == MSE_PACKETIZE_STATUS_CONTINUE) &&
+	       (pcount < MSE_PACKET_COUNT_MAX)) {
 		new_write_p = (dma->write_p + 1) % dma->size;
 		if (new_write_p == dma->read_p) {
 			pr_err("make overrun r=%d w=%d nw=%d p=%zu/%zu\n",
@@ -443,11 +444,12 @@ int mse_packet_ctrl_take_out_packet(int index,
 			*timestamps++ = recv_time;
 			(*t_stored)++;
 		}
-		if (ret == 1)
+
+		if (ret == MSE_PACKETIZE_STATUS_COMPLETE)
 			break;
 	}
 
-	if (ret != 1 && pcount > 0) {
+	if (ret == MSE_PACKETIZE_STATUS_CONTINUE && pcount > 0) {
 		pr_debug("[%s] depacketize not enough. processed packet=%d(processed=%zu, ret=%d)\n",
 			 __func__, pcount, *processed, ret);
 		return -1;
