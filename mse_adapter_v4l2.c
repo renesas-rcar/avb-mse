@@ -107,8 +107,6 @@
 #define NUM_BUFFERS 2
 #define NUM_PLANES  1
 
-static struct mutex g_lock;
-
 /*************/
 /* Structure */
 /*************/
@@ -123,13 +121,13 @@ struct v4l2_adapter_device {
 	struct v4l2_device	v4l2_dev;
 	struct video_device	vdev;
 	/* mutex lock */
-	struct mutex		lock;
+	struct mutex		mutex_vb2;        /* lock for vb2_queue */
 	struct v4l2_pix_format	format;
 	struct v4l2_fract	frameintervals;
 	unsigned int		input;
 	struct vb2_queue	queue;
 	/* spin lock */
-	spinlock_t		qlock;
+	spinlock_t		lock_buf_list;    /* lock for buf_list */
 	struct list_head	buf_list;
 	unsigned int		sequence;
 	unsigned int		output;
@@ -285,25 +283,20 @@ static int mse_adapter_v4l2_fop_open(struct file *filp)
 	int err;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
 
-	mutex_lock(&g_lock);
 	pr_debug("[%s]START\n", __func__);
 
 	if (!vadp_dev) {
 		pr_err("[%s]Failed video_drvdata()\n", __func__);
-		mutex_unlock(&g_lock);
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
 	err = v4l2_fh_open(filp);
 	if (err) {
 		pr_err("[%s]Failed v4l2_fh_open()\n", __func__);
-		mutex_unlock(&g_lock);
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
 	pr_debug("[%s]END\n", __func__);
-
-	mutex_unlock(&g_lock);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
@@ -313,32 +306,26 @@ static int mse_adapter_v4l2_fop_release(struct file *filp)
 	int err;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
 
-	mutex_lock(&g_lock);
 	pr_debug("[%s]START\n", __func__);
 
 	if (!vadp_dev) {
 		pr_err("[%s]Failed video_drvdata()\n", __func__);
-		mutex_unlock(&g_lock);
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
 	err = try_mse_close(vadp_dev);
 	if (err) {
 		pr_err("[%s]Failed mse_close()\n", __func__);
-		mutex_unlock(&g_lock);
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
 	err = v4l2_fh_release(filp);
 	if (err) {
 		pr_err("[%s]Failed v4l2_fh_release()\n", __func__);
-		mutex_unlock(&g_lock);
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
 	pr_debug("[%s]END\n", __func__);
-
-	mutex_unlock(&g_lock);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
@@ -718,13 +705,13 @@ static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 	long new_buf_size;
 	int err;
 
-	spin_lock_irqsave(&vadp_dev->qlock, flags);
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	if (!list_empty(&vadp_dev->buf_list)) {
 		new_buf = list_first_entry(&vadp_dev->buf_list,
 					   struct v4l2_adapter_buffer,
 					   list);
 	}
-	spin_unlock_irqrestore(&vadp_dev->qlock, flags);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	if (!new_buf) {
 		pr_debug("[%s]new_buf is NULL\n", __func__);
@@ -766,11 +753,11 @@ static void mse_adapter_v4l2_playback_buf_queue(struct vb2_buffer *vb)
 		return;
 	}
 
-	spin_lock_irqsave(&vadp_dev->qlock, flags);
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	if (list_empty(&vadp_dev->buf_list))
 		is_need_send = 1;
 	list_add_tail(&buf->list, &vadp_dev->buf_list);
-	spin_unlock_irqrestore(&vadp_dev->qlock, flags);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	/* start_streaming is not called yet */
 	if (!vb2_start_streaming_called(&vadp_dev->queue)) {
@@ -793,12 +780,12 @@ static void return_all_buffers(struct v4l2_adapter_device *vadp_dev,
 	unsigned long flags;
 	struct v4l2_adapter_buffer *buf, *node;
 
-	spin_lock_irqsave(&vadp_dev->qlock, flags);
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	list_for_each_entry_safe(buf, node, &vadp_dev->buf_list, list) {
 		vb2_buffer_done(&buf->vb.vb2_buf, state);
 		list_del(&buf->list);
 	}
-	spin_unlock_irqrestore(&vadp_dev->qlock, flags);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 }
 
 static int mse_adapter_v4l2_playback_callback(int index, int size)
@@ -816,14 +803,14 @@ static int mse_adapter_v4l2_playback_callback(int index, int size)
 
 	pr_debug("[%s]START\n", __func__);
 
-	spin_lock_irqsave(&vadp_dev->qlock, flags);
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	if (!list_empty(&vadp_dev->buf_list)) {
 		buf = list_first_entry(&vadp_dev->buf_list,
 				       struct v4l2_adapter_buffer,
 				       list);
 		list_del(&buf->list);
 	}
-	spin_unlock_irqrestore(&vadp_dev->qlock, flags);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	if (!buf) {
 		pr_err("[%s]buf is NULL\n", __func__);
@@ -1199,12 +1186,12 @@ static int capture_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 	long new_buf_size;
 	int err;
 
-	spin_lock_irqsave(&vadp_dev->qlock, flags);
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	if (!list_empty(&vadp_dev->buf_list))
 		new_buf = list_first_entry(&vadp_dev->buf_list,
 					   struct v4l2_adapter_buffer,
 					   list);
-	spin_unlock_irqrestore(&vadp_dev->qlock, flags);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	if (!new_buf) {
 		pr_debug("[%s]new_buf is NULL\n", __func__);
@@ -1242,11 +1229,11 @@ static void mse_adapter_v4l2_capture_buf_queue(struct vb2_buffer *vb)
 		return;
 	}
 
-	spin_lock_irqsave(&vadp_dev->qlock, flags);
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	if (list_empty(&vadp_dev->buf_list))
 		is_need_send = 1;
 	list_add_tail(&buf->list, &vadp_dev->buf_list);
-	spin_unlock_irqrestore(&vadp_dev->qlock, flags);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	/* start_streaming is not called yet */
 	if (!vb2_start_streaming_called(&vadp_dev->queue)) {
@@ -1279,14 +1266,14 @@ static int mse_adapter_v4l2_capture_callback(int index, int size)
 
 	pr_debug("[%s]START size=%d\n", __func__, size);
 
-	spin_lock_irqsave(&vadp_dev->qlock, flags);
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	if (!list_empty(&vadp_dev->buf_list)) {
 		buf = list_first_entry(&vadp_dev->buf_list,
 				       struct v4l2_adapter_buffer,
 				       list);
 		list_del(&buf->list);
 	}
-	spin_unlock_irqrestore(&vadp_dev->qlock, flags);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	if (!buf) {
 		pr_debug("[%s]buf is NULL\n", __func__);
@@ -1800,7 +1787,7 @@ static int mse_adapter_v4l2_probe(int dev_num, unsigned int buf_type)
 	vdev->ioctl_ops = init_info->ioctl_ops;
 	vdev->vfl_dir = init_info->vfl_dir;
 
-	mutex_init(&vadp_dev->lock);
+	mutex_init(&vadp_dev->mutex_vb2);
 
 	q = &vadp_dev->queue;
 	q->type = init_info->type;
@@ -1810,7 +1797,7 @@ static int mse_adapter_v4l2_probe(int dev_num, unsigned int buf_type)
 	q->ops = init_info->queue_ops;
 	q->mem_ops = &vb2_vmalloc_memops;
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-	q->lock = &vadp_dev->lock;
+	q->lock = &vadp_dev->mutex_vb2;
 	q->gfp_flags = GFP_DMA32;
 	q->min_buffers_needed = 2;
 
@@ -1821,9 +1808,9 @@ static int mse_adapter_v4l2_probe(int dev_num, unsigned int buf_type)
 	}
 
 	INIT_LIST_HEAD(&vadp_dev->buf_list);
-	spin_lock_init(&vadp_dev->qlock);
+	spin_lock_init(&vadp_dev->lock_buf_list);
 
-	vdev->lock = &vadp_dev->lock;
+	vdev->lock = &vadp_dev->mutex_vb2;
 	vdev->queue = q;
 	video_set_drvdata(vdev, vadp_dev);
 
@@ -1912,7 +1899,6 @@ static int mse_adapter_v4l2_init(void)
 	int rtn = MSE_ADAPTER_V4L2_RTN_OK;
 
 	pr_debug("Start v4l2 adapter\n");
-	mutex_init(&g_lock);
 	for (i = 0; i < MSE_ADAPTER_V4L2_DEVICE_MAX; i++) {
 		if (i < MSE_ADAPTER_V4L2_CAPTURE_DEVICE_MAX) {
 			dev_num = i;
