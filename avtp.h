@@ -83,6 +83,8 @@
 
 #define AVTP_CIP_HEADER_SIZE             (8)
 #define AVTP_PAYLOAD_OFFSET              (24 + AVTP_OFFSET)
+#define AVTP_IEC61883_4_PAYLOAD_OFFSET \
+	(AVTP_CIP_HEADER_SIZE + AVTP_PAYLOAD_OFFSET)
 #define AVTP_IEC61883_6_PAYLOAD_OFFSET \
 	(AVTP_CIP_HEADER_SIZE + AVTP_PAYLOAD_OFFSET)
 #define AVTP_AAF_PAYLOAD_OFFSET          (AVTP_PAYLOAD_OFFSET)
@@ -534,6 +536,7 @@ DEF_AVTP_ACCESSER_UINT16(crf_timestamp_interval, 18)
 /**
  * Template - IEEE1722
  */
+extern void avtp_copy_iec61883_4_template(void *data);
 extern void avtp_copy_iec61883_6_template(void *data);
 extern void avtp_copy_aaf_pcm_template(void *data);
 extern void avtp_copy_cvf_h264_d13_template(void *data);
