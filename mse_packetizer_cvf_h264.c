@@ -463,7 +463,8 @@ static int mse_packetizer_video_cvf_h264_d13_packetize(
 		case NALU_TYPE_UNSPECIFIED:
 		case NALU_TYPE_UNSPECIFIED31:
 			pr_err("NAL format error\n");
-			return 0; /* invalid nal type, continue */
+			/* invalid nal type, continue */
+			return MSE_PACKETIZE_STATUS_CONTINUE;
 		/* VCL */
 		case NALU_TYPE_VCL_NON_IDR:
 		case NALU_TYPE_VCL_PART_A:
@@ -525,9 +526,9 @@ static int mse_packetizer_video_cvf_h264_d13_packetize(
 
 	/* TODO buffer over check */
 	if (*buffer_processed >= buffer_size)
-		return 1; /* end of buffer */
+		return MSE_PACKETIZE_STATUS_COMPLETE;
 	else
-		return 0; /* continue */
+		return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
 static int mse_packetizer_video_cvf_h264_packetize(int index,
@@ -574,7 +575,8 @@ static int mse_packetizer_video_cvf_h264_packetize(int index,
 		case NALU_TYPE_UNSPECIFIED:
 		case NALU_TYPE_UNSPECIFIED31:
 			pr_err("NAL format error\n");
-			return 0; /* invalid nal type, continue */
+			/* invalid nal type, continue */
+			return MSE_PACKETIZE_STATUS_CONTINUE;
 		/* VCL */
 		case NALU_TYPE_VCL_NON_IDR:
 		case NALU_TYPE_VCL_PART_A:
@@ -638,9 +640,9 @@ static int mse_packetizer_video_cvf_h264_packetize(int index,
 
 	/* TODO buffer over check */
 	if (*buffer_processed >= buffer_size)
-		return 1; /* end of buffer */
+		return MSE_PACKETIZE_STATUS_COMPLETE;
 	else
-		return 0; /* continue */
+		return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
 static int mse_packetizer_video_cvf_h264_d13_depacketize(
@@ -727,13 +729,12 @@ static int mse_packetizer_video_cvf_h264_d13_depacketize(
 
 	avtp_set_sequence_num(packet, 0); /* for debug */
 
-	/* TODO buffer over check */
 	if (!(((unsigned char *)packet)[MBIT_ADDR] & MBIT_SET)) /* M bit */
-		return 0; /* continue */
+		return MSE_PACKETIZE_STATUS_CONTINUE;
 
 	pr_debug("[%s] M bit enable\n", __func__);
 
-	return 1; /* end of picture frame */
+	return MSE_PACKETIZE_STATUS_COMPLETE;
 }
 
 static int mse_packetizer_video_cvf_h264_depacketize(int index,
@@ -807,7 +808,7 @@ static int mse_packetizer_video_cvf_h264_depacketize(int index,
 
 		if (*buffer_processed + fu_size >= buffer_size) {
 			pr_err("[%s] buffer overrun\n", __func__);
-			return -EPERM; /* error */
+			return -EPERM;
 		}
 		memcpy((unsigned char *)buffer + *buffer_processed,
 		       payload + FU_HEADER_LEN, fu_size);
@@ -819,13 +820,12 @@ static int mse_packetizer_video_cvf_h264_depacketize(int index,
 
 	avtp_set_sequence_num(packet, 0); /* for debug */
 
-	/* TODO buffer over check */
 	if (!(((unsigned char *)packet)[MBIT_ADDR] & MBIT_SET)) /* M bit */
-		return 0; /* continue */
+		return MSE_PACKETIZE_STATUS_CONTINUE;
 
 	pr_debug("[%s] M bit enable\n", __func__);
 
-	return 1; /* end of picture frame */
+	return MSE_PACKETIZE_STATUS_COMPLETE;
 }
 
 struct mse_packetizer_ops mse_packetizer_video_cvf_h264_d13_ops = {

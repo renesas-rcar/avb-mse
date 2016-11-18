@@ -1566,6 +1566,7 @@ static int mse_adapter_v4l2_streamon(
 	int err;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
 	struct mse_video_config config;
+	struct mse_mpeg2ts_config config_ts;
 
 	pr_debug("[%s]START\n", __func__);
 
@@ -1580,32 +1581,48 @@ static int mse_adapter_v4l2_streamon(
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
-	err = mse_get_video_config(vadp_dev->index_instance, &config);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
-		pr_err("[%s]Failed mse_get_video_config()\n", __func__);
-		return MSE_ADAPTER_V4L2_RTN_NG;
-	}
+	if (vadp_dev->format.pixelformat == V4L2_PIX_FMT_MPEG) {
+		err = mse_get_mpeg2ts_config(vadp_dev->index_instance,
+					     &config_ts);
+		if (err < 0) {
+			pr_err("[%s]Failed mse_get_mpeg2ts_config()\n",
+			       __func__);
+			return MSE_ADAPTER_V4L2_RTN_NG;
+		}
 
-	config.height = vadp_dev->format.height;
-	config.width = vadp_dev->format.width;
-	if (vadp_dev->format.field == V4L2_FIELD_INTERLACED)
-		config.interlaced = 1;
-	else
-		config.interlaced = 0;
+		/* nothing to set at current version */
 
-	if (vadp_dev->format.pixelformat > 0)
-		config.format = vadp_dev->format.pixelformat;
+		err = mse_set_mpeg2ts_config(vadp_dev->index_instance,
+					     &config_ts);
+		if (err < 0) {
+			pr_err("[%s]Failed mse_get_mpeg2ts_config()\n",
+			       __func__);
+			return MSE_ADAPTER_V4L2_RTN_NG;
+		}
+	} else {
+		/* video config */
+		err = mse_get_video_config(vadp_dev->index_instance, &config);
+		if (err < MSE_ADAPTER_V4L2_RTN_OK) {
+			pr_err("[%s]Failed mse_get_video_config()\n",
+			       __func__);
+			return MSE_ADAPTER_V4L2_RTN_NG;
+		}
 
-	if (vadp_dev->frameintervals.numerator > 0 &&
-	    vadp_dev->frameintervals.denominator > 0) {
-		config.fps.n = vadp_dev->frameintervals.numerator;
-		config.fps.m = vadp_dev->frameintervals.denominator;
-	}
+		if (vadp_dev->format.pixelformat > 0)
+			config.format = vadp_dev->format.pixelformat;
 
-	err = mse_set_video_config(vadp_dev->index_instance, &config);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
-		pr_err("[%s]Failed mse_set_video_config()\n", __func__);
-		return MSE_ADAPTER_V4L2_RTN_NG;
+		if (vadp_dev->frameintervals.numerator > 0 &&
+		    vadp_dev->frameintervals.denominator > 0) {
+			config.fps.n = vadp_dev->frameintervals.numerator;
+			config.fps.m = vadp_dev->frameintervals.denominator;
+		}
+
+		err = mse_set_video_config(vadp_dev->index_instance, &config);
+		if (err < MSE_ADAPTER_V4L2_RTN_OK) {
+			pr_err("[%s]Failed mse_set_video_config()\n",
+			       __func__);
+			return MSE_ADAPTER_V4L2_RTN_NG;
+		}
 	}
 
 	pr_debug("[%s]END\n", __func__);

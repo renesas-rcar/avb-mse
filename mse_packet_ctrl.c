@@ -144,35 +144,6 @@ void mse_packet_ctrl_free(struct mse_packet_ctrl *dma)
 	kfree(dma);
 }
 
-#if 0
-static int calculate_timestamp(unsigned int *timestamp,
-			       int ptp_clock,
-			       int tstamp_size,
-			       unsigned int *tstamp)
-{
-	/* TODO: calculate! */
-	switch (ptp_clock) {
-	case 0:
-		/* ptp */
-		*timestamp = tstamp[tstamp_size - 1] +
-			    ((tstamp[tstamp_size - 1] +
-			    tstamp[tstamp_size - 2]) / 2);
-		break;
-	case 1:
-		/* timestamp */
-		*timestamp = tstamp[tstamp_size - 1] +
-			    ((tstamp[tstamp_size - 1] +
-			    tstamp[tstamp_size - 2]) / 2);
-		break;
-	default:
-		*timestamp = tstamp[tstamp_size - 1];
-		break;
-	}
-
-	return 0;
-}
-#endif
-
 int mse_packet_ctrl_make_packet(int index,
 				void *data,
 				size_t size,
@@ -183,7 +154,7 @@ int mse_packet_ctrl_make_packet(int index,
 				struct mse_packetizer_ops *ops,
 				size_t *processed)
 {
-	int ret = 0;
+	int ret = MSE_PACKETIZE_STATUS_CONTINUE;
 	size_t packet_size = 0;
 	int new_write_p;
 	int pcount = 0;
@@ -195,7 +166,8 @@ int mse_packet_ctrl_make_packet(int index,
 	}
 	t  = 0;
 
-	while (!ret && pcount < MSE_PACKET_COUNT_MAX) {
+	while ((ret == MSE_PACKETIZE_STATUS_CONTINUE) &&
+	       (pcount < MSE_PACKET_COUNT_MAX)) {
 		new_write_p = (dma->write_p + 1) % dma->size;
 		if (new_write_p == dma->read_p) {
 			pr_err("make overrun r=%d w=%d nw=%d p=%zu/%zu\n",
@@ -205,8 +177,16 @@ int mse_packet_ctrl_make_packet(int index,
 		}
 		memset(dma->packet_table[dma->write_p].vaddr, 0,
 		       VLAN_ETH_ZLEN);
-		timestamp = tstamp[t++];
-
+		if (tstamp_size == 1) {               /* video */
+			timestamp = tstamp[0];
+		} else {                              /* audio */
+			if (t < tstamp_size) {
+				timestamp = tstamp[t++];
+			} else {
+				pr_err("not enough timestamp %d", tstamp_size);
+				return -EINVAL;
+			}
+		}
 		ret = ops->packetize(index,
 				     dma->packet_table[dma->write_p].vaddr,
 				     &packet_size,
@@ -215,14 +195,14 @@ int mse_packet_ctrl_make_packet(int index,
 				     processed,
 				     &timestamp);
 
-		if (ret >= 0) {
+		if (ret >= 0 && ret != MSE_PACKETIZE_STATUS_NOT_ENOUGH) {
 			pcount++;
 			if (packet_size >= VLAN_ETH_ZLEN)
 				dma->packet_table[dma->write_p].len =
 					packet_size;
 			else
 				dma->packet_table[dma->write_p].len =
-				        VLAN_ETH_ZLEN;
+					VLAN_ETH_ZLEN;
 
 			dma->write_p = new_write_p;
 		} else {
@@ -437,9 +417,8 @@ int mse_packet_ctrl_take_out_packet(int index,
 				    size_t *processed)
 {
 	int ret = 0;
-	int new_read_p;
 	unsigned int recv_time;
-	static int pcount;
+	int pcount;
 
 	if (!*processed)
 		pcount = 0;
@@ -456,7 +435,6 @@ int mse_packet_ctrl_take_out_packet(int index,
 	*t_stored = 0;
 
 	while (dma->read_p != dma->write_p) {
-		new_read_p = (dma->read_p + 1) % dma->size;
 		ret = ops->depacketize(index,
 				       data,
 				       size,
@@ -465,18 +443,25 @@ int mse_packet_ctrl_take_out_packet(int index,
 				       dma->packet_table[dma->read_p].vaddr,
 				       dma->packet_table[dma->read_p].len);
 
-		dma->read_p = new_read_p;
-		pcount++;
+		dma->read_p = (dma->read_p + 1) % dma->size;
 
-		if (ret >= 0 && *t_stored < t_size) {
+		if (ret < 0)
+			continue; /* error occurred, so skip this packet */
+
+		pcount++;
+		if (*t_stored < t_size) {
 			*timestamps++ = recv_time;
 			(*t_stored)++;
+		} else {
+			pr_err("[%s] timestamp error\n", __func__);
+			break;
 		}
-		if (ret == 1)
+
+		if (ret == MSE_PACKETIZE_STATUS_COMPLETE)
 			break;
 	}
 
-	if (ret != 1 && pcount > 0) {
+	if (ret == MSE_PACKETIZE_STATUS_CONTINUE && pcount > 0) {
 		pr_debug("[%s] depacketize not enough. processed packet=%d(processed=%zu, ret=%d)\n",
 			 __func__, pcount, *processed, ret);
 		return -1;

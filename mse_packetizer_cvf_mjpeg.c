@@ -555,9 +555,9 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 
 	/* buffer end */
 	if (*buffer_processed == buffer_size)
-		return 1;
+		return MSE_PACKETIZE_STATUS_COMPLETE;
 	else
-		return 0;
+		return MSE_PACKETIZE_STATUS_CONTINUE;
 
 header_error:
 	/* find next header */
@@ -681,7 +681,7 @@ static int mse_packetizer_cvf_mjpeg_depacketize(int index,
 
 		if (*buffer_processed + len >= buffer_size) {
 			pr_err("[%s] buffer overrun header\n", __func__);
-			return -EPERM; /* error */
+			return -EPERM;
 		}
 
 		memcpy(buffer + *buffer_processed, header, len);
@@ -690,7 +690,7 @@ static int mse_packetizer_cvf_mjpeg_depacketize(int index,
 
 	if (*buffer_processed + data_len >= buffer_size) {
 		pr_err("[%s] buffer overrun data\n", __func__);
-		return -EPERM; /* error */
+		return -EPERM;
 	}
 
 	/* data copy */
@@ -705,12 +705,12 @@ static int mse_packetizer_cvf_mjpeg_depacketize(int index,
 
 	/* TODO buffer over check */
 	if (!avtp_get_cvf_m(packet))
-		return 0; /* continue */
+		return MSE_PACKETIZE_STATUS_CONTINUE;
 
 	pr_info("[%s] M bit enable seq=%d size=%zu/%zu\n", __func__,
 		mjpg->old_seq_num - 1, *buffer_processed, buffer_size);
 
-	return 1; /* end of picture frame */
+	return MSE_PACKETIZE_STATUS_COMPLETE;
 }
 
 struct mse_packetizer_ops mse_packetizer_video_cvf_mjpeg_ops = {
