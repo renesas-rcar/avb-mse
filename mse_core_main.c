@@ -76,7 +76,7 @@
 #include <linux/delay.h>
 #include <linux/ptp_clock.h>
 #include "avtp.h"
-#include "mse_core.h"
+#include "ravb_mse_kernel.h"
 #include "mse_packet_ctrl.h"
 #include "mse_sysfs.h"
 #include "mse_packetizer.h"

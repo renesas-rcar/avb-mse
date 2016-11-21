@@ -69,7 +69,7 @@
 #include <linux/hrtimer.h>
 #include <linux/ptp_clock.h>
 
-#include "mse_core.h"
+#include "ravb_mse_kernel.h"
 
 #define MAX_PTP_DEVICES  10
 #define DELAY            3333333  /* 3.33..ms */

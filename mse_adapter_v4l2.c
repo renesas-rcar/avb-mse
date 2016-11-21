@@ -80,7 +80,7 @@
 #include <media/videobuf2-vmalloc.h>
 #include <media/videobuf2-memops.h>
 
-#include "mse_core.h"
+#include "ravb_mse_kernel.h"
 
 /****************/
 /* Return value */

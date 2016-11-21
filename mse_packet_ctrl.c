@@ -68,7 +68,7 @@
 #include <linux/device.h>
 #include <linux/dma-mapping.h>
 #include <linux/ptp_clock.h>
-#include "mse_core.h"
+#include "ravb_mse_kernel.h"
 #include "mse_packet_ctrl.h"
 #include "mse_packetizer.h"
 
