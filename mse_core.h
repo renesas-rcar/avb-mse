@@ -154,20 +154,49 @@ struct mse_network_config {
 	/* if need, add more parameters */
 };
 
+enum MSE_AUDIO_BIT {
+	MSE_AUDIO_BIT_INVALID,
+	MSE_AUDIO_BIT_16,
+	MSE_AUDIO_BIT_18,
+	MSE_AUDIO_BIT_20,
+	MSE_AUDIO_BIT_24,
+	MSE_AUDIO_BIT_32
+};
+
+static inline int mse_get_bit_depth(enum MSE_AUDIO_BIT bit_depth)
+{
+	switch (bit_depth) {
+	case MSE_AUDIO_BIT_16:
+		return 16;
+	case MSE_AUDIO_BIT_18:
+		return 18;
+	case MSE_AUDIO_BIT_20:
+		return 20;
+	case MSE_AUDIO_BIT_24:
+		return 24;
+	case MSE_AUDIO_BIT_32:
+		return 32;
+	default:
+		return 0;
+	}
+}
+
 /**
  * @brief aduio stream configuration
  */
 struct mse_audio_config {
 	/** @brief sampling rate */
 	int sample_rate;
-	/** @brief sample format */
-	int sample_format;
 	/** @brief channels */
 	int channels;
 	/** @brief period_size */
 	int period_size;
 	/** @brief samples per frame */
 	int bytes_per_sample;
+	/** @brief sample bit depth  */
+	enum MSE_AUDIO_BIT sample_bit_depth;
+	/** @brief sample endian */
+	bool is_big_endian;
 	/** @brief bytes per frame */
 	int bytes_per_frame;
 	/* if need, add more parameters */

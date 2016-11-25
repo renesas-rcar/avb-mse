@@ -277,6 +277,7 @@ struct mse_instance {
 	/** @brief AVTP timestampes */
 	unsigned int avtp_timestamps[1024];
 	int avtp_timestamps_size;
+	int avtp_timestamps_current;
 	/** @brief complete function pointer */
 	int (*mse_completion)(int index, int size);
 	/** @brief work length for media buffer */
@@ -1452,6 +1453,8 @@ static int create_avtp_timestamps(struct mse_instance *instance)
 		instance->index_packetizer,
 		&instance->audio_info);
 
+	instance->avtp_timestamps_current = 0;
+
 	if (instance->ptp_clock == 0) {
 		offset = instance->max_transit_time;
 	} else {
@@ -1556,6 +1559,7 @@ static void mse_work_packetize(struct work_struct *work)
 			instance->media_buffer,
 			instance->media_buffer_size,
 			instance->ptp_clock,
+			&instance->avtp_timestamps_current,
 			instance->avtp_timestamps_size,
 			instance->avtp_timestamps,
 			instance->packet_buffer,
@@ -1584,6 +1588,7 @@ static void mse_work_packetize(struct work_struct *work)
 			instance->media_buffer + instance->work_length,
 			instance->media_buffer_size - instance->work_length,
 			-1,
+			NULL,
 			1,
 			&instance->timestamp,
 			instance->packet_buffer,
@@ -1692,6 +1697,12 @@ static void mse_work_depacketize(struct work_struct *work)
 				instance->packet_buffer,
 				instance->packetizer,
 				&instance->work_length);
+
+			if (ret < -1) {
+				instance->mse_completion(instance->index_media,
+							 ret);
+				break;
+			}
 
 			/* samples per packet */
 			instance->packetizer->get_audio_info(
@@ -2660,6 +2671,7 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	struct mse_instance *instance;
 	u64 timer;
 	struct mse_adapter *adapter;
+	int ret;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
@@ -2672,10 +2684,14 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	}
 
 	pr_debug("[%s] index=%d data=%p\n", __func__, index, config);
-	pr_info("[%s]\n  sample_rate=%d sample_format=%d channels=%d\n"
-		"  period_size=%d bytes_per_sample=%d\n", __func__,
-		config->sample_rate, config->sample_format, config->channels,
-		config->period_size, config->bytes_per_sample);
+	pr_info("[%s]\n  sample_rate=%d channels=%d\n"
+		"  period_size=%d bytes_per_sample=%d bit_depth=%d\n"
+		"  is_big_endian=%d\n",
+		__func__,
+		config->sample_rate,  config->channels,
+		config->period_size, config->bytes_per_sample,
+		mse_get_bit_depth(config->sample_bit_depth),
+		config->is_big_endian);
 
 	instance = &mse->instance_table[index];
 	adapter = instance->media;
@@ -2693,8 +2709,10 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	instance->packetizer->set_network_config(
 		instance->index_packetizer, &instance->net_config);
 	/* init packet header */
-	instance->packetizer->set_audio_config(
+	ret = instance->packetizer->set_audio_config(
 		instance->index_packetizer, config);
+	if (ret < 0)
+		return ret;
 
 	if (instance->inout == MSE_DIRECTION_INPUT) {
 		struct eavb_cbsparam cbs;
