@@ -113,17 +113,25 @@ struct snd_pcm_hardware g_mse_adapter_alsa_playback_hw = {
 	.formats		= SNDRV_PCM_FMTBIT_S16_LE |
 				  SNDRV_PCM_FMTBIT_S16_BE |
 				  SNDRV_PCM_FMTBIT_S24_LE |
-				  SNDRV_PCM_FMTBIT_S24_BE,
-	.rates			= SNDRV_PCM_RATE_8000_96000,
+				  SNDRV_PCM_FMTBIT_S24_BE |
+				  SNDRV_PCM_FMTBIT_S32_LE |
+				  SNDRV_PCM_FMTBIT_S32_BE |
+				  SNDRV_PCM_FMTBIT_S18_3LE |
+				  SNDRV_PCM_FMTBIT_S18_3BE |
+				  SNDRV_PCM_FMTBIT_S20_3LE |
+				  SNDRV_PCM_FMTBIT_S20_3BE |
+				  SNDRV_PCM_FMTBIT_S24_3LE |
+				  SNDRV_PCM_FMTBIT_S24_3BE,
+	.rates			= SNDRV_PCM_RATE_8000_192000,
 	.rate_min		= 8000,
-	.rate_max		= 96000,
-	.channels_min		= 2,
-	.channels_max		= 2,
+	.rate_max		= 192000,
+	.channels_min		= 1,
+	.channels_max		= 24,
 	.buffer_bytes_max	= 65536,
 	.period_bytes_min	= 64,
 	.period_bytes_max	= 8192,
 	.periods_min		= 2,
-	.periods_max		= 1024,
+	.periods_max		= 32,
 };
 
 /* hw - Capture */
@@ -135,17 +143,25 @@ struct snd_pcm_hardware g_mse_adapter_alsa_capture_hw = {
 	.formats		= SNDRV_PCM_FMTBIT_S16_LE |
 				  SNDRV_PCM_FMTBIT_S16_BE |
 				  SNDRV_PCM_FMTBIT_S24_LE |
-				  SNDRV_PCM_FMTBIT_S24_BE,
-	.rates			= SNDRV_PCM_RATE_8000_96000,
+				  SNDRV_PCM_FMTBIT_S24_BE |
+				  SNDRV_PCM_FMTBIT_S32_LE |
+				  SNDRV_PCM_FMTBIT_S32_BE |
+				  SNDRV_PCM_FMTBIT_S18_3LE |
+				  SNDRV_PCM_FMTBIT_S18_3BE |
+				  SNDRV_PCM_FMTBIT_S20_3LE |
+				  SNDRV_PCM_FMTBIT_S20_3BE |
+				  SNDRV_PCM_FMTBIT_S24_3LE |
+				  SNDRV_PCM_FMTBIT_S24_3BE,
+	.rates			= SNDRV_PCM_RATE_8000_192000,
 	.rate_min		= 8000,
-	.rate_max		= 96000,
-	.channels_min		= 2,
-	.channels_max		= 2,
+	.rate_max		= 192000,
+	.channels_min		= 1,
+	.channels_max		= 24,
 	.buffer_bytes_max	= 65536,
 	.period_bytes_min	= 64,
 	.period_bytes_max	= 8192,
 	.periods_min		= 2,
-	.periods_max		= 1024,
+	.periods_max		= 32,
 };
 
 /************/
@@ -185,6 +201,20 @@ static int mse_adapter_alsa_callback(int index, int size)
 		return 0;
 	}
 	runtime = io->substream->runtime;
+
+	if (size < 0) {
+		unsigned long flags;
+
+		pr_err("[%s] error from mse core %d\n", __func__, size);
+
+		snd_pcm_stream_lock_irqsave(io->substream, flags);
+		if (snd_pcm_running(io->substream))  {
+			snd_pcm_stop(io->substream,
+				     SNDRV_PCM_STATE_DISCONNECTED);
+		}
+		snd_pcm_stream_unlock_irqrestore(io->substream, flags);
+		return 0;
+	}
 
 	io->byte_pos += io->byte_per_period;
 	io->period_pos++;
@@ -524,6 +554,46 @@ static int mse_adapter_alsa_hw_free(struct snd_pcm_substream *substream)
 	return snd_pcm_lib_free_pages(substream);
 }
 
+static enum MSE_AUDIO_BIT get_alsa_bit_depth(int alsa_format)
+{
+	switch (alsa_format) {
+	case SNDRV_PCM_FORMAT_S32_LE:
+	case SNDRV_PCM_FORMAT_S32_BE:
+		return MSE_AUDIO_BIT_32;
+	case SNDRV_PCM_FORMAT_S24_LE:
+	case SNDRV_PCM_FORMAT_S24_BE:
+	case SNDRV_PCM_FORMAT_S24_3LE:
+	case SNDRV_PCM_FORMAT_S24_3BE:
+		return MSE_AUDIO_BIT_24;
+	case SNDRV_PCM_FORMAT_S20_3LE:
+	case SNDRV_PCM_FORMAT_S20_3BE:
+		return MSE_AUDIO_BIT_20;
+	case SNDRV_PCM_FORMAT_S18_3LE:
+	case SNDRV_PCM_FORMAT_S18_3BE:
+		return MSE_AUDIO_BIT_18;
+	case SNDRV_PCM_FORMAT_S16_LE:
+	case SNDRV_PCM_FORMAT_S16_BE:
+		return MSE_AUDIO_BIT_16;
+	default:
+		return MSE_AUDIO_BIT_INVALID;
+	}
+}
+
+static bool is_alsa_big_endian(int alsa_format)
+{
+	switch (alsa_format) {
+	case SNDRV_PCM_FORMAT_S16_BE:
+	case SNDRV_PCM_FORMAT_S24_BE:
+	case SNDRV_PCM_FORMAT_S32_BE:
+	case SNDRV_PCM_FORMAT_S24_3BE:
+	case SNDRV_PCM_FORMAT_S18_3BE:
+	case SNDRV_PCM_FORMAT_S20_3BE:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 {
 	struct alsa_device *chip = snd_pcm_substream_chip(substream);
@@ -548,10 +618,11 @@ static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 	}
 
 	config.sample_rate		= runtime->rate;
-	config.sample_format		= runtime->format;
 	config.channels			= runtime->channels;
 	config.period_size		= runtime->period_size;
 	config.bytes_per_sample		= samples_to_bytes(runtime, 1);
+	config.sample_bit_depth		= get_alsa_bit_depth(runtime->format);
+	config.is_big_endian		= is_alsa_big_endian(runtime->format);
 
 	err = mse_set_audio_config(io->index, &config);
 	if (err < 0) {

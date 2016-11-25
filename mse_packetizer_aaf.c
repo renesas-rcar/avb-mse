@@ -534,7 +534,6 @@ static int copy_bit_to_paload(unsigned char *dest, int dest_type,
 		dest[0] = (value & 0xFF0000) >> 16;
 		dest[1] = (value & 0x00FF00) >> 8;
 		dest[2] = (value & 0x0000FF);
-
 		break;
 	case AVTP_AAF_FORMAT_INT_32BIT:
 		dest[0] = (value & 0xFF000000) >> 24;
