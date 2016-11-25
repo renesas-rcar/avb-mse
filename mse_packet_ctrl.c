@@ -148,6 +148,7 @@ int mse_packet_ctrl_make_packet(int index,
 				void *data,
 				size_t size,
 				int ptp_clock,
+				int *current_timestamp,
 				int tstamp_size,
 				unsigned int *tstamp,
 				struct mse_packet_ctrl *dma,
@@ -158,13 +159,12 @@ int mse_packet_ctrl_make_packet(int index,
 	size_t packet_size = 0;
 	int new_write_p;
 	int pcount = 0;
-	unsigned int timestamp, t;
+	unsigned int timestamp;
 
 	if (!ops) {
 		pr_err("[%s] no packetizer\n", __func__);
 		return -EINVAL;
 	}
-	t  = 0;
 
 	while ((ret == MSE_PACKETIZE_STATUS_CONTINUE) &&
 	       (pcount < MSE_PACKET_COUNT_MAX)) {
@@ -180,8 +180,11 @@ int mse_packet_ctrl_make_packet(int index,
 		if (tstamp_size == 1) {               /* video */
 			timestamp = tstamp[0];
 		} else {                              /* audio */
-			if (t < tstamp_size) {
-				timestamp = tstamp[t++];
+			if (*current_timestamp < tstamp_size) {
+				timestamp = tstamp[(*current_timestamp)++];
+			} else if (*current_timestamp == tstamp_size) {
+				timestamp = 0;      /* dummy, not used */
+				(*current_timestamp)++;
 			} else {
 				pr_err("not enough timestamp %d", tstamp_size);
 				return -EINVAL;
@@ -446,15 +449,12 @@ int mse_packet_ctrl_take_out_packet(int index,
 		dma->read_p = (dma->read_p + 1) % dma->size;
 
 		if (ret < 0)
-			continue; /* error occurred, so skip this packet */
+			return ret;
 
 		pcount++;
-		if (*t_stored < t_size) {
+		if (ret >= 0 && *t_stored < t_size) {
 			*timestamps++ = recv_time;
 			(*t_stored)++;
-		} else {
-			pr_err("[%s] timestamp error\n", __func__);
-			break;
 		}
 
 		if (ret == MSE_PACKETIZE_STATUS_COMPLETE)
