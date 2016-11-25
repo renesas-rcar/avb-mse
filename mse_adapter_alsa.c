@@ -231,6 +231,7 @@ static int mse_adapter_alsa_playback_open(struct snd_pcm_substream *substream)
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
 	int index;
+	int ret;
 
 	pr_debug("[%s]\n", __func__);
 
@@ -245,6 +246,15 @@ static int mse_adapter_alsa_playback_open(struct snd_pcm_substream *substream)
 
 	/* substream init */
 	io->substream = substream;
+
+	/* constraint to be buffer size multiple of period size */
+	ret = snd_pcm_hw_constraint_integer(runtime,
+					    SNDRV_PCM_HW_PARAM_PERIODS);
+	if (ret < 0) {
+		pr_err("[%s] snd_pcm_hw_constraint_integer() %d\n",
+		       __func__, ret);
+		return ret;
+	}
 
 	/* MSE Core open */
 	index = mse_open(chip->adapter_index, MSE_DIRECTION_INPUT);
@@ -360,6 +370,7 @@ static int mse_adapter_alsa_capture_open(struct snd_pcm_substream *substream)
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
 	int index;
+	int ret;
 
 	pr_debug("[%s]\n", __func__);
 
@@ -374,6 +385,15 @@ static int mse_adapter_alsa_capture_open(struct snd_pcm_substream *substream)
 
 	/* substream init */
 	io->substream = substream;
+
+	/* constraint to be buffer size multiple of period size */
+	ret = snd_pcm_hw_constraint_integer(runtime,
+					    SNDRV_PCM_HW_PARAM_PERIODS);
+	if (ret < 0) {
+		pr_err("[%s] snd_pcm_hw_constraint_integer() %d\n",
+		       __func__, ret);
+		return ret;
+	}
 
 	/* MSE Core open */
 	index = mse_open(chip->adapter_index, MSE_DIRECTION_OUTPUT);
