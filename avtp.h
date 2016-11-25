@@ -405,7 +405,7 @@ static inline int avtp_fdf_to_sample_rate(int format_dependent_field)
 /* AAF */
 DEF_AVTP_ACCESSER_UINT8(aaf_format, 16)
 DEF_AVTP_ACCESSER_UINT8(aaf_channels_per_frame, 18)
-DEF_AVTP_ACCESSER_UINT8(bit_depth, 19)
+DEF_AVTP_ACCESSER_UINT8(aaf_bit_depth, 19)
 
 static inline u8 avtp_get_aaf_nsr(void *data)
 {
