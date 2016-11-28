@@ -281,6 +281,8 @@ static int mse_packetizer_video_cvf_h264_set_video_config(
 {
 	struct cvf_h264_packetizer *h264;
 	struct avtp_param param;
+	int bytes_per_frame;
+	int data_offset;
 
 	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
 		return -EPERM;
@@ -302,17 +304,17 @@ static int mse_packetizer_video_cvf_h264_set_video_config(
 	}
 	h264->f_single_nal = CONFIG_CVF_H264_SEND_SINGLE_NAL;
 
-	if (h264->cvf_config.bytes_per_frame == 0) {
-		h264->payload_max =
-			ETHFRAMELEN_MAX - FU_HEADER_LEN - h264->header_size;
+	data_offset = h264->header_size + FU_HEADER_LEN;
+	bytes_per_frame = h264->cvf_config.bytes_per_frame;
+	if (bytes_per_frame == 0) {
+		h264->payload_max = ETHFRAMELEN_MAX - data_offset;
 	} else {
-		if (h264->header_size + h264->cvf_config.bytes_per_frame +
-		    FU_HEADER_LEN > ETHFRAMELEN_MAX) {
+		if (data_offset + bytes_per_frame > ETHFRAMELEN_MAX) {
 			pr_err("[%s] bytes_per_frame too big %d\n", __func__,
-			       h264->cvf_config.bytes_per_frame);
+			       bytes_per_frame);
 				return -EINVAL;
 		}
-		h264->payload_max = h264->cvf_config.bytes_per_frame;
+		h264->payload_max = bytes_per_frame - FU_HEADER_LEN;
 	}
 
 	memcpy(param.dest_addr, h264->net_config.dest_addr, MSE_MAC_LEN_MAX);
