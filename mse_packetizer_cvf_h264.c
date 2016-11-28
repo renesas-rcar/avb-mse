@@ -503,6 +503,15 @@ static int mse_packetizer_video_cvf_h264_packetize(int index,
 		return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
+static inline void set_avc_nal_header(struct cvf_h264_packetizer *h264,
+				      unsigned char *buf,
+				      size_t stored)
+{
+	u32 avc_nal_header = htonl(stored - h264->avc_nal_header_offset -
+				   sizeof(u32));
+	memcpy(buf + h264->avc_nal_header_offset, &avc_nal_header, sizeof(u32));
+}
+
 static int mse_packetizer_video_cvf_h264_depacketize(int index,
 						     void *buffer,
 						     size_t buffer_size,
@@ -518,7 +527,6 @@ static int mse_packetizer_video_cvf_h264_depacketize(int index,
 	unsigned char *buf = (unsigned char *)buffer;
 	unsigned char *payload;
 	unsigned char fu_indicator, fu_header;
-	u32 avc_nal_header;
 
 	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
 		return -EPERM;
@@ -561,8 +569,9 @@ static int mse_packetizer_video_cvf_h264_depacketize(int index,
 	fu_indicator = payload[FU_ADDR_INDICATOR];
 
 	if ((fu_indicator & NALU_TYPE_MASK) == NALU_TYPE_FU_A)  {
-		fu_header = payload[FU_ADDR_HEADER];
+		int fu_size = payload_size - FU_HEADER_LEN;
 
+		fu_header = payload[FU_ADDR_HEADER];
 		if (fu_header & FU_H_S_BIT) { /* start */
 			pr_debug("[%s] start size=%d\n",
 				 __func__, payload_size);
@@ -581,27 +590,24 @@ static int mse_packetizer_video_cvf_h264_depacketize(int index,
 				(fu_header & NALU_TYPE_MASK);
 			(*buffer_processed)++;
 		}
-		if (payload_size > FU_HEADER_LEN) {
-			int fu_size = payload_size - FU_HEADER_LEN;
-
+		if (fu_size > 0) {
 			if (*buffer_processed + fu_size >= buffer_size) {
 				pr_err("[%s] buffer overrun %zu/%zu\n",
 				       __func__,
 				       *buffer_processed, buffer_size);
-				return -EPERM;
+				if (!h264->f_start_code)
+					set_avc_nal_header(h264, buf,
+							   *buffer_processed);
+
+				return MSE_PACKETIZE_STATUS_COMPLETE;
 			}
 			memcpy(buf + *buffer_processed,
 			       payload + FU_HEADER_LEN, fu_size);
 
 			(*buffer_processed) += fu_size;
 		}
-		if (!h264->f_start_code && (fu_header & FU_H_E_BIT)) { /* end */
-			avc_nal_header = htonl(*buffer_processed -
-					       h264->avc_nal_header_offset -
-					       sizeof(u32));
-			memcpy(buf + h264->avc_nal_header_offset,
-			       &avc_nal_header, sizeof(u32));
-		}
+		if (!h264->f_start_code && (fu_header & FU_H_E_BIT)) /* end */
+			set_avc_nal_header(h264, buf, *buffer_processed);
 	} else if (is_single_nal(fu_indicator)) {
 		pr_debug("[%s] single nal %02x\n",
 			 __func__, fu_indicator);
@@ -609,9 +615,7 @@ static int mse_packetizer_video_cvf_h264_depacketize(int index,
 			memcpy(buf + *buffer_processed,
 			       &start_code, sizeof(u32));
 		} else {
-			avc_nal_header = htonl(payload_size);
-			memcpy(buf + *buffer_processed,
-			       &avc_nal_header, sizeof(u32));
+			set_avc_nal_header(h264, buf, payload_size);
 		}
 		(*buffer_processed) += sizeof(u32);
 		*(buf + *buffer_processed)
