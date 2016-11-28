@@ -218,12 +218,18 @@ enum MSE_MPEG2TS_TYPE {
 	MSE_MPEG2TS_TYPE_M2TS,
 };
 
+enum MSE_VIDEO_FORMAT_TYPE {
+	MSE_VIDEO_FORMAT_H264_BYTE_STREAM,
+	MSE_VIDEO_FORMAT_H264_AVC,
+	MSE_VIDEO_FORMAT_MJPEG
+};
+
 /**
  * @brief video stream configuration
  */
 struct mse_video_config {
 	/** @brief video format */
-	int format;
+	enum MSE_VIDEO_FORMAT_TYPE format;
 	/** @brief bitrate [Mbps] */
 	int bitrate;
 	/** @brief framerate */
