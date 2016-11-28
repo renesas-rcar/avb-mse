@@ -207,45 +207,6 @@ void avtp_copy_aaf_pcm_template(void *data)
 	       sizeof(avtp_aaf_pcm_hdr_tmpl));
 }
 
-/* P1722/D13 9.5 H.264 Video Format */
-struct avtp_cvf_h264_d13_hdr {
-	u8 subtype;
-	u8 sv_version_mr_tv; /* sv:1, version:3, mr:1, rsv:2, tv:1 */
-	u8 sequence_num;
-	u8 tu; /* reserved:7, tu:1 */
-	__be64 stream_id;
-	__be32 avtp_timestamp;
-	u8 format;
-	u8 format_subtype;
-	__be16 reserved0;
-	__be16 stream_data_length;
-	u8 M_evt; /* rsv:3, M:1, evt:4 */
-	u8 reserved1;
-	u8 payload[0];
-} __packed;
-
-/* AVTP CVF H.264 without h264_timestamp field header */
-static const struct avtp_cvf_h264_d13_hdr avtp_cvf_h264_d13_hdr_tmpl = {
-	.subtype                = AVTP_SUBTYPE_CVF,
-	.sv_version_mr_tv       = 0x81, /* sv=1, version=0, mr=0, tv=1 */
-	.sequence_num           = 0,
-	.tu                     = 0,
-	.stream_id              = cpu_to_be64(0),
-	.avtp_timestamp         = cpu_to_be32(0),
-	.format                 = AVTP_CVF_FORMAT_RFC,
-	.format_subtype         = AVTP_CVF_RFC_FORMAT_H264,
-	.reserved0              = cpu_to_be16(0),
-	.stream_data_length     = cpu_to_be16(0),
-	.M_evt                  = 0,
-	.reserved1              = 0,
-};
-
-void avtp_copy_cvf_h264_d13_template(void *data)
-{
-	memcpy(data + AVTP_OFFSET, &avtp_cvf_h264_d13_hdr_tmpl,
-	       sizeof(avtp_cvf_h264_d13_hdr_tmpl));
-}
-
 /* P1722/D16 9.5 H.264 Video Format */
 struct avtp_cvf_h264_hdr {
 	u8 subtype;
