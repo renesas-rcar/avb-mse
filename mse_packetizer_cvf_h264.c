@@ -102,9 +102,6 @@
 #define FU_H_E_BIT        (0x40)
 #define NALU_TYPE_MASK    (0x1F)
 
-#define IS_SINGLE_NAL(x) (((x) & NALU_TYPE_MASK) >= 1 && \
-			  ((x) & NALU_TYPE_MASK) <= 23)
-
 #define START_CODE        (0x00000001)
 
 enum NALU_TYPE {
@@ -136,13 +133,13 @@ struct cvf_h264_packetizer {
 	int send_seq_num;
 	int old_seq_num;
 	int seq_num_err;
-	int header_size;
+	int header_size;             /* whole header size defined IEEE1722 */
+	int additional_header_size;  /* additional .. defined IEEE1722 H.264 */
 	int payload_max;
 
 	unsigned char *next_nal;
 	unsigned char fu_indicator;
 	unsigned char fu_header;
-	int payload_header_size;
 	size_t avc_nal_header_offset;
 	unsigned char packet_template[ETHFRAMELEN_MAX];
 
@@ -170,7 +167,8 @@ static int mse_packetizer_video_cvf_h264_open(void)
 	h264->old_seq_num = SEQNUM_INIT;
 	h264->seq_num_err = SEQNUM_INIT;
 	h264->header_size = AVTP_CVF_H264_PAYLOAD_OFFSET;
-
+	h264->additional_header_size =
+		AVTP_CVF_H264_PAYLOAD_OFFSET - AVTP_PAYLOAD_OFFSET;
 	pr_debug("[%s] index=%d\n", __func__, index);
 	return index;
 }
@@ -193,6 +191,8 @@ static int mse_packetizer_video_cvf_h264_d13_open(void)
 	h264->old_seq_num = SEQNUM_INIT;
 	h264->seq_num_err = SEQNUM_INIT;
 	h264->header_size = AVTP_CVF_H264_D13_PAYLOAD_OFFSET;
+	h264->additional_header_size =
+		AVTP_CVF_H264_D13_PAYLOAD_OFFSET - AVTP_PAYLOAD_OFFSET;
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 	return index;
@@ -314,7 +314,8 @@ static int mse_packetizer_video_cvf_h264_set_video_config(
 			       bytes_per_frame);
 				return -EINVAL;
 		}
-		h264->payload_max = bytes_per_frame - FU_HEADER_LEN;
+		h264->payload_max = bytes_per_frame - FU_HEADER_LEN -
+			h264->additional_header_size;
 	}
 
 	memcpy(param.dest_addr, h264->net_config.dest_addr, MSE_MAC_LEN_MAX);
@@ -371,6 +372,13 @@ static int mse_packetizer_video_cvf_h264_calc_cbs(int index,
 	return 0;
 }
 
+static inline bool is_single_nal(u8 fu_indicator)
+{
+	u8 nalu_type = fu_indicator & NALU_TYPE_MASK;
+
+	return nalu_type >= 1 && nalu_type <= 23;
+}
+
 static int mse_packetizer_video_cvf_h264_packetize(int index,
 						   void *packet,
 						   size_t *packet_size,
@@ -381,6 +389,7 @@ static int mse_packetizer_video_cvf_h264_packetize(int index,
 {
 	struct cvf_h264_packetizer *h264;
 	int data_len;
+	u32 data_offset;
 	u32 nal_size, nal_header;
 	u32 start_code = htonl(START_CODE);
 	unsigned char *buf = (unsigned char *)buffer;
@@ -443,13 +452,11 @@ static int mse_packetizer_video_cvf_h264_packetize(int index,
 		    (h264->next_nal - cur_nal < h264->payload_max)) {
 			h264->fu_indicator =
 				*cur_nal & (FU_I_F_NRI_MASK | NALU_TYPE_MASK);
-			h264->payload_header_size = 1;
 		} else {
 			h264->fu_indicator =
 				(*cur_nal & FU_I_F_NRI_MASK) | NALU_TYPE_FU_A;
 			h264->fu_header =
 				FU_H_S_BIT | (*cur_nal & NALU_TYPE_MASK);
-			h264->payload_header_size = FU_HEADER_LEN;
 		}
 		cur_nal++;
 		(*buffer_processed) += sizeof(u32) + 1;
@@ -470,10 +477,12 @@ static int mse_packetizer_video_cvf_h264_packetize(int index,
 	memcpy(packet, h264->packet_template, h264->header_size);
 
 	/* variable header */
+	data_offset = is_single_nal(h264->fu_indicator) ? 1 : FU_HEADER_LEN;
 	avtp_set_sequence_num(packet, h264->send_seq_num++);
 	avtp_set_timestamp(packet, (u32)*timestamp);
 	avtp_set_stream_data_length(packet,
-				    data_len + h264->payload_header_size);
+				    data_len + data_offset +
+				    h264->additional_header_size);
 
 	if (h264->is_vcl && (h264->fu_header & FU_H_E_BIT))
 		/* set M bit */
@@ -484,13 +493,12 @@ static int mse_packetizer_video_cvf_h264_packetize(int index,
 
 	payload = packet + h264->header_size;
 	payload[FU_ADDR_INDICATOR] = h264->fu_indicator;
-	if (h264->payload_header_size > 1)
+	if (data_offset == FU_HEADER_LEN)
 		payload[FU_ADDR_HEADER] = h264->fu_header;
 	if (data_len > 0)
-		memcpy(payload + h264->payload_header_size, cur_nal, data_len);
+		memcpy(payload + data_offset, cur_nal, data_len);
 
-	*packet_size =
-		h264->header_size + data_len + h264->payload_header_size;
+	*packet_size = h264->header_size + data_offset + data_len;
 	(*buffer_processed) += data_len;
 
 	if (*buffer_processed >= buffer_size)
@@ -550,7 +558,8 @@ static int mse_packetizer_video_cvf_h264_depacketize(int index,
 	h264->old_seq_num = (seq_num + 1 + (AVTP_SEQUENCE_NUM_MAX + 1))
 		% (AVTP_SEQUENCE_NUM_MAX + 1);
 
-	payload_size = avtp_get_stream_data_length(packet);
+	payload_size = avtp_get_stream_data_length(packet) -
+		h264->additional_header_size;
 	payload = (unsigned char *)packet + h264->header_size;
 
 	fu_indicator = payload[FU_ADDR_INDICATOR];
@@ -597,7 +606,7 @@ static int mse_packetizer_video_cvf_h264_depacketize(int index,
 			memcpy(buf + h264->avc_nal_header_offset,
 			       &avc_nal_header, sizeof(u32));
 		}
-	} else if (IS_SINGLE_NAL(fu_indicator)) {
+	} else if (is_single_nal(fu_indicator)) {
 		pr_debug("[%s] single nal %02x\n",
 			 __func__, fu_indicator);
 		if (h264->f_start_code) {
