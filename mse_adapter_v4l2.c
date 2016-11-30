@@ -164,6 +164,10 @@ static const struct v4l2_fmtdesc g_formats[] = {
 		.pixelformat = V4L2_PIX_FMT_H264,
 	},
 	{
+		.description = "H264 without start codes",
+		.pixelformat = V4L2_PIX_FMT_H264_NO_SC,
+	},
+	{
 		.description = "MPEG-1/2/4 Multiplexed",
 		.pixelformat = V4L2_PIX_FMT_MPEG,
 	},
@@ -180,6 +184,18 @@ static const struct v4l2_adapter_fmt g_mse_adapter_v4l2_common_fmt_sizes[] = {
 	 */
 	{
 		.fourcc		= V4L2_PIX_FMT_H264,
+		.min_width	= 80,
+		.max_width	= 3840,
+		.step_width	= 2,
+		.min_height	= 80,
+		.max_height	= 2160,
+		.step_height	= 2,
+	},
+	/* limited H.264 picture size to range of
+	 * R-Car Hardware video decoder (VCP4).
+	 */
+	{
+		.fourcc		= V4L2_PIX_FMT_H264_NO_SC,
 		.min_width	= 80,
 		.max_width	= 3840,
 		.step_width	= 2,
@@ -1608,8 +1624,24 @@ static int mse_adapter_v4l2_streamon(
 			return MSE_ADAPTER_V4L2_RTN_NG;
 		}
 
-		if (vadp_dev->format.pixelformat > 0)
-			config.format = vadp_dev->format.pixelformat;
+		switch (vadp_dev->format.pixelformat) {
+		case V4L2_PIX_FMT_H264:
+			config.format = MSE_VIDEO_FORMAT_H264_BYTE_STREAM;
+			break;
+		case V4L2_PIX_FMT_H264_NO_SC:
+			config.format = MSE_VIDEO_FORMAT_H264_AVC;
+			break;
+		case V4L2_PIX_FMT_MJPEG:
+			config.format = MSE_VIDEO_FORMAT_MJPEG;
+			break;
+		default:
+			pr_err("[%s] invalid format=%c%c%c%c\n", __func__,
+			       vadp_dev->format.pixelformat >> 0,
+			       vadp_dev->format.pixelformat >> 8,
+			       vadp_dev->format.pixelformat >> 16,
+			       vadp_dev->format.pixelformat >> 24);
+			return -EINVAL;
+		}
 
 		if (vadp_dev->frameintervals.numerator > 0 &&
 		    vadp_dev->frameintervals.denominator > 0) {
