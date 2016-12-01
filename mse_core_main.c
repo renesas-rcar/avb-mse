@@ -89,7 +89,6 @@
 
 #define MSE_RADIX_HEXADECIMAL   (16)
 #define MSE_DEFAULT_BITRATE     (50000000) /* 50Mbps */
-#define MSE_DEFAULT_TIMER       (100000000) /* 100msec */
 
 /** @brief MSE's media adapter max */
 #define MSE_ADAPTER_MEDIA_MAX   (10)
@@ -588,12 +587,12 @@ static struct mse_sysfs_config mse_sysfs_config_video[] = {
 	{
 		.name = MSE_SYSFS_NAME_STR_FPS_SECONDS,
 		.type = MSE_TYPE_INT,
-		.int_value = 1,
+		.int_value = 0,
 	},
 	{
 		.name = MSE_SYSFS_NAME_STR_FPS_FRAMES,
 		.type = MSE_TYPE_INT,
-		.int_value = 30,
+		.int_value = 0,
 	},
 	{
 		.name = MSE_SYSFS_NAME_STR_BITRATE,
@@ -988,6 +987,10 @@ static void mse_work_stream(struct work_struct *work)
 		} else {
 			instance->f_completion = true;
 			pr_debug("[%s] f_completion = true\n", __func__);
+			if (instance->timer_delay == 0) {
+				instance->mse_completion(
+					instance->index_media, 0);
+			}
 		}
 	} else {
 		/* request receive packet */
@@ -2143,8 +2146,10 @@ static void mse_work_start_streaming(struct work_struct *work)
 	instance->remain = 0;
 
 	/* start timer */
-	ktime = ktime_set(0, instance->timer_delay);
-	hrtimer_start(&instance->timer, ktime, HRTIMER_MODE_REL);
+	if (instance->timer_delay) {
+		ktime = ktime_set(0, instance->timer_delay);
+		hrtimer_start(&instance->timer, ktime, HRTIMER_MODE_REL);
+	}
 
 	if (IS_MSE_TYPE_KIND_AUDIO(adapter->type)) {
 		/* capture timestamps */
@@ -2795,10 +2800,13 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 	memcpy(&instance->media_config.video, config, sizeof(*config));
 
 	/* calc timer value */
-	framerate = NSEC_SCALE * (u64)config->fps.n;
-	do_div(framerate, config->fps.m);
-	instance->timer_delay = framerate;
-	pr_notice("[%s] timer_delay=%d\n", __func__, instance->timer_delay);
+	if (config->fps.n != 0 && config->fps.m != 0) {
+		framerate = NSEC_SCALE * (u64)config->fps.n;
+		do_div(framerate, config->fps.m);
+		instance->timer_delay = framerate;
+		pr_notice("[%s] timer_delay=%d\n",
+			  __func__, instance->timer_delay);
+	}
 
 	/* set AVTP header info */
 	instance->packetizer->set_network_config(instance->index_packetizer,
@@ -3123,7 +3131,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	instance->wq_stream = create_singlethread_workqueue("mse_streamq");
 	instance->wq_packet = create_singlethread_workqueue("mse_packetq");
 	hrtimer_init(&instance->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	instance->timer_delay = MSE_DEFAULT_TIMER;
+	instance->timer_delay = 0;
 	instance->timer.function = &mse_timer_callback;
 
 	/* for timestamp */
