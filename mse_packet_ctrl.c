@@ -73,6 +73,7 @@
 #include "mse_core.h"
 #include "mse_packet_ctrl.h"
 #include "mse_packetizer.h"
+#include "avtp.h"
 
 #define MSE_DMA_BUF_RECEIVE_SIZE 10
 #define MSE_DMA_BUF_SEND_SIZE 10
@@ -176,7 +177,7 @@ int mse_packet_ctrl_make_packet(int index,
 			return *processed;
 		}
 		memset(dma->packet_table[dma->write_p].vaddr, 0,
-		       VLAN_ETH_ZLEN);
+		       AVTP_FRAME_SIZE_MIN);
 		if (tstamp_size == 1) {               /* video */
 			timestamp = tstamp[0];
 		} else {                              /* audio */
@@ -190,6 +191,7 @@ int mse_packet_ctrl_make_packet(int index,
 				return -EINVAL;
 			}
 		}
+
 		ret = ops->packetize(index,
 				     dma->packet_table[dma->write_p].vaddr,
 				     &packet_size,
@@ -200,12 +202,12 @@ int mse_packet_ctrl_make_packet(int index,
 
 		if (ret >= 0 && ret != MSE_PACKETIZE_STATUS_NOT_ENOUGH) {
 			pcount++;
-			if (packet_size >= VLAN_ETH_ZLEN)
+			if (packet_size >= AVTP_FRAME_SIZE_MIN)
 				dma->packet_table[dma->write_p].len =
 					packet_size;
 			else
 				dma->packet_table[dma->write_p].len =
-					VLAN_ETH_ZLEN;
+					AVTP_FRAME_SIZE_MIN;
 
 			dma->write_p = new_write_p;
 		} else {
@@ -234,7 +236,7 @@ int mse_packet_ctrl_make_packet_crf(int index,
 		return -1;
 	}
 
-	memset(dma->packet_table[dma->write_p].vaddr, 0, VLAN_ETH_ZLEN);
+	memset(dma->packet_table[dma->write_p].vaddr, 0, AVTP_FRAME_SIZE_MIN);
 
 	/* CRF packetizer */
 	mse_packetizer_crf_tstamp_audio_ops.packetize(
@@ -247,10 +249,11 @@ int mse_packet_ctrl_make_packet_crf(int index,
 		NULL);
 
 	if (ret >= 0) {
-		if (packet_size >= VLAN_ETH_ZLEN)
+		if (packet_size >= AVTP_FRAME_SIZE_MIN)
 			dma->packet_table[dma->write_p].len = packet_size;
 		else
-			dma->packet_table[dma->write_p].len = VLAN_ETH_ZLEN;
+			dma->packet_table[dma->write_p].len =
+				AVTP_FRAME_SIZE_MIN;
 
 		dma->write_p = new_write_p;
 	}
