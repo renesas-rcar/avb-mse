@@ -106,7 +106,7 @@ static const struct avtp_iec61883_sph1_hdr avtp_iec61883_4_hdr_tmpl = {
 	.cip1.dbs               = 6,    /* 6 quadlets (see std IEC 61883-4 5.1) */
 	.cip1.fn_qpc_sph        = 3 << 2, /* fn=3, qpc=0, sph=1 */
 	.cip1.dbc               = 0,
-	.cip2.qi2_fmt_fdf      = (2 << 30 | AVTP_IEC61883_FMT_MPEG2TS << 24) /* qi_2=2, fmt=0x20, fdf=0 */
+	.cip2.qi2_fmt_fdf       = cpu_to_be32(2 << 30 | AVTP_IEC61883_FMT_MPEG2TS << 24) /* qi_2=2, fmt=0x20, fdf=0 */
 };
 
 void avtp_copy_iec61883_4_template(void *data)
