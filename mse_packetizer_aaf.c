@@ -423,8 +423,8 @@ static int mse_packetizer_audio_aaf_set_audio_config(
 	payload_size = aaf->sample_per_packet * aaf->aaf_config.channels *
 						aaf->avtp_bytes_per_ch;
 	aaf->avtp_packet_size = AVTP_AAF_PAYLOAD_OFFSET + payload_size;
-	if (aaf->avtp_packet_size < ETHFRAMELEN_MIN)
-		aaf->avtp_packet_size = ETHFRAMELEN_MIN;
+	if (aaf->avtp_packet_size < AVTP_FRAME_SIZE_MIN)
+		aaf->avtp_packet_size = AVTP_FRAME_SIZE_MIN;
 
 	memcpy(param.dest_addr, aaf->net_config.dest_addr, MSE_MAC_LEN_MAX);
 	memcpy(param.source_addr, aaf->net_config.source_addr,
