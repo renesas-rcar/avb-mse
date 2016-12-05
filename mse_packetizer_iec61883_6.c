@@ -361,8 +361,8 @@ static int mse_packetizer_audio_iec_set_audio_config(
 	payload_size = iec->sample_per_packet * iec->iec_config.channels *
 						AM824_DATA_SIZE;
 	iec->avtp_packet_size = AVTP_IEC61883_6_PAYLOAD_OFFSET + payload_size;
-	if (iec->avtp_packet_size < ETHFRAMELEN_MIN)
-		iec->avtp_packet_size = ETHFRAMELEN_MIN;
+	if (iec->avtp_packet_size < AVTP_FRAME_SIZE_MIN)
+		iec->avtp_packet_size = AVTP_FRAME_SIZE_MIN;
 
 	memcpy(param.dest_addr, iec->net_config.dest_addr, MSE_MAC_LEN_MAX);
 	memcpy(param.source_addr, iec->net_config.source_addr,
