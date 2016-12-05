@@ -167,38 +167,17 @@ struct snd_pcm_hardware g_mse_adapter_alsa_capture_hw = {
 /************/
 /* Function */
 /************/
-static inline struct alsa_stream *mse_adapter_alsa_mse_to_io(
-						struct alsa_device *chip,
-						int index)
+static int mse_adapter_alsa_callback(void *priv, int size)
 {
-	if (mse_get_inout(index) == MSE_DIRECTION_INPUT)
-		return &chip->playback;
-	else if (mse_get_inout(index) == MSE_DIRECTION_OUTPUT)
-		return &chip->capture;
-	else
-		return NULL;
-}
-
-static int mse_adapter_alsa_callback(int index, int size)
-{
-	struct alsa_device *chip = NULL;
 	struct snd_pcm_runtime *runtime;
-	struct alsa_stream *io;
+	struct alsa_stream *io = priv;
 	int err;
 
 	pr_debug("[%s]\n", __func__);
 
-	err = mse_get_private_data(index, (void **)&chip);
-	if (err < 0) {
-		pr_err("[%s] Failed mse_get_private_data() err=%d\n",
-		       __func__, err);
-		return -EPERM;
-	}
-
-	io = mse_adapter_alsa_mse_to_io(chip, index);
 	if (!io) {
-		pr_err("[%s] Failed mse_adapter_alsa_mse_to_io()\n", __func__);
-		return 0;
+		pr_err("[%s] private data is NULL\n", __func__);
+		return -EPERM;
 	}
 	runtime = io->substream->runtime;
 
@@ -235,6 +214,7 @@ static int mse_adapter_alsa_callback(int index, int size)
 	err = mse_start_transmission(io->index,
 				     runtime->dma_area + io->byte_pos,
 				     io->byte_per_period,
+				     io,
 				     mse_adapter_alsa_callback);
 	if (err < 0) {
 		pr_err("[%s] Failed mse_start_transmission() err=%d\n",
@@ -365,6 +345,7 @@ static int mse_adapter_alsa_playback_trigger(
 		err = mse_start_transmission(io->index,
 					     runtime->dma_area + io->byte_pos,
 					     io->byte_per_period,
+					     io,
 					     mse_adapter_alsa_callback);
 		if (err < 0) {
 			pr_err("[%s] Failed mse_start_transmission() err=%d\n",
@@ -503,6 +484,7 @@ static int mse_adapter_alsa_capture_trigger(
 		err = mse_start_transmission(io->index,
 					     runtime->dma_area + io->byte_pos,
 					     io->byte_per_period,
+					     io,
 					     mse_adapter_alsa_callback);
 		if (err < 0) {
 			pr_err("[%s] Failed mse_start_transmission() err=%d\n",
@@ -804,7 +786,6 @@ static int mse_adapter_alsa_probe(int devno)
 	index = mse_register_adapter_media(MSE_TYPE_ADAPTER_AUDIO_PCM,
 					   MSE_DIRECTION_BOTH,
 					   "ALSA Adapter",
-					   chip,
 					   device_name);
 	if (index < 0) {
 		pr_err("[%s] Failed register adapter index=%d\n",
