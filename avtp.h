@@ -82,6 +82,7 @@
 #endif
 
 #define AVTP_CIP_HEADER_SIZE             (8)
+#define AVTP_FRAME_SIZE_MIN              (60)
 #define AVTP_PAYLOAD_OFFSET              (24 + AVTP_OFFSET)
 #define AVTP_IEC61883_4_PAYLOAD_OFFSET \
 	(AVTP_CIP_HEADER_SIZE + AVTP_PAYLOAD_OFFSET)
