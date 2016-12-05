@@ -95,7 +95,7 @@ static const struct avtp_iec61883_sph1_hdr avtp_iec61883_4_hdr_tmpl = {
 	.subtype                = AVTP_SUBTYPE_61883_IIDC,
 	.sv_version_mr_gv_tv    = 0x81, /* sv=1, version=0, mr=0, gv=0, tv=1 */
 	.sequence_num           = 0,
-	.tu                     = 0x01,
+	.tu                     = 0,
 	.stream_id              = cpu_to_be64(0),
 	.avtp_timestamp         = cpu_to_be32(0),
 	.gateway_info           = cpu_to_be32(0),
@@ -146,7 +146,7 @@ static const struct avtp_iec61883_sph0_hdr avtp_iec61883_6_hdr_tmpl = {
 	.subtype                = AVTP_SUBTYPE_61883_IIDC,
 	.sv_version_mr_gv_tv    = 0x81, /* sv=1, version=0, mr=0, gv=0, tv=1 */
 	.sequence_num           = 0,
-	.tu                     = 0x01,
+	.tu                     = 0,
 	.stream_id              = cpu_to_be64(0),
 	.avtp_timestamp         = cpu_to_be32(0),
 	.gateway_info           = cpu_to_be32(0),
