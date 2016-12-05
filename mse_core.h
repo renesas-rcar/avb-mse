@@ -287,8 +287,6 @@ struct mse_adapter {
 	enum MSE_DIRECTION inout;
 	/** @brief type of Adapter */
 	enum MSE_TYPE type;
-	/** @brief adapter's private data */
-	void *private_data;
 	/** @brief sysfs index */
 	int index_sysfs;
 	/** @brief sysfs data */
@@ -431,7 +429,6 @@ static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
  * @param[in] type type of adapter
  * @param[in] inout direction of adapter
  * @param[in] name of adapter
- * @param[in] data private adapter pointer
  * @param[in] device_name device name
  *
  * @retval >=0 MSE adapter ID
@@ -440,7 +437,6 @@ static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
 extern int mse_register_adapter_media(enum MSE_TYPE type,
 				      enum MSE_DIRECTION inout,
 				      char *name,
-				      void *data,
 				      char *device_name);
 
 /**
@@ -456,9 +452,6 @@ extern int mse_unregister_adapter_media(int index_media);
 /**
  * @brief register network adapter to MSE
  *
- * @param[in] type type of adapter
- * @param[in] name of adapter
- * @param[in] data private adapter pointer
  * @param[in] ops adapter operations
  *
  * @retval 0 MSE instance ID
@@ -479,9 +472,6 @@ extern int mse_unregister_adapter_network(int index);
 /**
  * @brief register packetizer to MSE
  *
- * @param[in] type type of adapter
- * @param[in] name of packetizer
- * @param[in] data private pointer
  * @param[in] ops packetizer operations
  *
  * @retval 0 MSE adapter ID
@@ -614,6 +604,7 @@ extern int mse_stop_streaming(int index);
  * @param[in] index MSE instance ID
  * @param[in] buffer send data
  * @param[in] buffer_size buffer size
+ * @param[out] priv private data
  * @param[in] mse_completion callback function pointer
  *
  * @retval 0 Success
@@ -622,28 +613,8 @@ extern int mse_stop_streaming(int index);
 extern int mse_start_transmission(int index,
 				  void *buffer,
 				  size_t buffer_size,
-				  int (*mse_completion)(int index, int size));
-
-/**
- * @brief get private data
- *
- * @param[in] index MSE adapter ID
- * @param[out] private_data pointer
- *
- * @retval 0 Success
- */
-extern int mse_get_private_data(int index_media, void **private_data);
-
-/**
- * @brief get input output info
- *
- * @param[in] index MSE adapter ID
- *
- * @retval MSE_DIRECTION_INPUT input
- * @retval MSE_DIRECTION_OUTPUT output
- * @retval <0 Error
- */
-extern enum MSE_DIRECTION mse_get_inout(int index_media);
+				  void *priv,
+				  int (*mse_completion)(void *priv, int size));
 
 /**
  * @brief register MCH to MSE

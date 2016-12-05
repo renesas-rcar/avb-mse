@@ -222,7 +222,7 @@ struct mse_instance {
 
 	void *start_buffer;
 	size_t start_buffer_size;
-	int (*start_mse_completion)(int index, int size);
+	int (*start_mse_completion)(void *priv, int size);
 
 	/** @brief timer handler */
 	struct hrtimer timer;
@@ -267,6 +267,8 @@ struct mse_instance {
 	/** @brief timestamp(nsec) */
 	unsigned int timestamp;
 
+	/** @brief private data */
+	void *private_data;
 	/** @brief packet buffer */
 	struct mse_packet_ctrl *packet_buffer;
 	/** @brief media buffer */
@@ -278,7 +280,7 @@ struct mse_instance {
 	int avtp_timestamps_size;
 	int avtp_timestamps_current;
 	/** @brief complete function pointer */
-	int (*mse_completion)(int index, int size);
+	int (*mse_completion)(void *priv, int size);
 	/** @brief work length for media buffer */
 	size_t work_length;
 	/** @brief streaming flag */
@@ -989,7 +991,7 @@ static void mse_work_stream(struct work_struct *work)
 			pr_debug("[%s] f_completion = true\n", __func__);
 			if (instance->timer_delay == 0) {
 				instance->mse_completion(
-					instance->index_media, 0);
+						instance->private_data, 0);
 			}
 		}
 	} else {
@@ -1702,8 +1704,8 @@ static void mse_work_depacketize(struct work_struct *work)
 				&instance->work_length);
 
 			if (ret < -1) {
-				instance->mse_completion(instance->index_media,
-							 ret);
+				instance->mse_completion(
+						instance->private_data, ret);
 				break;
 			}
 
@@ -1754,7 +1756,7 @@ static void mse_work_depacketize(struct work_struct *work)
 
 		/* complete callback */
 		if (ret >= 0) {
-			instance->mse_completion(instance->index_media, ret);
+			instance->mse_completion(instance->private_data, ret);
 			instance->work_length = 0;
 		} else {
 			spin_lock_irqsave(&instance->lock_timer, flags);
@@ -1824,7 +1826,7 @@ static void mse_work_callback(struct work_struct *work)
 	}
 
 	/* complete callback anytime */
-	instance->mse_completion(instance->index_media, 0);
+	instance->mse_completion(instance->private_data, 0);
 }
 
 static void mse_work_stop(struct work_struct *work)
@@ -2300,7 +2302,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 	struct mse_adapter *adapter;
 	void *buffer;
 	size_t buffer_size;
-	int (*mse_completion)(int index, int size);
+	int (*mse_completion)(void *priv, int size);
 	unsigned long flags;
 
 	instance = container_of(work, struct mse_instance, wk_start_trans);
@@ -2336,8 +2338,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 			instance->f_trans_start = true;
 		} else {
 			/* not EOI */
-			(*mse_completion)(instance->index_media, 0);
-
+			(*mse_completion)(instance->private_data, 0);
 			return;
 		}
 	} else if (instance->use_temp_video_buffer_mpeg2ts) {
@@ -2382,8 +2383,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 			instance->media_buffer_size = instance->parsed;
 			instance->f_temp_video_buffer_rewind = true;
 		} else {
-			(*mse_completion)(instance->index_media, 0);
-
+			(*mse_completion)(instance->private_data, 0);
 			return;
 		}
 	} else {
@@ -2422,7 +2422,6 @@ static void mse_work_start_transmission(struct work_struct *work)
 int mse_register_adapter_media(enum MSE_TYPE type,
 			       enum MSE_DIRECTION inout,
 			       char *name,
-			       void *data,
 			       char *device_name)
 {
 	int i, err;
@@ -2431,10 +2430,6 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 	/* check argument */
 	if (!name) {
 		pr_err("[%s] invalid argument. name\n", __func__);
-		return -EINVAL;
-	}
-	if (!data) {
-		pr_err("[%s] invalid argument. data\n", __func__);
 		return -EINVAL;
 	}
 
@@ -2457,7 +2452,6 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 			mse->media_table[i].used_f = true;
 			mse->media_table[i].type = type;
 			mse->media_table[i].inout = inout;
-			mse->media_table[i].private_data = data;
 			strncpy(mse->media_table[i].name, name,
 				MSE_NAME_LEN_MAX);
 
@@ -3356,7 +3350,8 @@ static bool check_mjpeg(struct mse_instance *instance)
 int mse_start_transmission(int index,
 			   void *buffer,
 			   size_t buffer_size,
-			   int (*mse_completion)(int index, int size))
+			   void *priv,
+			   int (*mse_completion)(void *priv, int size))
 {
 	struct mse_instance *instance;
 
@@ -3372,6 +3367,7 @@ int mse_start_transmission(int index,
 
 	instance->start_buffer = buffer;
 	instance->start_buffer_size = buffer_size;
+	instance->private_data = priv;
 	instance->start_mse_completion = mse_completion;
 
 	queue_work(instance->wq_packet,
@@ -3380,42 +3376,6 @@ int mse_start_transmission(int index,
 	return 0;
 }
 EXPORT_SYMBOL(mse_start_transmission);
-
-int mse_get_private_data(int index_media, void **private_data)
-{
-	if ((index_media < 0) || (index_media >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n",
-		       __func__, index_media);
-		return -EINVAL;
-	}
-
-	*private_data = mse->media_table[index_media].private_data;
-
-	return 0;
-}
-EXPORT_SYMBOL(mse_get_private_data);
-
-enum MSE_DIRECTION mse_get_inout(int index_media)
-{
-	int index;
-
-	if ((index_media < 0) || (index_media >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n",
-		       __func__, index_media);
-		return -EINVAL;
-	}
-
-	for (index = 0; index < ARRAY_SIZE(mse->instance_table); index++) {
-		if (index_media == mse->instance_table[index].index_media)
-			return mse->instance_table[index].inout;
-	}
-
-	pr_err("[%s] adapter was unregistered. index=%d\n",
-	       __func__, index_media);
-
-	return -EPERM;
-}
-EXPORT_SYMBOL(mse_get_inout);
 
 int mse_register_mch(struct mch_ops *ops)
 {
