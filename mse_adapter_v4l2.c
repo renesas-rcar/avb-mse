@@ -711,7 +711,7 @@ static int mse_adapter_v4l2_playback_buf_prepare(struct vb2_buffer *vb)
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
 
-static int mse_adapter_v4l2_playback_callback(int index, int size);
+static int mse_adapter_v4l2_playback_callback(void *priv, int size);
 
 static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 {
@@ -745,6 +745,7 @@ static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 	err = mse_start_transmission(vadp_dev->index_instance,
 				     buf_to_send,
 				     new_buf_size,
+				     vadp_dev,
 				     mse_adapter_v4l2_playback_callback);
 	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
 		pr_err("[%s]Failed mse_start_transmission()\n", __func__);
@@ -804,16 +805,15 @@ static void return_all_buffers(struct v4l2_adapter_device *vadp_dev,
 	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 }
 
-static int mse_adapter_v4l2_playback_callback(int index, int size)
+static int mse_adapter_v4l2_playback_callback(void *priv, int size)
 {
 	int err;
-	struct v4l2_adapter_device *vadp_dev = NULL;
+	struct v4l2_adapter_device *vadp_dev = priv;
 	unsigned long flags;
 	struct v4l2_adapter_buffer *buf = NULL;
 
-	err = mse_get_private_data(index, (void **)&vadp_dev);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK || !vadp_dev) {
-		pr_err("[%s]Failed mse_get_private_data()\n", __func__);
+	if (!vadp_dev) {
+		pr_err("[%s]Private data is NULL\n", __func__);
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
@@ -1192,7 +1192,7 @@ static int mse_adapter_v4l2_capture_buf_prepare(struct vb2_buffer *vb)
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
 
-static int mse_adapter_v4l2_capture_callback(int index, int size);
+static int mse_adapter_v4l2_capture_callback(void *priv, int size);
 
 static int capture_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 {
@@ -1221,6 +1221,7 @@ static int capture_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 	err = mse_start_transmission(vadp_dev->index_instance,
 				     buf_to_send,
 				     new_buf_size,
+				     vadp_dev,
 				     mse_adapter_v4l2_capture_callback);
 	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
 		pr_err("[%s]Failed mse_start_transmission()\n", __func__);
@@ -1266,17 +1267,16 @@ static void mse_adapter_v4l2_capture_buf_queue(struct vb2_buffer *vb)
 	pr_debug("[%s]END\n", __func__);
 }
 
-static int mse_adapter_v4l2_capture_callback(int index, int size)
+static int mse_adapter_v4l2_capture_callback(void *priv, int size)
 {
 	int err;
 	unsigned long flags;
 	struct v4l2_adapter_buffer *buf = NULL;
-	struct v4l2_adapter_device *vadp_dev = NULL;
+	struct v4l2_adapter_device *vadp_dev = priv;
 	enum vb2_buffer_state buf_state = VB2_BUF_STATE_DONE;
 
-	err = mse_get_private_data(index, (void **)&vadp_dev);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK || !vadp_dev) {
-		pr_err("[%s]Failed mse_get_private_data()\n", __func__);
+	if (!vadp_dev) {
+		pr_err("[%s]Private data is NULL\n", __func__);
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
@@ -1792,7 +1792,6 @@ static int register_mse_core(struct v4l2_adapter_device *vadp_dev)
 	index_mse = mse_register_adapter_media(MSE_TYPE_ADAPTER_VIDEO_H264,
 					       inout,
 					       vdev->name,
-					       vadp_dev,
 					       device_name);
 	if (index_mse < MSE_ADAPTER_V4L2_RTN_OK)
 		return MSE_ADAPTER_V4L2_RTN_NG;
