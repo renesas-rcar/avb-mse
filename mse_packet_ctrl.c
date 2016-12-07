@@ -239,7 +239,7 @@ int mse_packet_ctrl_make_packet_crf(int index,
 	memset(dma->packet_table[dma->write_p].vaddr, 0, AVTP_FRAME_SIZE_MIN);
 
 	/* CRF packetizer */
-	mse_packetizer_crf_tstamp_audio_ops.packetize(
+	ret = mse_packetizer_crf_tstamp_audio_ops.packetize(
 		index,
 		dma->packet_table[dma->write_p].vaddr,
 		&packet_size,
@@ -258,7 +258,7 @@ int mse_packet_ctrl_make_packet_crf(int index,
 		dma->write_p = new_write_p;
 	}
 
-	return 1;
+	return MSE_PACKETIZE_STATUS_COMPLETE;
 }
 
 int mse_packet_ctrl_send_prepare_packet(
@@ -481,7 +481,7 @@ int mse_packet_ctrl_take_out_packet_crf(
 {
 	int ret;
 	int new_read_p;
-	int count;
+	int count = 0;
 	size_t crf_len;
 
 	pr_debug("[%s] r=%d w=%d s=%d v=%p\n",
@@ -501,8 +501,8 @@ int mse_packet_ctrl_take_out_packet_crf(
 		dma->packet_table[dma->read_p].len);
 
 	if (ret > 0) {
-		timestamp += ret / sizeof(u64);
-		count = ret / sizeof(u64);
+		timestamp += crf_len / sizeof(u64);
+		count = crf_len / sizeof(u64);
 	} else {
 		return ret;
 	}
