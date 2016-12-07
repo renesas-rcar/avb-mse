@@ -348,7 +348,7 @@ static int mse_packetizer_crf_audio_packetize(int index,
 	avtp_set_crf_data_length(packet, data_len);
 	*packet_size = (size_t)data_len + AVTP_CRF_PAYLOAD_OFFSET;
 
-	return 0;
+	return MSE_PACKETIZE_STATUS_COMPLETE;
 }
 
 static int mse_packetizer_crf_audio_depacketize(int index,
@@ -363,6 +363,9 @@ static int mse_packetizer_crf_audio_depacketize(int index,
 	int size, i;
 	unsigned long value;
 	struct crf_packetizer *crf;
+
+	if (index >= ARRAY_SIZE(crf_packetizer_table))
+		return -EPERM;
 
 	crf = &crf_packetizer_table[index];
 
@@ -381,9 +384,9 @@ static int mse_packetizer_crf_audio_depacketize(int index,
 
 	for (i = 0; i < size / sizeof(u64); i++)
 		*dest++ = be64_to_cpu(*crf_data++);
-	/* *buffer_processed = size;*/
+	*buffer_processed = size;
 
-	return size; /* continue */
+	return MSE_PACKETIZE_STATUS_COMPLETE;
 }
 
 struct mse_packetizer_ops mse_packetizer_crf_tstamp_audio_ops = {
