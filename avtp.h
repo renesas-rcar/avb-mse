@@ -263,11 +263,11 @@ enum AVTP_CVF_RFC_FORMAT {
 
 /* P1722/D16 Table 26 CRF Types */
 enum AVTP_CRF_TYPE {
-	AVTP_CRF_TYPE_USER          = 0x1, /* User Specified               */
-	AVTP_CRF_TYPE_AUDIO_SAMPLE  = 0x2, /* Audio Sample Timestamp       */
-	AVTP_CRF_TYPE_VIDEO_FRAME   = 0x3, /* Video Frame Sync Timestamp   */
-	AVTP_CRF_TYPE_VIDEO_LINE    = 0x4, /* Video Line Sync Timestamp    */
-	AVTP_CRF_TYPE_MACHINE_CYCLE = 0x5, /* Machine Cycle Timestamp      */
+	AVTP_CRF_TYPE_USER          = 0x0, /* User Specified               */
+	AVTP_CRF_TYPE_AUDIO_SAMPLE  = 0x1, /* Audio Sample Timestamp       */
+	AVTP_CRF_TYPE_VIDEO_FRAME   = 0x2, /* Video Frame Sync Timestamp   */
+	AVTP_CRF_TYPE_VIDEO_LINE    = 0x3, /* Video Line Sync Timestamp    */
+	AVTP_CRF_TYPE_MACHINE_CYCLE = 0x4, /* Machine Cycle Timestamp      */
 };
 
 /* P1722/D16 Table 27 - pull field values */
