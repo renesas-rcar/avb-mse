@@ -528,7 +528,7 @@ static struct mse_sysfs_config mse_sysfs_config_video[] = {
 		.name = MSE_SYSFS_NAME_STR_TYPE,
 		.type = MSE_TYPE_ENUM,
 		.int_value = 0,
-		.enum_list = {"talker", "listener", NULL},
+		.enum_list = {"both", NULL},
 	},
 	{
 		.name = MSE_SYSFS_NAME_STR_KIND,
@@ -662,7 +662,7 @@ static int mse_create_config_device(int index_media,
 				    struct mse_adapter *adapter,
 				    char *device_name)
 {
-	int ret, type;
+	int ret;
 
 	pr_debug("[%s]\n", __func__);
 
@@ -672,29 +672,12 @@ static int mse_create_config_device(int index_media,
 						GFP_KERNEL);
 		memcpy(adapter->sysfs_config, mse_sysfs_config_audio,
 		       sizeof(mse_sysfs_config_audio));
-
-		type = 0; /* both */
-
 		break;
 	case MSE_TYPE_ADAPTER_VIDEO:
 		adapter->sysfs_config = kzalloc(sizeof(mse_sysfs_config_video),
 						GFP_KERNEL);
 		memcpy(adapter->sysfs_config, mse_sysfs_config_video,
 		       sizeof(mse_sysfs_config_video));
-
-		switch (adapter->inout) {
-		case MSE_DIRECTION_INPUT:
-			type = 0; /* talker */
-			break;
-		case MSE_DIRECTION_OUTPUT:
-			type = 1; /* listener */
-			break;
-		default:
-			pr_err("[%s] undefined type=%d\n",
-			       __func__, adapter->inout);
-			return -EPERM;
-		}
-
 		break;
 	default:
 		pr_err("[%s] undefined type=%d\n", __func__, adapter->type);
@@ -723,10 +706,8 @@ static int mse_create_config_device(int index_media,
 	}
 
 	/* type */
-	ret = mse_sysfs_set_config_int(
-			index_media,
-			MSE_SYSFS_NAME_STR_TYPE,
-			type);
+	ret = mse_sysfs_set_config_int(index_media,
+				       MSE_SYSFS_NAME_STR_TYPE, 0);
 	if (ret < 0) {
 		pr_err("[%s] failed setting for sysfs ret=%d type=%s\n",
 		       __func__, ret, MSE_SYSFS_NAME_STR_TYPE);
