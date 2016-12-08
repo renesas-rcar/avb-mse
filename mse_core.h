@@ -79,18 +79,6 @@
 #define MSE_INDEX_UNDEFINED	(-1)
 
 /**
- * @brief direction of MSE
- */
-enum MSE_DIRECTION {
-	/** @brief Invalid */
-	MSE_DIRECTION_INVALID,
-	/** @brief Input */
-	MSE_DIRECTION_INPUT,
-	/** @brief Output */
-	MSE_DIRECTION_OUTPUT,
-};
-
-/**
  * @brief Get kind of MSE
  */
 #define MSE_TYPE_KIND_GET(type) ((type) & 0xFFFF0000)
@@ -283,8 +271,6 @@ struct mse_adapter {
 	bool used_f;
 	/** @brief adapter name */
 	char name[MSE_NAME_LEN_MAX];
-	/** @brief direction of adapter */
-	enum MSE_DIRECTION inout;
 	/** @brief type of Adapter */
 	enum MSE_TYPE type;
 	/** @brief sysfs index */
@@ -564,7 +550,7 @@ extern int mse_set_mpeg2ts_config(int index,
  * @retval >=0 instance ID of MSE
  * @retval <0 Error
  */
-extern int mse_open(int index_media, enum MSE_DIRECTION inout);
+extern int mse_open(int index_media, bool tx);
 
 /**
  * @brief MSE close

@@ -267,7 +267,7 @@ static int mse_adapter_alsa_playback_open(struct snd_pcm_substream *substream)
 	}
 
 	/* MSE Core open */
-	index = mse_open(chip->adapter_index, MSE_DIRECTION_INPUT);
+	index = mse_open(chip->adapter_index, true);
 	if (index < 0) {
 		pr_err("[%s] Failed mse_open() index=%d\n", __func__, index);
 		return -EPERM;
@@ -407,7 +407,7 @@ static int mse_adapter_alsa_capture_open(struct snd_pcm_substream *substream)
 	}
 
 	/* MSE Core open */
-	index = mse_open(chip->adapter_index, MSE_DIRECTION_OUTPUT);
+	index = mse_open(chip->adapter_index, false);
 	if (index < 0) {
 		pr_err("[%s] Failed mse_open() index=%d\n", __func__, index);
 		return -EPERM;

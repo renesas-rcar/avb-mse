@@ -220,7 +220,7 @@ static inline struct v4l2_adapter_buffer *to_v4l2_adapter_buffer(
 static int try_mse_open(struct v4l2_adapter_device *vadp_dev,
 			enum v4l2_buf_type i)
 {
-	enum MSE_DIRECTION dir;
+	bool tx = V4L2_TYPE_IS_OUTPUT(i);
 	int index;
 
 	if (vadp_dev->f_mse_open)
@@ -232,12 +232,7 @@ static int try_mse_open(struct v4l2_adapter_device *vadp_dev,
 		return MSE_ADAPTER_V4L2_RTN_OK;
 	}
 
-	if (V4L2_TYPE_IS_OUTPUT(i))
-		dir = MSE_DIRECTION_INPUT;
-	else
-		dir = MSE_DIRECTION_OUTPUT;
-
-	index = mse_open(vadp_dev->index_mse, dir);
+	index = mse_open(vadp_dev->index_mse, tx);
 	if (index < MSE_ADAPTER_V4L2_RTN_OK)
 		return MSE_ADAPTER_V4L2_RTN_NG;
 
