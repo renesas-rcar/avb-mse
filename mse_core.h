@@ -79,18 +79,6 @@
 #define MSE_INDEX_UNDEFINED	(-1)
 
 /**
- * @brief direction of MSE
- */
-enum MSE_DIRECTION {
-	/** @brief Input */
-	MSE_DIRECTION_INPUT,
-	/** @brief Output */
-	MSE_DIRECTION_OUTPUT,
-	/** @brief Both (only ALSA) */
-	MSE_DIRECTION_BOTH,
-};
-
-/**
  * @brief Get kind of MSE
  */
 #define MSE_TYPE_KIND_GET(type) ((type) & 0xFFFF0000)
@@ -283,8 +271,6 @@ struct mse_adapter {
 	bool used_f;
 	/** @brief adapter name */
 	char name[MSE_NAME_LEN_MAX];
-	/** @brief direction of adapter */
-	enum MSE_DIRECTION inout;
 	/** @brief type of Adapter */
 	enum MSE_TYPE type;
 	/** @brief sysfs index */
@@ -427,7 +413,6 @@ static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
  * @brief register media adapter to MSE
  *
  * @param[in] type type of adapter
- * @param[in] inout direction of adapter
  * @param[in] name of adapter
  * @param[in] device_name device name
  *
@@ -435,7 +420,6 @@ static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
  * @retval <0 Error
  */
 extern int mse_register_adapter_media(enum MSE_TYPE type,
-				      enum MSE_DIRECTION inout,
 				      char *name,
 				      char *device_name);
 
@@ -566,7 +550,7 @@ extern int mse_set_mpeg2ts_config(int index,
  * @retval >=0 instance ID of MSE
  * @retval <0 Error
  */
-extern int mse_open(int index_media, enum MSE_DIRECTION inout);
+extern int mse_open(int index_media, bool tx);
 
 /**
  * @brief MSE close

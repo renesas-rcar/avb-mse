@@ -175,7 +175,7 @@ struct mse_instance {
 	bool used_f;
 
 	/** @brief instance direction */
-	enum MSE_DIRECTION inout;
+	bool tx;
 	/** @brief instance state */
 	enum MSE_STATE state;
 	/** @brief media adapter IDs */
@@ -528,7 +528,7 @@ static struct mse_sysfs_config mse_sysfs_config_video[] = {
 		.name = MSE_SYSFS_NAME_STR_TYPE,
 		.type = MSE_TYPE_ENUM,
 		.int_value = 0,
-		.enum_list = {"talker", "listener", NULL},
+		.enum_list = {"both", NULL},
 	},
 	{
 		.name = MSE_SYSFS_NAME_STR_KIND,
@@ -662,7 +662,7 @@ static int mse_create_config_device(int index_media,
 				    struct mse_adapter *adapter,
 				    char *device_name)
 {
-	int ret, type;
+	int ret;
 
 	pr_debug("[%s]\n", __func__);
 
@@ -672,29 +672,12 @@ static int mse_create_config_device(int index_media,
 						GFP_KERNEL);
 		memcpy(adapter->sysfs_config, mse_sysfs_config_audio,
 		       sizeof(mse_sysfs_config_audio));
-
-		type = 0; /* both */
-
 		break;
 	case MSE_TYPE_ADAPTER_VIDEO:
 		adapter->sysfs_config = kzalloc(sizeof(mse_sysfs_config_video),
 						GFP_KERNEL);
 		memcpy(adapter->sysfs_config, mse_sysfs_config_video,
 		       sizeof(mse_sysfs_config_video));
-
-		switch (adapter->inout) {
-		case MSE_DIRECTION_INPUT:
-			type = 0; /* talker */
-			break;
-		case MSE_DIRECTION_OUTPUT:
-			type = 1; /* listener */
-			break;
-		default:
-			pr_err("[%s] undefined type=%d\n",
-			       __func__, adapter->inout);
-			return -EPERM;
-		}
-
 		break;
 	default:
 		pr_err("[%s] undefined type=%d\n", __func__, adapter->type);
@@ -723,10 +706,8 @@ static int mse_create_config_device(int index_media,
 	}
 
 	/* type */
-	ret = mse_sysfs_set_config_int(
-			index_media,
-			MSE_SYSFS_NAME_STR_TYPE,
-			type);
+	ret = mse_sysfs_set_config_int(index_media,
+				       MSE_SYSFS_NAME_STR_TYPE, 0);
 	if (ret < 0) {
 		pr_err("[%s] failed setting for sysfs ret=%d type=%s\n",
 		       __func__, ret, MSE_SYSFS_NAME_STR_TYPE);
@@ -976,7 +957,7 @@ static void mse_work_stream(struct work_struct *work)
 		return;
 	}
 
-	if (instance->inout == MSE_DIRECTION_INPUT) {
+	if (instance->tx) {
 		/* request send packet */
 		err = mse_packet_ctrl_send_packet(
 			instance->index_network,
@@ -1810,7 +1791,7 @@ static void mse_work_callback(struct work_struct *work)
 		}
 	}
 
-	if (instance->inout == MSE_DIRECTION_OUTPUT) {
+	if (!instance->tx) {
 		if (IS_MSE_TYPE_KIND_AUDIO(adapter->type)) {
 			if (instance->temp_w != instance->temp_r &&
 			    check_presentation_time(instance)) {
@@ -2394,7 +2375,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 	}
 	instance->mse_completion = mse_completion;
 
-	if (instance->inout == MSE_DIRECTION_INPUT) {
+	if (instance->tx) {
 		instance->work_length = 0;
 		/* start workqueue for packetize */
 		instance->f_continue = false;
@@ -2420,7 +2401,6 @@ static void mse_work_start_transmission(struct work_struct *work)
 
 /* External function */
 int mse_register_adapter_media(enum MSE_TYPE type,
-			       enum MSE_DIRECTION inout,
 			       char *name,
 			       char *device_name)
 {
@@ -2451,7 +2431,6 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 			/* init table */
 			mse->media_table[i].used_f = true;
 			mse->media_table[i].type = type;
-			mse->media_table[i].inout = inout;
 			strncpy(mse->media_table[i].name, name,
 				MSE_NAME_LEN_MAX);
 
@@ -2713,7 +2692,7 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	if (ret < 0)
 		return ret;
 
-	if (instance->inout == MSE_DIRECTION_INPUT) {
+	if (instance->tx) {
 		struct eavb_cbsparam cbs;
 
 		instance->packetizer->calc_cbs(instance->index_packetizer,
@@ -2809,7 +2788,7 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 	instance->packetizer->set_video_config(instance->index_packetizer,
 					       &instance->media_config.video);
 
-	if (instance->inout == MSE_DIRECTION_INPUT) {
+	if (instance->tx) {
 		struct eavb_cbsparam cbs;
 
 		instance->packetizer->calc_cbs(instance->index_packetizer,
@@ -2889,7 +2868,7 @@ int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 		instance->index_packetizer,
 		&instance->media_config.mpeg2ts);
 
-	if (instance->inout == MSE_DIRECTION_INPUT) {
+	if (instance->tx) {
 		struct eavb_cbsparam cbs;
 
 		instance->packetizer->calc_cbs(
@@ -2914,7 +2893,7 @@ int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 }
 EXPORT_SYMBOL(mse_set_mpeg2ts_config);
 
-int mse_open(int index_media, enum MSE_DIRECTION inout)
+int mse_open(int index_media, bool tx)
 {
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
@@ -2933,7 +2912,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 		return -EINVAL;
 	}
 
-	pr_debug("[%s] index=%d inout=%d\n", __func__, index_media, inout);
+	pr_debug("[%s] index=%d tx=%d\n", __func__, index_media, tx);
 
 	adapter = &mse->media_table[index_media];
 	mutex_lock(&mse->mutex_open);
@@ -3009,7 +2988,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 
 	/* if mjpeg input */
 	if (sysfs_name_cmp(MSE_PACKETIZER_NAME_STR_CVF_MJPEG, name) == 0 &&
-	    inout == MSE_DIRECTION_INPUT) {
+	    tx) {
 		pr_debug("[%s] use mjpeg\n",  __func__);
 		instance->use_temp_video_buffer_mjpeg = true;
 		instance->f_first_vframe = true;
@@ -3017,7 +2996,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 
 	/* if mpeg2-ts input */
 	if (sysfs_name_cmp(MSE_PACKETIZER_NAME_STR_IEC61883_4, name) == 0 &&
-	    inout == MSE_DIRECTION_INPUT) {
+	    tx) {
 		pr_err("[%s] use mpeg2-ts\n",  __func__);
 		instance->use_temp_video_buffer_mpeg2ts = true;
 		instance->f_first_vframe = true;
@@ -3062,10 +3041,10 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 		instance->network_device_name_tx,
 		MSE_NAME_LEN_MAX);
 
-	if (inout != MSE_DIRECTION_INPUT)
-		ret = network->open(instance->network_device_name_rx);
-	else
+	if (tx)
 		ret = network->open(instance->network_device_name_tx);
+	else
+		ret = network->open(instance->network_device_name_rx);
 	if (ret < 0) {
 		pr_err("[%s] cannot open network adapter ret=%d\n",
 		       __func__, ret);
@@ -3103,7 +3082,7 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 	instance->index_packetizer = ret;
 
 	/* set selector */
-	instance->inout = inout;
+	instance->tx = tx;
 	instance->state = MSE_STATE_OPEN;
 	instance->media = adapter;
 	instance->packetizer = packetizer;
@@ -3182,13 +3161,13 @@ int mse_open(int index_media, enum MSE_DIRECTION inout)
 						MSE_DMA_MAX_PACKET * 2,
 						MSE_DMA_MAX_PACKET_SIZE);
 
-	if (instance->inout == MSE_DIRECTION_OUTPUT)
-		mse_packet_ctrl_receive_prepare_packet(
+	if (instance->tx)
+		mse_packet_ctrl_send_prepare_packet(
 						instance->index_network,
 						instance->packet_buffer,
 						instance->network);
 	else
-		mse_packet_ctrl_send_prepare_packet(
+		mse_packet_ctrl_receive_prepare_packet(
 						instance->index_network,
 						instance->packet_buffer,
 						instance->network);
