@@ -277,104 +277,6 @@ static int mse_adapter_alsa_playback_open(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static int mse_adapter_alsa_playback_close(struct snd_pcm_substream *substream)
-{
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
-	int err;
-
-	pr_debug("[%s]\n", __func__);
-
-	/* parameter check */
-	if (!substream) {
-		pr_err("[%s] Invalid argument. substream\n", __func__);
-		return -EINVAL;
-	}
-
-	/* MSE Core close */
-	err = mse_close(io->index);
-	if (err < 0) {
-		pr_err("[%s] Failed mse_close() err=%d\n", __func__, err);
-		return -EPERM;
-	}
-
-	return 0;
-}
-
-static int mse_adapter_alsa_playback_trigger(
-					struct snd_pcm_substream *substream,
-					int cmd)
-{
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
-	int rtn = 0;
-	int err;
-
-	pr_debug("[%s]\n", __func__);
-
-	/* parameter check */
-	if (!substream) {
-		pr_err("[%s] Invalid argument. substream\n", __func__);
-		return -EINVAL;
-	}
-
-	switch (cmd) {
-	case SNDRV_PCM_TRIGGER_START:
-		io->substream		= substream;
-		io->byte_pos		= 0;
-		io->period_pos		= 0;
-		io->byte_per_period	= runtime->period_size
-					  * runtime->channels
-					  * samples_to_bytes(runtime, 1);
-		io->next_period_byte	= io->byte_per_period;
-
-		/* config check */
-		pr_debug("[%s] ch=%u period_size=%lu fmt_size=%zu\n",
-			 __func__, runtime->channels, runtime->period_size,
-			 samples_to_bytes(runtime, 1));
-
-		err = mse_start_streaming(io->index);
-		if (err < 0) {
-			pr_err("[%s] Failed mse_start_streaming() err=%d\n",
-			       __func__, err);
-			rtn = -EPERM;
-			break;
-		}
-		io->streaming = true;
-		err = mse_start_transmission(io->index,
-					     runtime->dma_area + io->byte_pos,
-					     io->byte_per_period,
-					     io,
-					     mse_adapter_alsa_callback);
-		if (err < 0) {
-			pr_err("[%s] Failed mse_start_transmission() err=%d\n",
-			       __func__, err);
-			rtn = -EPERM;
-			break;
-		}
-		break;
-
-	case SNDRV_PCM_TRIGGER_STOP:
-		err = mse_stop_streaming(io->index);
-		if (err < 0) {
-			pr_err("[%s] Failed mse_stop_streaming() err=%d\n",
-			       __func__, err);
-			rtn = -EPERM;
-			break;
-		}
-		io->streaming = false;
-		break;
-
-	default:
-		pr_err("[%s] Invalid argument. cmd=%d\n", __func__, cmd);
-		rtn = -EINVAL;
-		break;
-	}
-
-	return rtn;
-}
-
 static int mse_adapter_alsa_capture_open(struct snd_pcm_substream *substream)
 {
 	struct alsa_device *chip = snd_pcm_substream_chip(substream);
@@ -417,7 +319,7 @@ static int mse_adapter_alsa_capture_open(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static int mse_adapter_alsa_capture_close(struct snd_pcm_substream *substream)
+static int mse_adapter_alsa_close(struct snd_pcm_substream *substream)
 {
 	struct alsa_device *chip = snd_pcm_substream_chip(substream);
 	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
@@ -431,6 +333,7 @@ static int mse_adapter_alsa_capture_close(struct snd_pcm_substream *substream)
 		return -EINVAL;
 	}
 
+	/* MSE Core close */
 	err = mse_close(io->index);
 	if (err < 0) {
 		pr_err("[%s] Failed mse_close() err=%d\n", __func__, err);
@@ -440,9 +343,9 @@ static int mse_adapter_alsa_capture_close(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static int mse_adapter_alsa_capture_trigger(
-					struct snd_pcm_substream *substream,
-					int cmd)
+static int mse_adapter_alsa_trigger(
+				struct snd_pcm_substream *substream,
+				int cmd)
 {
 	struct alsa_device *chip = snd_pcm_substream_chip(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
@@ -630,23 +533,23 @@ static snd_pcm_uframes_t mse_adapter_alsa_pointer(
 
 struct snd_pcm_ops g_mse_adapter_alsa_playback_ops = {
 	.open		= mse_adapter_alsa_playback_open,
-	.close		= mse_adapter_alsa_playback_close,
+	.close		= mse_adapter_alsa_close,
 	.ioctl		= mse_adapter_alsa_ioctl,
 	.hw_params	= mse_adapter_alsa_hw_params,
 	.hw_free	= mse_adapter_alsa_hw_free,
 	.prepare	= mse_adapter_alsa_prepare,
-	.trigger	= mse_adapter_alsa_playback_trigger,
+	.trigger	= mse_adapter_alsa_trigger,
 	.pointer	= mse_adapter_alsa_pointer,
 };
 
 struct snd_pcm_ops g_mse_adapter_alsa_capture_ops = {
 	.open		= mse_adapter_alsa_capture_open,
-	.close		= mse_adapter_alsa_capture_close,
+	.close		= mse_adapter_alsa_close,
 	.ioctl		= mse_adapter_alsa_ioctl,
 	.hw_params	= mse_adapter_alsa_hw_params,
 	.hw_free	= mse_adapter_alsa_hw_free,
 	.prepare	= mse_adapter_alsa_prepare,
-	.trigger	= mse_adapter_alsa_capture_trigger,
+	.trigger	= mse_adapter_alsa_trigger,
 	.pointer	= mse_adapter_alsa_pointer,
 };
 
