@@ -1426,7 +1426,6 @@ static int register_mse_core(struct v4l2_adapter_device *vadp_dev)
 	sprintf(device_name, "/dev/%s", video_device_node_name(vdev));
 
 	index_mse = mse_register_adapter_media(MSE_TYPE_ADAPTER_VIDEO_H264,
-					       MSE_DIRECTION_BOTH;
 					       vdev->name,
 					       device_name);
 	if (index_mse < MSE_ADAPTER_V4L2_RTN_OK)

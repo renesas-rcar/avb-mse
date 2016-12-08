@@ -82,12 +82,12 @@
  * @brief direction of MSE
  */
 enum MSE_DIRECTION {
+	/** @brief Invalid */
+	MSE_DIRECTION_INVALID,
 	/** @brief Input */
 	MSE_DIRECTION_INPUT,
 	/** @brief Output */
 	MSE_DIRECTION_OUTPUT,
-	/** @brief Both (only ALSA) */
-	MSE_DIRECTION_BOTH,
 };
 
 /**
@@ -427,7 +427,6 @@ static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
  * @brief register media adapter to MSE
  *
  * @param[in] type type of adapter
- * @param[in] inout direction of adapter
  * @param[in] name of adapter
  * @param[in] device_name device name
  *
@@ -435,7 +434,6 @@ static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
  * @retval <0 Error
  */
 extern int mse_register_adapter_media(enum MSE_TYPE type,
-				      enum MSE_DIRECTION inout,
 				      char *name,
 				      char *device_name);
 

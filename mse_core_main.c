@@ -2401,7 +2401,6 @@ static void mse_work_start_transmission(struct work_struct *work)
 
 /* External function */
 int mse_register_adapter_media(enum MSE_TYPE type,
-			       enum MSE_DIRECTION inout,
 			       char *name,
 			       char *device_name)
 {
@@ -2432,7 +2431,7 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 			/* init table */
 			mse->media_table[i].used_f = true;
 			mse->media_table[i].type = type;
-			mse->media_table[i].inout = inout;
+			mse->media_table[i].inout = MSE_DIRECTION_INVALID;
 			strncpy(mse->media_table[i].name, name,
 				MSE_NAME_LEN_MAX);
 

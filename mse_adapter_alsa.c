@@ -784,7 +784,6 @@ static int mse_adapter_alsa_probe(int devno)
 
 	/* regist mse */
 	index = mse_register_adapter_media(MSE_TYPE_ADAPTER_AUDIO_PCM,
-					   MSE_DIRECTION_BOTH,
 					   "ALSA Adapter",
 					   device_name);
 	if (index < 0) {
