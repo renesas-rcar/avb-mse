@@ -68,7 +68,7 @@
 #include <linux/kernel.h>
 #include <uapi/linux/if_ether.h>
 #include <linux/math64.h>
-#include "mse_core.h"
+#include "ravb_mse_kernel.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
 
