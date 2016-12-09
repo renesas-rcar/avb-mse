@@ -66,7 +66,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
-#include "mse_core.h"
+#include "ravb_mse_kernel.h"
 #include "ravb_eavb.h"
 
 #define MSE_EAVB_ADAPTER_MAX (10)

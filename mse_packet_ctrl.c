@@ -70,7 +70,7 @@
 #include <linux/ptp_clock.h>
 #include <linux/if_vlan.h>
 
-#include "mse_core.h"
+#include "ravb_mse_kernel.h"
 #include "mse_packet_ctrl.h"
 #include "mse_packetizer.h"
 #include "avtp.h"

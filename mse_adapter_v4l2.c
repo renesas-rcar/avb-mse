@@ -80,7 +80,7 @@
 #include <media/videobuf2-vmalloc.h>
 #include <media/videobuf2-memops.h>
 
-#include "mse_core.h"
+#include "ravb_mse_kernel.h"
 
 /****************/
 /* Return value */
@@ -845,11 +845,19 @@ static int mse_adapter_v4l2_enum_framesizes(
 static int mse_adapter_v4l2_playback_callback(void *priv, int size);
 static int mse_adapter_v4l2_capture_callback(void *priv, int size);
 
+#if KERNEL_VERSION(4, 7, 0) <= LINUX_VERSION_CODE
+static int mse_adapter_v4l2_playback_queue_setup(struct vb2_queue *vq,
+						 unsigned int *nbuffers,
+						 unsigned int *nplanes,
+						 unsigned int sizes[],
+						 struct device *alloc_devs[])
+#else
 static int mse_adapter_v4l2_playback_queue_setup(struct vb2_queue *vq,
 						 unsigned int *nbuffers,
 						 unsigned int *nplanes,
 						 unsigned int sizes[],
 						 void *alloc_ctxs[])
+#endif
 {
 	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
 
@@ -1108,11 +1116,19 @@ static void mse_adapter_v4l2_playback_stop_streaming(struct vb2_queue *vq)
 	pr_debug("[%s]END\n", __func__);
 }
 
+#if KERNEL_VERSION(4, 7, 0) <= LINUX_VERSION_CODE
+static int mse_adapter_v4l2_capture_queue_setup(struct vb2_queue *vq,
+						unsigned int *nbuffers,
+						unsigned int *nplanes,
+						unsigned int sizes[],
+						struct device *alloc_devs[])
+#else
 static int mse_adapter_v4l2_capture_queue_setup(struct vb2_queue *vq,
 						unsigned int *nbuffers,
 						unsigned int *nplanes,
 						unsigned int sizes[],
 						void *alloc_ctxs[])
+#endif
 {
 	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
 
