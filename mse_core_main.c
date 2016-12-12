@@ -2572,12 +2572,7 @@ int mse_register_packetizer(struct mse_packetizer_ops *ops)
 		return -EINVAL;
 	}
 
-	if (!IS_MSE_TYPE_KIND_PACKETIZER(ops->type)) {
-		pr_err("[%s] unknown type=%d\n", __func__, ops->type);
-		return -EINVAL;
-	}
-
-	pr_debug("[%s] type=%d name=%s\n", __func__, ops->type, ops->name);
+	pr_debug("[%s] name=%s\n", __func__, ops->name);
 
 	spin_lock_irqsave(&mse->lock_tables, flags);
 
