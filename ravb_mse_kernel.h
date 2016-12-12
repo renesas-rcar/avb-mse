@@ -80,46 +80,22 @@
 #define MSE_INDEX_UNDEFINED	(-1)
 
 /**
- * @brief Get kind of MSE
+ * @brief Check Type of MSE
  */
-#define MSE_TYPE_KIND_GET(type) ((type) & 0xFFFF0000)
-#define IS_MSE_TYPE_KIND_AUDIO(type) \
-	(((type) & 0xFFFF0000) == MSE_TYPE_ADAPTER_AUDIO)
-#define IS_MSE_TYPE_KIND_VIDEO(type) \
-	(((type) & 0xFFFF0000) == MSE_TYPE_ADAPTER_VIDEO)
-#define IS_MSE_TYPE_KIND_NETWORK(type) \
-	(((type) & 0xFFFF0000) == MSE_TYPE_ADAPTER_NETWORK)
-#define IS_MSE_TYPE_KIND_PACKETIZER(type) \
-	(((type) & 0xFFFF0000) == MSE_TYPE_PACKETIZER)
+#define IS_MSE_TYPE_AUDIO(type) ((type) == MSE_TYPE_ADAPTER_AUDIO)
+#define IS_MSE_TYPE_VIDEO(type) ((type) == MSE_TYPE_ADAPTER_VIDEO)
+#define IS_MSE_TYPE_NETWORK(type) ((type) == MSE_TYPE_ADAPTER_NETWORK)
 
 /**
  * @brief type of MSE
  */
 enum MSE_TYPE {
 	/** @brief Audio Adapter */
-	MSE_TYPE_ADAPTER_AUDIO = 0x00000000,
-	/** @brief Adapter type for PCM */
-	MSE_TYPE_ADAPTER_AUDIO_PCM,
+	MSE_TYPE_ADAPTER_AUDIO,
 	/** @brief Video Adapter */
-	MSE_TYPE_ADAPTER_VIDEO = 0x00010000,
-	/** @brief Adapter type for H.264 */
-	MSE_TYPE_ADAPTER_VIDEO_H264,
+	MSE_TYPE_ADAPTER_VIDEO,
 	/** @brief Network Adapter */
-	MSE_TYPE_ADAPTER_NETWORK = 0x000A0000,
-	/** @brief Special type for EAVB Adapter */
-	MSE_TYPE_ADAPTER_NETWORK_EAVB,
-	/** @brief Packetizer */
-	MSE_TYPE_PACKETIZER = 0x000B0000,
-	/** @brief Packetizer for Audio PCM */
-	MSE_TYPE_PACKETIZER_AUDIO_PCM,
-	/** @brief Packetizer for Video H.264 */
-	MSE_TYPE_PACKETIZER_VIDEO_H264,
-	/** @brief Packetizer for Video MJPEG */
-	MSE_TYPE_PACKETIZER_VIDEO_MJPEG,
-	/** @brief Packetizer for System MPEG2TS */
-	MSE_TYPE_PACKETIZER_SYSTEM_MPEG2TS,
-	/** @brief Packetizer for control protocol CRF  */
-	MSE_TYPE_PACKETIZER_CTRL_CRF,
+	MSE_TYPE_ADAPTER_NETWORK,
 };
 
 /**
@@ -338,8 +314,6 @@ enum MSE_PACKETIZE_STATUS  {
 struct mse_packetizer_ops {
 	/** @brief name */
 	char *name;
-	/** @brief type */
-	enum MSE_TYPE type;
 	/** @brief private data */
 	void *priv;
 	/** @brief open function pointer */
