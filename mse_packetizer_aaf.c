@@ -859,7 +859,6 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 struct mse_packetizer_ops mse_packetizer_audio_aaf_ops = {
 	.name = MSE_PACKETIZER_NAME_STR_AAF_PCM,
 	.priv = NULL,
-	.type = MSE_TYPE_PACKETIZER_AUDIO_PCM,
 	.open = mse_packetizer_audio_aaf_open,
 	.release = mse_packetizer_audio_aaf_release,
 	.init = mse_packetizer_audio_aaf_packet_init,

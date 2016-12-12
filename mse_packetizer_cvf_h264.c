@@ -640,7 +640,6 @@ static int mse_packetizer_video_cvf_h264_depacketize(int index,
 struct mse_packetizer_ops mse_packetizer_video_cvf_h264_d13_ops = {
 	.name = MSE_PACKETIZER_NAME_STR_CVF_H264_D13,
 	.priv = NULL,
-	.type = MSE_TYPE_PACKETIZER_VIDEO_H264,
 	.open = mse_packetizer_video_cvf_h264_d13_open,
 	.release = mse_packetizer_video_cvf_h264_release,
 	.init = mse_packetizer_video_cvf_h264_packet_init,
@@ -654,7 +653,6 @@ struct mse_packetizer_ops mse_packetizer_video_cvf_h264_d13_ops = {
 struct mse_packetizer_ops mse_packetizer_video_cvf_h264_ops = {
 	.name = MSE_PACKETIZER_NAME_STR_CVF_H264,
 	.priv = NULL,
-	.type = MSE_TYPE_PACKETIZER_VIDEO_H264,
 	.open = mse_packetizer_video_cvf_h264_open,
 	.release = mse_packetizer_video_cvf_h264_release,
 	.init = mse_packetizer_video_cvf_h264_packet_init,

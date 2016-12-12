@@ -833,7 +833,6 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 struct mse_packetizer_ops mse_packetizer_audio_iec61883_6_ops = {
 	.name = MSE_PACKETIZER_NAME_STR_IEC61883_6,
 	.priv = NULL,
-	.type = MSE_TYPE_PACKETIZER_AUDIO_PCM,
 	.open = mse_packetizer_audio_iec_open,
 	.release = mse_packetizer_audio_iec_release,
 	.init = mse_packetizer_audio_iec_packet_init,

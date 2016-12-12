@@ -392,7 +392,6 @@ static int mse_packetizer_crf_audio_depacketize(int index,
 struct mse_packetizer_ops mse_packetizer_crf_tstamp_audio_ops = {
 	.name = MSE_PACKETIZER_NAME_STR_CRF_TIMESTAMP,
 	.priv = NULL,
-	.type = MSE_TYPE_PACKETIZER_CTRL_CRF,
 	.open = mse_packetizer_crf_audio_open,
 	.release = mse_packetizer_crf_audio_release,
 	.init = mse_packetizer_crf_audio_packet_init,
