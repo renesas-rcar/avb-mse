@@ -101,14 +101,38 @@
 #define START_CODE        (0x00000001)
 
 enum NALU_TYPE {
-	NALU_TYPE_UNSPECIFIED    = 0,
-	NALU_TYPE_VCL_NON_IDR    = 1,
-	NALU_TYPE_VCL_PART_A     = 2,
-	NALU_TYPE_VCL_PART_B     = 3,
-	NALU_TYPE_VCL_PART_C     = 4,
-	NALU_TYPE_VCL_IDR_PIC    = 5,
-	NALU_TYPE_FU_A           = 28,
-	NALU_TYPE_UNSPECIFIED31  = 31,
+	NALU_TYPE_UNSPECIFIED0  = 0,
+	NALU_TYPE_VCL_NON_IDR   = 1,
+	NALU_TYPE_VCL_PART_A    = 2,
+	NALU_TYPE_VCL_PART_B    = 3,
+	NALU_TYPE_VCL_PART_C    = 4,
+	NALU_TYPE_VCL_IDR_PIC   = 5,
+	NALU_TYPE_SEI           = 6,
+	NALU_TYPE_SPS           = 7,
+	NALU_TYPE_PPS           = 8,
+	NALU_TYPE_AUD           = 9,
+	NALU_TYPE_END_OF_SEQ    = 10,
+	NALU_TYPE_END_OF_STREAM = 11,
+	NALU_TYPE_FILLER        = 12,
+	NALU_TYPE_SPS_EXT       = 13,
+	NALU_TYPE_PREFIX_NALU   = 14,
+	NALU_TYPE_SUBSET_SPS    = 15,
+	NALU_TYPE_RESERVED16    = 16,
+	NALU_TYPE_RESERVED17    = 17,
+	NALU_TYPE_RESERVED18    = 18,
+	NALU_TYPE_AUX           = 19,
+	NALU_TYPE_EXT           = 20,
+	NALU_TYPE_RESERVED21    = 21,
+	NALU_TYPE_RESERVED22    = 22,
+	NALU_TYPE_RESERVED23    = 23,
+	NALU_TYPE_STAP_A        = 24,
+	NALU_TYPE_STAP_B        = 25,
+	NALU_TYPE_MTAP16        = 26,
+	NALU_TYPE_MTAP24        = 27,
+	NALU_TYPE_FU_A          = 28,
+	NALU_TYPE_FU_B          = 29,
+	NALU_TYPE_UNSPECIFIED30 = 30,
+	NALU_TYPE_UNSPECIFIED31 = 31,
 };
 
 struct avtp_param {
@@ -372,7 +396,8 @@ static inline bool is_single_nal(u8 fu_indicator)
 {
 	u8 nalu_type = fu_indicator & NALU_TYPE_MASK;
 
-	return nalu_type >= 1 && nalu_type <= 23;
+	return nalu_type > NALU_TYPE_UNSPECIFIED0 &&
+	       nalu_type < NALU_TYPE_STAP_A;
 }
 
 static int mse_packetizer_video_cvf_h264_packetize(int index,
@@ -426,7 +451,8 @@ static int mse_packetizer_video_cvf_h264_packetize(int index,
 			 nal_size);
 
 		switch (*cur_nal & NALU_TYPE_MASK) {
-		case NALU_TYPE_UNSPECIFIED:
+		case NALU_TYPE_UNSPECIFIED0:
+		case NALU_TYPE_UNSPECIFIED30:
 		case NALU_TYPE_UNSPECIFIED31:
 			pr_err("NAL format error\n");
 			/* invalid nal type, continue */
