@@ -846,17 +846,17 @@ static int mse_adapter_v4l2_playback_callback(void *priv, int size);
 static int mse_adapter_v4l2_capture_callback(void *priv, int size);
 
 #if KERNEL_VERSION(4, 7, 0) <= LINUX_VERSION_CODE
-static int mse_adapter_v4l2_playback_queue_setup(struct vb2_queue *vq,
-						 unsigned int *nbuffers,
-						 unsigned int *nplanes,
-						 unsigned int sizes[],
-						 struct device *alloc_devs[])
+static int mse_adapter_v4l2_queue_setup(struct vb2_queue *vq,
+					unsigned int *nbuffers,
+					unsigned int *nplanes,
+					unsigned int sizes[],
+					struct device *alloc_devs[])
 #else
-static int mse_adapter_v4l2_playback_queue_setup(struct vb2_queue *vq,
-						 unsigned int *nbuffers,
-						 unsigned int *nplanes,
-						 unsigned int sizes[],
-						 void *alloc_ctxs[])
+static int mse_adapter_v4l2_queue_setup(struct vb2_queue *vq,
+					unsigned int *nbuffers,
+					unsigned int *nplanes,
+					unsigned int sizes[],
+					void *alloc_ctxs[])
 #endif
 {
 	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
@@ -888,7 +888,7 @@ static int mse_adapter_v4l2_playback_queue_setup(struct vb2_queue *vq,
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
 
-static int mse_adapter_v4l2_playback_buf_prepare(struct vb2_buffer *vb)
+static int mse_adapter_v4l2_buf_prepare(struct vb2_buffer *vb)
 {
 	unsigned long plane_size;
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
@@ -914,6 +914,43 @@ static int mse_adapter_v4l2_playback_buf_prepare(struct vb2_buffer *vb)
 	pr_debug("[%s]END\n", __func__);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
+}
+
+static void return_all_buffers(struct v4l2_adapter_device *vadp_dev,
+			       enum vb2_buffer_state state)
+{
+	unsigned long flags;
+	struct v4l2_adapter_buffer *buf, *node;
+
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
+	list_for_each_entry_safe(buf, node, &vadp_dev->buf_list, list) {
+		vb2_buffer_done(&buf->vb.vb2_buf, state);
+		list_del(&buf->list);
+	}
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+}
+
+static void mse_adapter_v4l2_stop_streaming(struct vb2_queue *vq)
+{
+	int err;
+	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
+
+	pr_debug("[%s]START\n", __func__);
+
+	if (!vadp_dev) {
+		pr_err("[%s]Failed vb2_get_drv_priv()\n", __func__);
+		return;
+	}
+
+	return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
+
+	err = mse_stop_streaming(vadp_dev->index_instance);
+	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
+		pr_err("[%s]Failed mse_stop_streaming()\n", __func__);
+		return;
+	}
+
+	pr_debug("[%s]END\n", __func__);
 }
 
 static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
@@ -1033,20 +1070,6 @@ static void mse_adapter_v4l2_playback_buf_queue(struct vb2_buffer *vb)
 	pr_debug("[%s]END\n", __func__);
 }
 
-static void return_all_buffers(struct v4l2_adapter_device *vadp_dev,
-			       enum vb2_buffer_state state)
-{
-	unsigned long flags;
-	struct v4l2_adapter_buffer *buf, *node;
-
-	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
-	list_for_each_entry_safe(buf, node, &vadp_dev->buf_list, list) {
-		vb2_buffer_done(&buf->vb.vb2_buf, state);
-		list_del(&buf->list);
-	}
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
-}
-
 static int playback_start_streaming(struct v4l2_adapter_device *vadp_dev,
 				    unsigned int count)
 {
@@ -1087,100 +1110,6 @@ static int mse_adapter_v4l2_playback_start_streaming(struct vb2_queue *vq,
 		return_all_buffers(vadp_dev, VB2_BUF_STATE_QUEUED);
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
-
-	pr_debug("[%s]END\n", __func__);
-
-	return MSE_ADAPTER_V4L2_RTN_OK;
-}
-
-static void mse_adapter_v4l2_playback_stop_streaming(struct vb2_queue *vq)
-{
-	int err;
-	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
-
-	pr_debug("[%s]START\n", __func__);
-
-	if (!vadp_dev) {
-		pr_err("[%s]Failed vb2_get_drv_priv()\n", __func__);
-		return;
-	}
-
-	return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
-
-	err = mse_stop_streaming(vadp_dev->index_instance);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
-		pr_err("[%s]Failed mse_stop_streaming()\n", __func__);
-		return;
-	}
-
-	pr_debug("[%s]END\n", __func__);
-}
-
-#if KERNEL_VERSION(4, 7, 0) <= LINUX_VERSION_CODE
-static int mse_adapter_v4l2_capture_queue_setup(struct vb2_queue *vq,
-						unsigned int *nbuffers,
-						unsigned int *nplanes,
-						unsigned int sizes[],
-						struct device *alloc_devs[])
-#else
-static int mse_adapter_v4l2_capture_queue_setup(struct vb2_queue *vq,
-						unsigned int *nbuffers,
-						unsigned int *nplanes,
-						unsigned int sizes[],
-						void *alloc_ctxs[])
-#endif
-{
-	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
-
-	pr_debug("[%s]START\n", __func__);
-
-	if (!vadp_dev) {
-		pr_err("[%s]Failed vb2_get_drv_priv()\n", __func__);
-		return MSE_ADAPTER_V4L2_RTN_NG;
-	}
-
-	pr_debug("[%s]vq->num_buffers=%d, nbuffers=%d",
-		 __func__, vq->num_buffers, *nbuffers);
-	if (vq->num_buffers + *nbuffers < NUM_BUFFERS)
-		*nbuffers = NUM_BUFFERS - vq->num_buffers;
-
-	if (*nplanes && sizes[0] < vadp_dev->format.sizeimage) {
-		pr_err("[%s]sizeimage too small (%d < %d)\n",
-		       __func__, sizes[0], vadp_dev->format.sizeimage);
-		return -EINVAL;
-	}
-
-	if (!*nplanes)
-		sizes[0] = vadp_dev->format.sizeimage;
-	*nplanes = NUM_PLANES;
-
-	pr_debug("[%s]END nbuffers=%d\n", __func__, *nbuffers);
-
-	return MSE_ADAPTER_V4L2_RTN_OK;
-}
-
-static int mse_adapter_v4l2_capture_buf_prepare(struct vb2_buffer *vb)
-{
-	unsigned long plane_size;
-	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
-	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vb->vb2_queue);
-
-	pr_debug("[%s]START vb=%p\n", __func__, vb2_plane_vaddr(vb, 0));
-
-	if (!vadp_dev) {
-		pr_err("[%s]Failed vb2_get_drv_priv()\n", __func__);
-		return MSE_ADAPTER_V4L2_RTN_NG;
-	}
-
-	plane_size = vb2_plane_size(&vbuf->vb2_buf, 0);
-	if (plane_size < vadp_dev->format.sizeimage) {
-		pr_err("[%s]buffer too small (%lu < %u)\n",
-		       __func__, plane_size, vadp_dev->format.sizeimage);
-		return -EINVAL;
-	}
-
-	vbuf->vb2_buf.planes[0].bytesused =
-				vb2_get_plane_payload(&vbuf->vb2_buf, 0);
 
 	pr_debug("[%s]END\n", __func__);
 
@@ -1352,46 +1281,23 @@ static int mse_adapter_v4l2_capture_start_streaming(struct vb2_queue *vq,
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
 
-static void mse_adapter_v4l2_capture_stop_streaming(struct vb2_queue *vq)
-{
-	int err;
-	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
-
-	pr_debug("[%s]START\n", __func__);
-
-	if (!vadp_dev) {
-		pr_err("[%s]Failed vb2_get_drv_priv()\n", __func__);
-		return;
-	}
-
-	return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
-
-	err = mse_stop_streaming(vadp_dev->index_instance);
-	if (err < MSE_ADAPTER_V4L2_RTN_OK) {
-		pr_err("[%s]Failed mse_stop_streaming()\n", __func__);
-		return;
-	}
-
-	pr_debug("[%s]END\n", __func__);
-}
-
 static const struct vb2_ops g_mse_adapter_v4l2_capture_queue_ops = {
-	.queue_setup		= mse_adapter_v4l2_capture_queue_setup,
+	.queue_setup		= mse_adapter_v4l2_queue_setup,
 	.wait_prepare		= vb2_ops_wait_prepare,
 	.wait_finish		= vb2_ops_wait_finish,
-	.buf_prepare		= mse_adapter_v4l2_capture_buf_prepare,
+	.buf_prepare		= mse_adapter_v4l2_buf_prepare,
 	.start_streaming	= mse_adapter_v4l2_capture_start_streaming,
-	.stop_streaming		= mse_adapter_v4l2_capture_stop_streaming,
+	.stop_streaming		= mse_adapter_v4l2_stop_streaming,
 	.buf_queue		= mse_adapter_v4l2_capture_buf_queue,
 };
 
 static const struct vb2_ops g_mse_adapter_v4l2_playback_queue_ops = {
-	.queue_setup		= mse_adapter_v4l2_playback_queue_setup,
+	.queue_setup		= mse_adapter_v4l2_queue_setup,
 	.wait_prepare		= vb2_ops_wait_prepare,
 	.wait_finish		= vb2_ops_wait_finish,
-	.buf_prepare		= mse_adapter_v4l2_playback_buf_prepare,
+	.buf_prepare		= mse_adapter_v4l2_buf_prepare,
 	.start_streaming	= mse_adapter_v4l2_playback_start_streaming,
-	.stop_streaming		= mse_adapter_v4l2_playback_stop_streaming,
+	.stop_streaming		= mse_adapter_v4l2_stop_streaming,
 	.buf_queue		= mse_adapter_v4l2_playback_buf_queue,
 };
 
@@ -1576,56 +1482,57 @@ static void unregister_mse_core(struct v4l2_adapter_device *vadp_dev)
 		       __func__);
 }
 
-static int mse_adapter_v4l2_free(void)
+static int mse_adapter_v4l2_free(int dev_num)
 {
-	int dev_num;
 	struct v4l2_adapter_device *vadp_dev;
 
-	pr_debug("[%s]START\n", __func__);
+	pr_debug("[%s]START device number=%d\n", __func__, dev_num);
 
-	for (dev_num = 0; dev_num < MSE_ADAPTER_V4L2_DEVICE_MAX; dev_num++) {
-		vadp_dev = g_v4l2_adapter[dev_num];
-		if (!vadp_dev)
-			break;
+	vadp_dev = g_v4l2_adapter[dev_num];
+	if (!vadp_dev)
+		return MSE_ADAPTER_V4L2_RTN_OK;
 
-		unregister_mse_core(vadp_dev);
-		mse_adapter_v4l2_cleanup(vadp_dev);
-		g_v4l2_adapter[dev_num] = NULL;
-	}
+	unregister_mse_core(vadp_dev);
+	mse_adapter_v4l2_cleanup(vadp_dev);
+	g_v4l2_adapter[dev_num] = NULL;
 
 	pr_debug("[%s]END\n", __func__);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
 }
 
-static int mse_adapter_v4l2_init(void)
+static int __init mse_adapter_v4l2_init(void)
 {
-	int dev_num;
-	int err;
-	int rtn = MSE_ADAPTER_V4L2_RTN_OK;
+	int err, i;
 
 	pr_debug("Start v4l2 adapter\n");
-	for (dev_num = 0; dev_num < MSE_ADAPTER_V4L2_DEVICE_MAX; dev_num++) {
-		err = mse_adapter_v4l2_probe(dev_num);
+
+	for (i = 0; i < MSE_ADAPTER_V4L2_DEVICE_MAX; i++) {
+		err = mse_adapter_v4l2_probe(i);
 		if (err) {
-			pr_err("Failed creating device=%d Rtn=%d\n",
-			       dev_num, err);
-			rtn = MSE_ADAPTER_V4L2_RTN_NG;
-			break;
+			pr_err("Failed creating device=%d Rtn=%d\n", i, err);
+			goto init_fail;
 		}
 	}
 
-	if (rtn == MSE_ADAPTER_V4L2_RTN_NG)
-		mse_adapter_v4l2_free();
+	return MSE_ADAPTER_V4L2_RTN_OK;
 
-	return rtn;
+init_fail:
+	for (i = 0; i < MSE_ADAPTER_V4L2_DEVICE_MAX; i++)
+		mse_adapter_v4l2_free(i);
+
+	return MSE_ADAPTER_V4L2_RTN_NG;
 }
 
 /* module clean up */
-static void mse_adapter_v4l2_exit(void)
+static void __exit mse_adapter_v4l2_exit(void)
 {
+	int i;
+
 	pr_debug("Stop v4l2 adapter\n");
-	mse_adapter_v4l2_free();
+
+	for (i = 0; i < MSE_ADAPTER_V4L2_DEVICE_MAX; i++)
+		mse_adapter_v4l2_free(i);
 }
 
 module_init(mse_adapter_v4l2_init)
