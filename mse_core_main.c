@@ -679,6 +679,12 @@ static int mse_create_config_device(int index_media,
 		memcpy(adapter->sysfs_config, mse_sysfs_config_video,
 		       sizeof(mse_sysfs_config_video));
 		break;
+	case MSE_TYPE_ADAPTER_MPEG2TS:
+		adapter->sysfs_config = kzalloc(sizeof(mse_sysfs_config_video),
+						GFP_KERNEL);
+		memcpy(adapter->sysfs_config, mse_sysfs_config_video,
+		       sizeof(mse_sysfs_config_video));
+		break;
 	default:
 		pr_err("[%s] undefined type=%d\n", __func__, adapter->type);
 		return -EPERM;
@@ -842,9 +848,26 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 			ret = -EPERM;
 		}
 
-		/* reflect shared params info into mpeg2ts config */
-		mpeg2ts->bitrate = video->bitrate;
-		mpeg2ts->bytes_per_frame = video->bytes_per_frame;
+		break;
+
+	case MSE_TYPE_ADAPTER_MPEG2TS:
+		err = mse_sysfs_get_config_int(index,
+					       MSE_SYSFS_NAME_STR_BITRATE,
+					       &mpeg2ts->bitrate);
+		if (err < 0) {
+			pr_err("[%s] undefined bitrate\n", __func__);
+			ret = -EPERM;
+		}
+
+		err = mse_sysfs_get_config_int(
+					index,
+					MSE_SYSFS_NAME_STR_BYTES_PER_FRAME,
+					&mpeg2ts->bytes_per_frame);
+		if (err < 0) {
+			pr_err("[%s] undefined payload size\n", __func__);
+			ret = -EPERM;
+		}
+
 		break;
 
 	case MSE_TYPE_ADAPTER_AUDIO:
@@ -1568,6 +1591,7 @@ static void mse_work_packetize(struct work_struct *work)
 		break;
 
 	case MSE_TYPE_ADAPTER_VIDEO:
+	case MSE_TYPE_ADAPTER_MPEG2TS:
 		/* make AVTP packet */
 		ret = mse_packet_ctrl_make_packet(
 			instance->index_packetizer,
@@ -1717,6 +1741,7 @@ static void mse_work_depacketize(struct work_struct *work)
 		break;
 
 	case MSE_TYPE_ADAPTER_VIDEO:
+	case MSE_TYPE_ADAPTER_MPEG2TS:
 		/* get AVTP packet payload */
 		ret = mse_packet_ctrl_take_out_packet(
 						instance->index_packetizer,
@@ -2416,6 +2441,7 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 	switch (type) {
 	case MSE_TYPE_ADAPTER_AUDIO:
 	case MSE_TYPE_ADAPTER_VIDEO:
+	case MSE_TYPE_ADAPTER_MPEG2TS:
 		break;
 	default:
 		pr_err("[%s] unknown type=%d\n", __func__, type);
