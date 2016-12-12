@@ -715,7 +715,6 @@ static int mse_packetizer_cvf_mjpeg_depacketize(int index,
 struct mse_packetizer_ops mse_packetizer_video_cvf_mjpeg_ops = {
 	.name = MSE_PACKETIZER_NAME_STR_CVF_MJPEG,
 	.priv = NULL,
-	.type = MSE_TYPE_PACKETIZER_VIDEO_MJPEG,
 	.open = mse_packetizer_cvf_mjpeg_open,
 	.release = mse_packetizer_cvf_mjpeg_release,
 	.init = mse_packetizer_cvf_mjpeg_packet_init,

@@ -569,7 +569,7 @@ static int mse_adapter_eavb_get_link_speed(int index)
 
 static struct mse_adapter_network_ops mse_adapter_eavb_ops = {
 	.name = "ravb",
-	.type = MSE_TYPE_ADAPTER_NETWORK_EAVB,
+	.type = MSE_TYPE_ADAPTER_NETWORK,
 	.priv = NULL,
 	.open = mse_adapter_eavb_open,
 	.release = mse_adapter_eavb_release,

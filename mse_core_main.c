@@ -666,7 +666,7 @@ static int mse_create_config_device(int index_media,
 
 	pr_debug("[%s]\n", __func__);
 
-	switch (MSE_TYPE_KIND_GET(adapter->type)) {
+	switch (adapter->type) {
 	case MSE_TYPE_ADAPTER_AUDIO:
 		adapter->sysfs_config = kzalloc(sizeof(mse_sysfs_config_audio),
 						GFP_KERNEL);
@@ -807,7 +807,7 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 		ret = -EPERM;
 	}
 
-	switch (MSE_TYPE_KIND_GET(instance->media->type)) {
+	switch (instance->media->type) {
 	case MSE_TYPE_ADAPTER_VIDEO:
 		err = mse_sysfs_get_config_int(index,
 					       MSE_SYSFS_NAME_STR_FPS_SECONDS,
@@ -1537,7 +1537,7 @@ static void mse_work_packetize(struct work_struct *work)
 	if (instance->f_stopping)
 		return;
 
-	switch (MSE_TYPE_KIND_GET(instance->media->type)) {
+	switch (instance->media->type) {
 	case MSE_TYPE_ADAPTER_AUDIO:
 		/* make AVTP packet */
 		ret = mse_packet_ctrl_make_packet(
@@ -1667,7 +1667,7 @@ static void mse_work_depacketize(struct work_struct *work)
 	received = mse_packet_ctrl_check_packet_remain(
 						instance->packet_buffer);
 
-	switch (MSE_TYPE_KIND_GET(instance->media->type)) {
+	switch (instance->media->type) {
 	case MSE_TYPE_ADAPTER_AUDIO:
 		/* get AVTP packet payload */
 		audio = &instance->media_config.audio;
@@ -1792,7 +1792,7 @@ static void mse_work_callback(struct work_struct *work)
 	}
 
 	if (!instance->tx) {
-		if (IS_MSE_TYPE_KIND_AUDIO(adapter->type)) {
+		if (IS_MSE_TYPE_AUDIO(adapter->type)) {
 			if (instance->temp_w != instance->temp_r &&
 			    check_presentation_time(instance)) {
 				memcpy(instance->media_buffer,
@@ -1842,7 +1842,7 @@ static void mse_work_stop(struct work_struct *work)
 		pr_err("[%s] The timer was still in use...\n", __func__);
 
 	/* timestamp timer, crf timer stop */
-	if (IS_MSE_TYPE_KIND_AUDIO(adapter->type)) {
+	if (IS_MSE_TYPE_AUDIO(adapter->type)) {
 		ret = hrtimer_try_to_cancel(&instance->tstamp_timer);
 		if (ret)
 			pr_err("[%s] The tstamp_timer was still in use...\n",
@@ -2134,7 +2134,7 @@ static void mse_work_start_streaming(struct work_struct *work)
 		hrtimer_start(&instance->timer, ktime, HRTIMER_MODE_REL);
 	}
 
-	if (IS_MSE_TYPE_KIND_AUDIO(adapter->type)) {
+	if (IS_MSE_TYPE_AUDIO(adapter->type)) {
 		/* capture timestamps */
 		if (instance->ptp_clock == 1) {
 			int count, i;
@@ -2380,7 +2380,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 		/* start workqueue for packetize */
 		instance->f_continue = false;
 
-		if (IS_MSE_TYPE_KIND_AUDIO(adapter->type))
+		if (IS_MSE_TYPE_AUDIO(adapter->type))
 			create_avtp_timestamps(instance);
 
 		queue_work(instance->wq_packet, &instance->wk_packetize);
@@ -2413,7 +2413,7 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 		return -EINVAL;
 	}
 
-	switch (MSE_TYPE_KIND_GET(type)) {
+	switch (type) {
 	case MSE_TYPE_ADAPTER_AUDIO:
 	case MSE_TYPE_ADAPTER_VIDEO:
 		break;
@@ -2511,7 +2511,7 @@ int mse_register_adapter_network(struct mse_adapter_network_ops *ops)
 		return -EINVAL;
 	}
 
-	if (!IS_MSE_TYPE_KIND_NETWORK(ops->type)) {
+	if (!IS_MSE_TYPE_NETWORK(ops->type)) {
 		pr_err("[%s] unknown type=%d\n", __func__, ops->type);
 		return -EINVAL;
 	}
@@ -2572,12 +2572,7 @@ int mse_register_packetizer(struct mse_packetizer_ops *ops)
 		return -EINVAL;
 	}
 
-	if (!IS_MSE_TYPE_KIND_PACKETIZER(ops->type)) {
-		pr_err("[%s] unknown type=%d\n", __func__, ops->type);
-		return -EINVAL;
-	}
-
-	pr_debug("[%s] type=%d name=%s\n", __func__, ops->type, ops->name);
+	pr_debug("[%s] name=%s\n", __func__, ops->name);
 
 	spin_lock_irqsave(&mse->lock_tables, flags);
 
@@ -3109,7 +3104,7 @@ int mse_open(int index_media, bool tx)
 
 	/* for timestamp */
 	instance->wq_tstamp = create_singlethread_workqueue("mse_tstampq");
-	if (IS_MSE_TYPE_KIND_AUDIO(adapter->type)) {
+	if (IS_MSE_TYPE_AUDIO(adapter->type)) {
 		spin_lock_irqsave(&instance->lock_ques, flags);
 		tstamps_clear_tstamps(&instance->tstamp_que);
 		spin_unlock_irqrestore(&instance->lock_ques, flags);
@@ -3241,7 +3236,7 @@ int mse_close(int index)
 	destroy_workqueue(instance->wq_stream);
 
 	destroy_workqueue(instance->wq_tstamp);
-	if (IS_MSE_TYPE_KIND_AUDIO(adapter->type))
+	if (IS_MSE_TYPE_AUDIO(adapter->type))
 		destroy_workqueue(instance->wq_crf_packet);
 
 	/* release network adapter */

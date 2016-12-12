@@ -532,7 +532,6 @@ static int mse_packetizer_video_iec_depacketize(int index,
 struct mse_packetizer_ops mse_packetizer_video_iec61883_4_ops = {
 	.name = MSE_PACKETIZER_NAME_STR_IEC61883_4,
 	.priv = NULL,
-	.type = MSE_TYPE_PACKETIZER_SYSTEM_MPEG2TS,
 	.open = mse_packetizer_video_iec_open,
 	.release = mse_packetizer_video_iec_release,
 	.init = mse_packetizer_video_iec_packet_init,
