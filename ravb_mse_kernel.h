@@ -84,6 +84,7 @@
  */
 #define IS_MSE_TYPE_AUDIO(type) ((type) == MSE_TYPE_ADAPTER_AUDIO)
 #define IS_MSE_TYPE_VIDEO(type) ((type) == MSE_TYPE_ADAPTER_VIDEO)
+#define IS_MSE_TYPE_MPEG2TS(type) ((type) == MSE_TYPE_ADAPTER_MPEG2TS)
 #define IS_MSE_TYPE_NETWORK(type) ((type) == MSE_TYPE_ADAPTER_NETWORK)
 
 /**
@@ -94,6 +95,8 @@ enum MSE_TYPE {
 	MSE_TYPE_ADAPTER_AUDIO,
 	/** @brief Video Adapter */
 	MSE_TYPE_ADAPTER_VIDEO,
+	/** @brief Adapter type for MPEG-2 TS */
+	MSE_TYPE_ADAPTER_MPEG2TS,
 	/** @brief Network Adapter */
 	MSE_TYPE_ADAPTER_NETWORK,
 };
