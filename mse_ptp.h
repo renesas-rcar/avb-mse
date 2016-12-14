@@ -64,16 +64,16 @@
 #define __MSE_PTP_H__
 
 
-int mse_ptp_open(int *dev_id);
+int mse_ptp_open_dummy(int *dev_id);
 
-int mse_ptp_close(int dev_id);
+int mse_ptp_close_dummy(int dev_id);
 
-int mse_ptp_get_time(int dev_id, struct ptp_clock_time *clock_time);
+int mse_ptp_get_time_dummy(int dev_id, struct ptp_clock_time *clock_time);
 
-int mse_ptp_get_timestamps(int dev_id,
-		       int ch,
-		       int *count,
-		       struct ptp_clock_time timestamps[]);
+int mse_ptp_get_timestamps_dummy(int dev_id,
+				 int ch,
+				 int *count,
+				 struct ptp_clock_time timestamps[]);
 
 #endif /* __MSE_SYSFS_H__ */
 
