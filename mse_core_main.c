@@ -2920,7 +2920,7 @@ int mse_open(int index_media, bool tx)
 	struct mse_adapter *adapter;
 	struct mse_adapter_network_ops *network;
 	struct mse_packetizer_ops *packetizer;
-	int ret, i, j;
+	int ret, i, index;
 	char name[MSE_NAME_LEN_MAX];
 	char eavbname[MSE_NAME_LEN_MAX];
 	long link_speed;
@@ -2949,14 +2949,15 @@ int mse_open(int index_media, bool tx)
 		if (!mse->instance_table[i].used_f)
 			break;
 	}
+	index = i;
 
-	if (ARRAY_SIZE(mse->instance_table) <= i) {
+	if (ARRAY_SIZE(mse->instance_table) <= index) {
 		pr_err("[%s] resister instance full!\n", __func__);
 		mutex_unlock(&mse->mutex_open);
 		return -EBUSY;
 	}
 
-	instance = &mse->instance_table[i];
+	instance = &mse->instance_table[index];
 	instance->used_f = true;
 	spin_lock_init(&instance->lock_timer);
 	spin_lock_init(&instance->lock_ques);
@@ -2976,8 +2977,8 @@ int mse_open(int index_media, bool tx)
 	}
 
 	/* search network adapter name for configuration value */
-	for (j = 0; j < ARRAY_SIZE(mse->network_table); j++) {
-		network = mse->network_table[j];
+	for (i = 0; i < ARRAY_SIZE(mse->network_table); i++) {
+		network = mse->network_table[i];
 		if (!network)
 			continue;
 
@@ -2985,7 +2986,7 @@ int mse_open(int index_media, bool tx)
 			break;
 	}
 
-	if (j >= ARRAY_SIZE(mse->network_table)) {
+	if (i >= ARRAY_SIZE(mse->network_table)) {
 		pr_err("[%s] network adapter module is not loaded\n",
 		       __func__);
 		instance->used_f = false;
@@ -2993,7 +2994,7 @@ int mse_open(int index_media, bool tx)
 	}
 
 	pr_debug("[%s] network adapter index=%d name=%s\n",
-		 __func__, j, network->name);
+		 __func__, i, network->name);
 
 	/* get configuration value */
 	memset(name, 0, MSE_NAME_LEN_MAX);
@@ -3024,8 +3025,8 @@ int mse_open(int index_media, bool tx)
 	}
 
 	/* search packetizer name for configuration value */
-	for (j = 0; j < ARRAY_SIZE(mse->packetizer_table); j++) {
-		packetizer = mse->packetizer_table[j];
+	for (i = 0; i < ARRAY_SIZE(mse->packetizer_table); i++) {
+		packetizer = mse->packetizer_table[i];
 		if (!packetizer)
 			continue;
 
@@ -3033,13 +3034,13 @@ int mse_open(int index_media, bool tx)
 			break;
 	}
 
-	if (j >= ARRAY_SIZE(mse->packetizer_table)) {
+	if (i >= ARRAY_SIZE(mse->packetizer_table)) {
 		pr_err("[%s] packetizer not found\n", __func__);
 		instance->used_f = false;
 		return -ENODEV;
 	}
 	pr_debug("[%s] packetizer index=%d name=%s\n",
-		 __func__, j, packetizer->name);
+		 __func__, i, packetizer->name);
 
 	/* ptp open */
 	ret = mse_ptp_open(&instance->ptp_dev_id);
@@ -3230,7 +3231,7 @@ int mse_open(int index_media, bool tx)
 	/* init paketizer */
 	instance->packetizer->init(instance->index_packetizer);
 
-	return i;
+	return index;
 }
 EXPORT_SYMBOL(mse_open);
 
