@@ -17,6 +17,7 @@ ccflags-y += -I$(INCSHARED)
 mse_core-objs := mse_core_main.o \
                  mse_packet_ctrl.o \
                  mse_sysfs.o \
+                 mse_ioctl.o \
                  avtp.o \
                  jpeg.o \
                  mse_packetizer.o \

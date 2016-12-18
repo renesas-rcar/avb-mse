@@ -64,6 +64,7 @@
 #ifdef __KERNEL__
 
 #include <linux/ptp_clock.h>
+#include "ravb_mse.h"
 #include "ravb_eavb.h"
 
 /**
