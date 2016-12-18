@@ -362,6 +362,7 @@ struct mse_instance {
 	int stored;
 	u64 mpeg2ts_pcr_90k;
 	u64 mpeg2ts_clock_90k;
+	bool f_force_flush;
 	unsigned char temp_video_buffer[128 * 1024];
 	/** @brief audio buffer  */
 	int temp_w;
@@ -864,7 +865,9 @@ static void mse_work_stream(struct work_struct *work)
 		} else {
 			instance->f_completion = true;
 			pr_debug("[%s] f_completion = true\n", __func__);
-			if (instance->timer_delay == 0) {
+			if (instance->timer_delay == 0 ||
+			    instance->f_force_flush) {
+				instance->f_force_flush = false;
 				instance->mse_completion(
 						instance->private_data, 0);
 			}
@@ -2253,15 +2256,24 @@ static void mse_work_start_transmission(struct work_struct *work)
 			instance->packetizer->set_mpeg2ts_config(
 				instance->index_packetizer,
 				&instance->media_config.mpeg2ts);
-		} else {
+		} else if (instance->stored + buffer_size <=
+			   sizeof(instance->temp_video_buffer)) {
 			memcpy(instance->temp_video_buffer + instance->stored,
 			       buffer, buffer_size);
 			instance->stored += buffer_size;
+			if (instance->stored + buffer_size >=
+			    sizeof(instance->temp_video_buffer))
+				instance->f_force_flush = true;
+		} else {
+			pr_err("[%s] temp buffer overrun %u  %zu\n",
+			       __func__,
+			       instance->stored, buffer_size);
+			return;
 		}
 
 		instance->f_first_vframe = false;
 
-		if (check_mpeg2ts_pcr(instance)) {
+		if (check_mpeg2ts_pcr(instance) || instance->f_force_flush) {
 			instance->state = MSE_STATE_EXECUTE;
 			instance->media_buffer = instance->temp_video_buffer;
 			instance->media_buffer_size = instance->parsed;
@@ -2885,6 +2897,7 @@ int mse_open(int index_media, bool tx)
 		pr_err("[%s] use mpeg2-ts\n",  __func__);
 		instance->use_temp_video_buffer_mpeg2ts = true;
 		instance->f_first_vframe = true;
+		instance->f_force_flush = false;
 	}
 
 	/* packetizer for configuration value */
