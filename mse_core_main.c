@@ -362,6 +362,8 @@ struct mse_instance {
 	int stored;
 	u64 mpeg2ts_pcr_90k;
 	u64 mpeg2ts_clock_90k;
+	int mpeg2ts_pre_pcr_pid;
+	u64 mpeg2ts_pre_pcr_90k;
 	bool f_force_flush;
 	unsigned char temp_video_buffer[128 * 1024];
 	/** @brief audio buffer  */
@@ -525,7 +527,7 @@ static struct mse_config mse_config_default_mpeg2ts = {
 	.media_mpeg2ts_config = {
 		.tspackets_per_frame = 7,
 		.bitrate = 50000000,
-		.pcr_pid = 8192,
+		.pcr_pid = PCR_PID_IGNORE,
 	},
 	.ptp_config = {
 		.type = MSE_PTP_TYPE_CURRENT_TIME,
@@ -2128,6 +2130,7 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 	u8 *tsp;
 	u8 afc, afc_len, pcr_flag;
 	u16 pid;
+	u16 pcr_pid = instance->media_config.mpeg2ts.pcr_pid;
 	u64 pcr;
 	int psize, offset;
 
@@ -2152,30 +2155,49 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 
 		/* Adaptation Field Control = 0b10 or 0b11 and  */
 		/* afc_len >= 7 and pcr_flag = 1 */
-		if ((afc & 0x2) && (afc_len >= 7) && pcr_flag) {
-			/* PCR base: 90KHz, 33bits (32+1bits) */
-			pcr = ((u64)tsp[6] << 25) |
-			      ((u64)tsp[7] << 17) |
-			      ((u64)tsp[8] << 9) |
-			      ((u64)tsp[9] << 1) |
-			      (((u64)tsp[10] & 0x80) >> 7);
+		if (!(afc & 0x2) || (afc_len < 7) || !pcr_flag)
+			continue;    /* no PCR */
 
-			/*
-			 * PCR extension: 27MHz, 9bits (8+1bits)
-			 * Note: MSE is ignore PCR extension.
-			 *
-			 * pcr_ext = ((tsp[10] & 0x1) << 9) | tsp[11];
-			 */
+		pr_debug("[%s] find pcr %d (required %d)\n",
+			 __func__, pid, pcr_pid);
+		/* PCR base: 90KHz, 33bits (32+1bits) */
+		pcr = ((u64)tsp[6] << 25) |
+			((u64)tsp[7] << 17) |
+			((u64)tsp[8] << 9) |
+			((u64)tsp[9] << 1) |
+			(((u64)tsp[10] & 0x80) >> 7);
 
-			if (compare_pcr(pcr, instance->mpeg2ts_clock_90k)) {
-				if (instance->mpeg2ts_clock_90k ==
-				    MPEG2TS_PCR90K_INVALID)
-					instance->mpeg2ts_clock_90k = pcr;
-
+		if (pcr_pid == PCR_PID_IGNORE) {
+			if (instance->mpeg2ts_pre_pcr_pid != PCR_PID_IGNORE &&
+			    (instance->mpeg2ts_pre_pcr_pid != pid ||
+			     compare_pcr(instance->mpeg2ts_pre_pcr_90k, pcr))) {
+				pr_info("[%s] change pid(%d -> %d) or rewind\n",
+					__func__, instance->mpeg2ts_pre_pcr_pid,
+					pid);
+				instance->mpeg2ts_clock_90k = pcr;
 				instance->mpeg2ts_pcr_90k = pcr;
-
+				instance->mpeg2ts_pre_pcr_pid = pid;
+				instance->mpeg2ts_pre_pcr_90k = pcr;
 				return true;
 			}
+		} else if (pcr_pid != pid) {
+			continue;
+		}
+		instance->mpeg2ts_pre_pcr_pid = pid;
+		instance->mpeg2ts_pre_pcr_90k = pcr;
+		/*
+		 * PCR extension: 27MHz, 9bits (8+1bits)
+		 * Note: MSE is ignore PCR extension.
+		 *
+		 * pcr_ext = ((tsp[10] & 0x1) << 9) | tsp[11];
+		 */
+		if (compare_pcr(pcr, instance->mpeg2ts_clock_90k)) {
+			if (instance->mpeg2ts_clock_90k ==
+			    MPEG2TS_PCR90K_INVALID)
+				instance->mpeg2ts_clock_90k = pcr;
+			instance->mpeg2ts_pcr_90k = pcr;
+
+			return true;
 		}
 	}
 
@@ -3163,6 +3185,8 @@ int mse_start_streaming(int index)
 		   &instance->wk_start_stream);
 
 	instance->mpeg2ts_clock_90k = MPEG2TS_PCR90K_INVALID;
+	instance->mpeg2ts_pre_pcr_pid = PCR_PID_IGNORE;
+	instance->mpeg2ts_pre_pcr_90k = 0;
 
 	return 0;
 }
