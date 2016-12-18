@@ -330,9 +330,9 @@ static int mse_packetizer_audio_iec_set_audio_config(
 	if (index >= ARRAY_SIZE(iec_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d rate=%d channels=%d bytes_per_frame=%d\n",
+	pr_debug("[%s] index=%d rate=%d channels=%d samples_per_frame=%d\n",
 		 __func__, index, config->sample_rate, config->channels,
-		 config->bytes_per_frame);
+		 config->samples_per_frame);
 	iec = &iec_packetizer_table[index];
 	iec->iec_config = *config;
 
@@ -340,15 +340,14 @@ static int mse_packetizer_audio_iec_set_audio_config(
 	if (ret < 0)
 		return ret;
 
-	/* when bytes_per_frame is not set */
-	if (!iec->iec_config.bytes_per_frame) {
+	/* when samples_per_frame is not set */
+	if (!iec->iec_config.samples_per_frame) {
 		iec->class_interval_frames = CLASS_INTERVAL_FRAMES;
 		iec->sample_per_packet = iec->iec_config.sample_rate /
 				(iec->class_interval_frames * INTERVAL_FRAMES);
 		iec->frame_interval_time = NSEC / CLASS_INTERVAL_FRAMES;
 	} else {
-		iec->sample_per_packet = iec->iec_config.bytes_per_frame /
-			(iec->iec_config.channels * AM824_DATA_SIZE);
+		iec->sample_per_packet = iec->iec_config.samples_per_frame;
 		if (iec->sample_per_packet < 2)
 			iec->sample_per_packet = 2;
 		else if (iec->sample_per_packet > 128)
@@ -831,8 +830,7 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 }
 
 struct mse_packetizer_ops mse_packetizer_audio_iec61883_6_ops = {
-	.name = MSE_PACKETIZER_NAME_STR_IEC61883_6,
-	.priv = NULL,
+	.id = MSE_PACKETIZER_IEC61883_6,
 	.open = mse_packetizer_audio_iec_open,
 	.release = mse_packetizer_audio_iec_release,
 	.init = mse_packetizer_audio_iec_packet_init,

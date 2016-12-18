@@ -70,7 +70,7 @@
 /**
  * @brief Resistered adapter name length
  */
-#define MSE_NAME_LEN_MAX	(64)
+#define MSE_NAME_LEN_MAX	(32)
 /**
  * @brief MAC address length
  */
@@ -121,6 +121,8 @@ struct mse_network_config {
 	unsigned long ts_offset;
 	/** @brief port transmit rate */
 	unsigned long port_transmit_rate;
+	/** @brief streamid */
+	u8 streamid[8];
 	/* if need, add more parameters */
 };
 
@@ -169,6 +171,8 @@ struct mse_audio_config {
 	bool is_big_endian;
 	/** @brief bytes per frame */
 	int bytes_per_frame;
+	/** @brief samples per frame */
+	int samples_per_frame;
 	/* if need, add more parameters */
 };
 
@@ -228,7 +232,9 @@ struct mse_mpeg2ts_config {
 	/** @brief bitrate [Mbps] */
 	int bitrate;
 	/** @brief bytes per frame is data size in 1 ether frame */
-	int bytes_per_frame;
+	int tspackets_per_frame;
+	/** @brief pid of pcr */
+	int pcr_pid;
 	/** @brief mpeg2ts type */
 	enum MSE_MPEG2TS_TYPE mpeg2ts_type;
 };
@@ -246,22 +252,6 @@ struct mse_packet {
 };
 
 /**
- * @brief main data for Adapter
- */
-struct mse_adapter {
-	/** @brief instance used flag */
-	bool used_f;
-	/** @brief adapter name */
-	char name[MSE_NAME_LEN_MAX];
-	/** @brief type of Adapter */
-	enum MSE_TYPE type;
-	/** @brief sysfs index */
-	int index_sysfs;
-	/** @brief sysfs data */
-	struct mse_sysfs_config *sysfs_config;
-};
-
-/**
  * @brief registered operations for network adapter
  */
 struct mse_adapter_network_ops {
@@ -269,8 +259,6 @@ struct mse_adapter_network_ops {
 	char *name;
 	/** @brief type */
 	enum MSE_TYPE type;
-	/** @brief private data */
-	void *priv;
 	/** @brief open function pointer */
 	int (*open)(char *name);
 	/** @brief release function pointer */
@@ -317,10 +305,8 @@ enum MSE_PACKETIZE_STATUS  {
  * @brief registered operations for packetizer
  */
 struct mse_packetizer_ops {
-	/** @brief name */
-	char *name;
-	/** @brief private data */
-	void *priv;
+	/** @brief id */
+	enum MSE_PACKETIZER id;
 	/** @brief open function pointer */
 	int (*open)(void);
 	/** @brief release function pointer */

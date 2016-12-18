@@ -85,6 +85,8 @@ struct mse_config {
 };
 
 extern int mse_dev_to_index(struct device *dev);
+extern bool mse_dev_is_busy(int index);
+extern struct mse_config *mse_get_dev_config(int index);
 extern int mse_config_get_info(int index, struct mse_info *data);
 extern int mse_config_set_network_device(int index,
 					 struct mse_network_device *data);

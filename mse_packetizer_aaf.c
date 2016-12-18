@@ -388,9 +388,9 @@ static int mse_packetizer_audio_aaf_set_audio_config(
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d rate=%d channels=%d bytes_per_frame=%d\n",
+	pr_debug("[%s] index=%d rate=%d channels=%d samples_per_frame=%d\n",
 		 __func__, index, config->sample_rate, config->channels,
-		 config->bytes_per_frame);
+		 config->samples_per_frame);
 	aaf = &aaf_packetizer_table[index];
 	aaf->aaf_config = *config;
 
@@ -402,15 +402,14 @@ static int mse_packetizer_audio_aaf_set_audio_config(
 	aaf->avtp_bytes_per_ch = get_aaf_format_size(aaf->avtp_format);
 	aaf->shift = get_bit_shift(aaf->aaf_config.sample_bit_depth);
 
-	/* when bytes_per_frame is not set */
-	if (!aaf->aaf_config.bytes_per_frame) {
+	/* when samples_per_frame is not set */
+	if (!aaf->aaf_config.samples_per_frame) {
 		aaf->class_interval_frames = CLASS_INTERVAL_FRAMES;
 		aaf->sample_per_packet = aaf->aaf_config.sample_rate /
 				(aaf->class_interval_frames * INTERVAL_FRAMES);
 		aaf->frame_interval_time = NSEC / aaf->class_interval_frames;
 	} else {
-		aaf->sample_per_packet = aaf->aaf_config.bytes_per_frame /
-			(aaf->aaf_config.channels * aaf->avtp_bytes_per_ch);
+		aaf->sample_per_packet = aaf->aaf_config.samples_per_frame;
 		if (aaf->sample_per_packet < 2)
 			aaf->sample_per_packet = 2;
 		else if (aaf->sample_per_packet > 128)
@@ -857,8 +856,7 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 }
 
 struct mse_packetizer_ops mse_packetizer_audio_aaf_ops = {
-	.name = MSE_PACKETIZER_NAME_STR_AAF_PCM,
-	.priv = NULL,
+	.id = MSE_PACKETIZER_AAF_PCM,
 	.open = mse_packetizer_audio_aaf_open,
 	.release = mse_packetizer_audio_aaf_release,
 	.init = mse_packetizer_audio_aaf_packet_init,
