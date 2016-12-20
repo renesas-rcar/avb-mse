@@ -413,6 +413,9 @@ static int mse_adapter_eavb_receive_prepare(int index,
 
 	eavb = &eavb_table[index];
 
+	if (num_packets <= 0)
+		return -EPERM;
+
 	pr_debug("[%s] index=%d addr=%p num=%d\n",
 		 __func__, index, packets, num_packets);
 
@@ -461,6 +464,9 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 		return -EPERM;
 
 	eavb = &eavb_table[index];
+
+	if (num_packets <= 0)
+		return -EPERM;
 
 	pr_debug("[%s] index=%d num=%d\n", __func__, index, num_packets);
 	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
