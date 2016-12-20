@@ -77,10 +77,12 @@
 #include <linux/ptp_clock.h>
 #include "avtp.h"
 #include "ravb_mse_kernel.h"
+#include "mse_config.h"
 #include "mse_packet_ctrl.h"
 #include "mse_sysfs.h"
 #include "mse_packetizer.h"
 #include "mse_ptp.h"
+#include "mse_ioctl_local.h"
 
 #define NSEC_SCALE              (1000000000ul)
 #define BUF_SIZE                (32)
@@ -90,18 +92,12 @@
 #define MSE_RADIX_HEXADECIMAL   (16)
 #define MSE_DEFAULT_BITRATE     (50000000) /* 50Mbps */
 
-/** @brief MSE's media adapter max */
-#define MSE_ADAPTER_MEDIA_MAX   (10)
-/** @brief MSE's network adapter max */
-#define MSE_ADAPTER_NETWORK_MAX (10)
 /** @brief MSE's packetizer max */
-#define MSE_PACKETIZER_MAX      (10)
-/** @brief MSE's instance max */
-#define MSE_INSTANCE_MAX        (10)
+#define MSE_PACKETIZER_TABLE_MAX   (10)
 /** @brief MCH table max */
-#define MSE_MCH_MAX             (10)
+#define MSE_MCH_MAX                (10)
 /** @brief PTP table max */
-#define MSE_PTP_MAX             (10)
+#define MSE_PTP_MAX                (10)
 
 #define MSE_DMA_MAX_PACKET         (128)
 #define MSE_DMA_MAX_PACKET_SIZE    (1526)
@@ -139,6 +135,28 @@
 #define MPEG2TS_CLOCK_D         (100000)              /* 10^9(NSEC) / 10K */
 #define MPEG2TS_PCR90K_BITS     (33)
 #define MPEG2TS_PCR90K_INVALID  (BIT(MPEG2TS_PCR90K_BITS))
+
+/**
+ * @brief main data for Adapter
+ */
+struct mse_adapter {
+	/** @brief instance used flag */
+	bool used_f;
+	/** @brief read-only flag for config */
+	bool ro_config_f;
+	/** @brief index */
+	int index;
+	/** @brief adapter name */
+	char name[MSE_NAME_LEN_MAX];
+	/** @brief type of Adapter */
+	enum MSE_TYPE type;
+	/** @brief adapter's private data */
+	void *private_data;
+	/** @brief device */
+	struct device device;
+	/** @brief configuration data */
+	struct mse_config config;
+};
 
 /** @brief mse state */
 enum MSE_STATE {
@@ -322,8 +340,6 @@ struct mse_instance {
 	int talker_delay_time;
 	int listener_delay_time;
 	int remain;
-	char network_device_name_tx[MSE_NAME_LEN_MAX];
-	char network_device_name_rx[MSE_NAME_LEN_MAX];
 
 	bool f_present;
 
@@ -354,6 +370,8 @@ struct mse_instance {
 	unsigned char guard_buffer[8192];
 };
 
+static int mse_instance_max = MSE_INSTANCE_MAX;
+
 struct mse_device {
 	/** @brief device */
 	struct platform_device *pdev;
@@ -361,8 +379,10 @@ struct mse_device {
 	spinlock_t lock_tables;           /* lock for talbes */
 	/** @brief mutex lock for open */
 	struct mutex mutex_open;
+	/* @brief device class */
+	struct class *class;
 
-	struct mse_packetizer_ops *packetizer_table[MSE_PACKETIZER_MAX];
+	struct mse_packetizer_ops *packetizer_table[MSE_PACKETIZER_TABLE_MAX];
 	struct mse_adapter_network_ops *network_table[MSE_ADAPTER_NETWORK_MAX];
 	struct mse_adapter media_table[MSE_ADAPTER_MEDIA_MAX];
 	struct mse_instance instance_table[MSE_INSTANCE_MAX];
@@ -376,254 +396,145 @@ static struct mse_device *mse;
 /*
  * module parameters
  */
-static int debug;
-module_param(debug, int, 0660);
+static int major;
+module_param(major, int, 0440);
 
 /*
  * global parameters
  */
-static struct mse_sysfs_config mse_sysfs_config_audio[] = {
-	{
-		.name = MSE_SYSFS_NAME_STR_TYPE,
-		.type = MSE_TYPE_ENUM,
-		.int_value = 0,
-		.enum_list = {"both", NULL},
+static struct mse_config mse_config_default_audio = {
+	.info = {
+		.device = "",
+		.type = MSE_STREAM_TYPE_AUDIO,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_KIND,
-		.type = MSE_TYPE_ENUM,
-		.int_value = 0,
-		.enum_list = {"audio", NULL},
+	.network_device = {
+		.module_name = MSE_CONFIG_DEFAULT_MODULE_NAME,
+		.device_name_tx = MSE_CONFIG_DEFAULT_DEVICE_NAME_TX,
+		.device_name_rx = MSE_CONFIG_DEFAULT_DEVICE_NAME_RX,
+		.device_name_tx_crf = MSE_CONFIG_DEFAULT_DEVICE_NAME_TX,
+		.device_name_rx_crf = MSE_CONFIG_DEFAULT_DEVICE_NAME_RX,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_DEVICE,
-		.type = MSE_TYPE_STR,
-		.str_value = "",
+	.packetizer = {
+		.packetizer = MSE_PACKETIZER_AAF_PCM,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_DST_MAC,
-		.type = MSE_TYPE_STR,
-		.str_value = "91e0f0000e80",
+	.avtp_tx_param = {
+		.dst_mac = {0x91, 0xe0, 0xf0, 0x00, 0x0e, 0x80},
+		.src_mac = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00},
+		.vlan = 2,
+		.priority = 3,
+		.uniqueid = 1,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_SRC_MAC,
-		.type = MSE_TYPE_STR,
-		.str_value = "769050000000",
+	.avtp_rx_param = {
+		.streamid = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00, 0x00, 0x01},
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_VLAN,
-		.type = MSE_TYPE_INT,
-		.int_value = 2,
+	.media_audio_config = {
+		.samples_per_frame = 0,
+		.crf_type = MSE_CRF_TYPE_NOT_USE,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_PRIORITY,
-		.type = MSE_TYPE_INT,
-		.int_value = 3,
+	.ptp_config = {
+		.type = MSE_PTP_TYPE_CURRENT_TIME,
+		.deviceid = 0,
+		.capture_ch = 2,
+		.capture_freq = 300,
+		.recovery_capture_freq = MSE_RECOVERY_CAPTURE_FREQ_FIXED,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_UNIQUE_ID,
-		.type = MSE_TYPE_INT,
-		.int_value = 1,
+	.mch_config = {
+		.enable = false,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_NETWORK_ADAPTER_NAME,
-		.type = MSE_TYPE_STR,
-		.str_value = "ravb",
+	.avtp_tx_param_crf = {
+		.dst_mac = {0x91, 0xe0, 0xf0, 0x00, 0x0e, 0x80},
+		.src_mac = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00},
+		.vlan = 2,
+		.priority = 3,
+		.uniqueid = 1,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_NETWORK_DEVICE_NAME_TX,
-		.type = MSE_TYPE_STR,
-		.str_value = "ravb_tx0",
+	.avtp_rx_param_crf = {
+		.streamid = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00, 0x00, 0x01},
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_NETWORK_DEVICE_NAME_RX,
-		.type = MSE_TYPE_STR,
-		.str_value = "ravb_rx0",
+	.delay_time = {
+		.max_transit_time_ns = 2000000,
+		.tx_delay_time_ns = 2000000,
+		.rx_delay_time_ns = 2000000,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_PACKETIZER_NAME,
-		.type = MSE_TYPE_STR,
-		.str_value = MSE_PACKETIZER_NAME_STR_AAF_PCM,
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_BYTES_PER_FRAME,
-		.type = MSE_TYPE_INT,
-		.int_value = 0,
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_PTP_CLOCK,
-		.type = MSE_TYPE_ENUM,
-		.int_value = 0,
-		.enum_list = {"ptp", "capture", NULL},
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_PTP_CLOCK_DEVICE,
-		.type = MSE_TYPE_INT,
-		.int_value = 0,
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_PTP_CAPTURE_CH,
-		.type = MSE_TYPE_INT,
-		.int_value = 0,
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_PTP_CAPTURE_FREQ,
-		.type = MSE_TYPE_INT,
-		.int_value = 300,
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_MEDIA_CLOCK_RECOVERY,
-		.type = MSE_TYPE_INT,
-		.int_value = 0,
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_MEDIA_CLOCK_TYPE,
-		.type = MSE_TYPE_ENUM,
-		.int_value = 0,
-		.enum_list = {"avtp", "crf", NULL},
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_RECOVERY_CAPTURE_FREQ,
-		.type = MSE_TYPE_INT,
-		.int_value = 0,
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_SEND_CLOCK,
-		.type = MSE_TYPE_INT,
-		.int_value = 0,
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_SEND_CLOCK_DST_MAC,
-		.type = MSE_TYPE_STR,
-		.str_value = "91e0f0000e80",
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_SEND_CLOCK_SRC_MAC,
-		.type = MSE_TYPE_STR,
-		.str_value = "769050000000",
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_SEND_CLOCK_UNIQUE_ID,
-		.type = MSE_TYPE_INT,
-		.int_value = 2,
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_MAX_TRANSIT_TIME,
-		.type = MSE_TYPE_INT,
-		.int_value = 2000000,
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_TALKER_DELAY_TIME,
-		.type = MSE_TYPE_INT,
-		.int_value = 2000000,
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_LISTENER_DELAY_TIME,
-		.type = MSE_TYPE_INT,
-		.int_value = 2000000,
-	},
-	{
-		.name = NULL, /* end of table */
-	}
 };
 
-static struct mse_sysfs_config mse_sysfs_config_video[] = {
-	{
-		.name = MSE_SYSFS_NAME_STR_TYPE,
-		.type = MSE_TYPE_ENUM,
-		.int_value = 0,
-		.enum_list = {"both", NULL},
+static struct mse_config mse_config_default_video = {
+	.info = {
+		.device = "",
+		.type = MSE_STREAM_TYPE_VIDEO,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_KIND,
-		.type = MSE_TYPE_ENUM,
-		.int_value = 0,
-		.enum_list = {"video", NULL},
+	.network_device = {
+		.module_name = MSE_CONFIG_DEFAULT_MODULE_NAME,
+		.device_name_tx = MSE_CONFIG_DEFAULT_DEVICE_NAME_TX,
+		.device_name_rx = MSE_CONFIG_DEFAULT_DEVICE_NAME_RX,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_DEVICE,
-		.type = MSE_TYPE_STR,
-		.str_value = "",
+	.packetizer = {
+		.packetizer = MSE_PACKETIZER_CVF_H264,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_DST_MAC,
-		.type = MSE_TYPE_STR,
-		.str_value = "91e0f0000e80",
+	.avtp_tx_param = {
+		.dst_mac = {0x91, 0xe0, 0xf0, 0x00, 0x0e, 0x80},
+		.src_mac = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00},
+		.vlan = 2,
+		.priority = 3,
+		.uniqueid = 1,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_SRC_MAC,
-		.type = MSE_TYPE_STR,
-		.str_value = "769050000000",
+	.avtp_rx_param = {
+		.streamid = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00, 0x00, 0x01},
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_VLAN,
-		.type = MSE_TYPE_INT,
-		.int_value = 2,
+	.media_video_config = {
+		.bytes_per_frame = 0,
+		.fps_denominator = 0,
+		.fps_numerator = 0,
+		.bitrate = 50000000,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_PRIORITY,
-		.type = MSE_TYPE_INT,
-		.int_value = 3,
+	.ptp_config = {
+		.type = MSE_PTP_TYPE_CURRENT_TIME,
+		.deviceid = 0,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_UNIQUE_ID,
-		.type = MSE_TYPE_INT,
-		.int_value = 1,
+	.delay_time = {
+		.max_transit_time_ns = 2000000,
+		.tx_delay_time_ns = 2000000,
+		.rx_delay_time_ns = 2000000,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_NETWORK_ADAPTER_NAME,
-		.type = MSE_TYPE_STR,
-		.str_value = "ravb",
+};
+
+static struct mse_config mse_config_default_mpeg2ts = {
+	.info = {
+		.device = "",
+		.type = MSE_STREAM_TYPE_MPEG2TS,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_NETWORK_DEVICE_NAME_TX,
-		.type = MSE_TYPE_STR,
-		.str_value = "ravb_tx0",
+	.network_device = {
+		.module_name = MSE_CONFIG_DEFAULT_MODULE_NAME,
+		.device_name_tx = MSE_CONFIG_DEFAULT_DEVICE_NAME_TX,
+		.device_name_rx = MSE_CONFIG_DEFAULT_DEVICE_NAME_RX,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_NETWORK_DEVICE_NAME_RX,
-		.type = MSE_TYPE_STR,
-		.str_value = "ravb_rx0",
+	.packetizer = {
+		.packetizer = MSE_PACKETIZER_IEC61883_4,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_PACKETIZER_NAME,
-		.type = MSE_TYPE_STR,
-		.str_value = MSE_PACKETIZER_NAME_STR_CVF_H264,
+	.avtp_tx_param = {
+		.dst_mac = {0x91, 0xe0, 0xf0, 0x00, 0x0e, 0x80},
+		.src_mac = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00},
+		.vlan = 2,
+		.priority = 3,
+		.uniqueid = 1,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_FPS_SECONDS,
-		.type = MSE_TYPE_INT,
-		.int_value = 0,
+	.avtp_rx_param = {
+		.streamid = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00, 0x00, 0x01},
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_FPS_FRAMES,
-		.type = MSE_TYPE_INT,
-		.int_value = 0,
+	.media_mpeg2ts_config = {
+		.tspackets_per_frame = 7,
+		.bitrate = 50000000,
+		.pcr_pid = 8192,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_BITRATE,
-		.type = MSE_TYPE_INT,
-		.int_value = MSE_DEFAULT_BITRATE,
+	.ptp_config = {
+		.type = MSE_PTP_TYPE_CURRENT_TIME,
+		.deviceid = 0,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_BYTES_PER_FRAME,
-		.type = MSE_TYPE_INT,
-		.int_value = 0,
+	.delay_time = {
+		.max_transit_time_ns = 2000000,
+		.tx_delay_time_ns = 2000000,
+		.rx_delay_time_ns = 2000000,
 	},
-	{
-		.name = MSE_SYSFS_NAME_STR_PTP_CLOCK,
-		.type = MSE_TYPE_ENUM,
-		.int_value = 0,
-		.enum_list = {"ptp", "capture", NULL},
-	},
-	{
-		.name = MSE_SYSFS_NAME_STR_PTP_CLOCK_DEVICE,
-		.type = MSE_TYPE_INT,
-		.int_value = 0,
-	},
-	{
-		.name = NULL, /* end of table */
-	}
 };
 
 static bool compare_pcr(u64 a, u64 b)
@@ -662,305 +573,195 @@ static int sysfs_name_cmp(char *defname, char *sysfsname)
 	return ret;
 }
 
-static int mse_create_config_device(int index_media,
-				    struct mse_adapter *adapter,
-				    char *device_name)
+static void mse_device_release(struct device *dev)
 {
-	int ret;
-
 	pr_debug("[%s]\n", __func__);
+}
 
-	switch (adapter->type) {
-	case MSE_TYPE_ADAPTER_AUDIO:
-		adapter->sysfs_config = kzalloc(sizeof(mse_sysfs_config_audio),
-						GFP_KERNEL);
-		memcpy(adapter->sysfs_config, mse_sysfs_config_audio,
-		       sizeof(mse_sysfs_config_audio));
-		break;
-	case MSE_TYPE_ADAPTER_VIDEO:
-		adapter->sysfs_config = kzalloc(sizeof(mse_sysfs_config_video),
-						GFP_KERNEL);
-		memcpy(adapter->sysfs_config, mse_sysfs_config_video,
-		       sizeof(mse_sysfs_config_video));
-		break;
-	case MSE_TYPE_ADAPTER_MPEG2TS:
-		adapter->sysfs_config = kzalloc(sizeof(mse_sysfs_config_video),
-						GFP_KERNEL);
-		memcpy(adapter->sysfs_config, mse_sysfs_config_video,
-		       sizeof(mse_sysfs_config_video));
-		break;
-	default:
-		pr_err("[%s] undefined type=%d\n", __func__, adapter->type);
-		return -EPERM;
+static int mse_create_config_device(int index_media, char *device_name)
+{
+	struct device *device;
+	const struct attribute_group **groups;
+	struct mse_adapter *adapter = &mse->media_table[index_media];
+	int err;
+
+	pr_debug("[%s] %s\n", __func__, device_name);
+
+	/* initialize data */
+	if (IS_MSE_TYPE_AUDIO(adapter->type)) {
+		memcpy(&adapter->config, &mse_config_default_audio,
+		       sizeof(adapter->config));
+		groups = mse_attr_groups_audio;
+	} else if (IS_MSE_TYPE_VIDEO(adapter->type)) {
+		memcpy(&adapter->config, &mse_config_default_video,
+		       sizeof(adapter->config));
+		groups = mse_attr_groups_video;
+	} else {
+		memcpy(&adapter->config, &mse_config_default_mpeg2ts,
+		       sizeof(adapter->config));
+		groups = mse_attr_groups_mpeg2ts;
 	}
-
-	ret = mse_sysfs_init(adapter->sysfs_config);
-	if (ret < 0) {
-		pr_err("[%s] failed mse_sysfs_init() ret=%d\n", __func__, ret);
-		kfree(adapter->sysfs_config);
-		return ret;
-	}
-
-	adapter->index_sysfs = ret;
+	spin_lock_init(&adapter->config.lock);
 
 	/* device name */
-	ret = mse_sysfs_set_config_str(
-			index_media,
-			MSE_SYSFS_NAME_STR_DEVICE,
-			device_name,
-			MSE_NAME_LEN_MAX);
-	if (ret < 0) {
-		pr_err("[%s] failed setting for sysfs ret=%d type=%s\n",
-		       __func__, ret, MSE_SYSFS_NAME_STR_DEVICE);
-		return ret;
-	}
+	strncpy(adapter->config.info.device, device_name, MSE_NAME_LEN_MAX);
 
-	/* type */
-	ret = mse_sysfs_set_config_int(index_media,
-				       MSE_SYSFS_NAME_STR_TYPE, 0);
-	if (ret < 0) {
-		pr_err("[%s] failed setting for sysfs ret=%d type=%s\n",
-		       __func__, ret, MSE_SYSFS_NAME_STR_TYPE);
-		return ret;
+	err = mse_ioctl_register(index_media);
+	if (err < 0)
+		return -EPERM;
+
+	/* initialize device */
+	device = &adapter->device;
+	device->devt = MKDEV(major, index_media);
+	device->class = mse->class;
+	device->groups = groups;
+	device->release = mse_device_release;
+	dev_set_name(device, "mse%d", index_media);
+
+	err = device_register(device);
+	if (err) {
+		pr_err("[%s] failed device_register() mse%d\n",
+		       __func__, index_media);
+		mse_ioctl_unregister(index_media);
+		memset(&adapter->device, 0, sizeof(struct device));
+
+		return err;
 	}
 
 	return 0;
 }
 
-static int mse_delete_config_device(struct mse_adapter *adapter)
+static int mse_delete_config_device(int index_media)
 {
+	struct mse_adapter *adapter;
+
 	pr_debug("[%s]\n", __func__);
 
-	mse_sysfs_exit(adapter->index_sysfs);
-	kfree(adapter->sysfs_config);
-	adapter->index_sysfs = MSE_INDEX_UNDEFINED;
+	adapter = &mse->media_table[index_media];
+
+	mse_ioctl_unregister(index_media);
+	device_unregister(&adapter->device);
+	memset(&adapter->device, 0, sizeof(struct device));
 
 	return 0;
-}
-
-static int change_mac_addr(unsigned char *dest, const char *in_str)
-{
-	union {
-		unsigned long long hex;
-		unsigned char byte[sizeof(unsigned long long)];
-	} decode;
-	int err, i, j;
-
-	err = kstrtoll(in_str, MSE_RADIX_HEXADECIMAL, &decode.hex);
-	for (i = 0, j = MSE_MAC_LEN_MAX - 1; i < MSE_MAC_LEN_MAX; i++, j--)
-		dest[i] = decode.byte[j];
-
-	return err;
 }
 
 static int mse_get_default_config(int index, struct mse_instance *instance)
 {
 	int ret = 0, err;
-	unsigned char mac[BUF_SIZE];
 	struct mse_network_config *network = &instance->net_config;
 	struct mse_network_config *crf_network = &instance->crf_net_config;
 	struct mse_video_config *video = &instance->media_config.video;
 	struct mse_audio_config *audio = &instance->media_config.audio;
 	struct mse_mpeg2ts_config *mpeg2ts = &instance->media_config.mpeg2ts;
+	struct mse_avtp_tx_param avtp_tx_param;
+	struct mse_avtp_rx_param avtp_rx_param;
+	struct mse_media_video_config video_config;
+	struct mse_media_mpeg2ts_config mpeg2ts_config;
+	struct mse_media_audio_config audio_config;
+	struct mse_ptp_config ptp_config;
+	struct mse_mch_config mch_config;
+	struct mse_avtp_tx_param crf_tx;
+	struct mse_avtp_rx_param crf_rx;
+	struct mse_delay_time delay_time;
 
-	err = mse_sysfs_get_config_str(index,
-				       MSE_SYSFS_NAME_STR_DST_MAC,
-				       mac,
-				       sizeof(mac));
+	err = mse_config_get_avtp_tx_param(index, &avtp_tx_param);
 	if (err < 0) {
-		pr_err("[%s] undefined destination MAC\n", __func__);
+		pr_err("[%s] undefined avtp_tx_param\n", __func__);
 		ret = -EPERM;
 	}
+	memcpy(network->dest_addr, avtp_tx_param.dst_mac,
+	       sizeof(network->dest_addr));
+	memcpy(network->source_addr, avtp_tx_param.src_mac,
+	       sizeof(network->source_addr));
+	network->priority = avtp_tx_param.priority;
+	network->vlanid = avtp_tx_param.vlan;
+	network->uniqueid = avtp_tx_param.uniqueid;
 
-	err = change_mac_addr(network->dest_addr, mac);
+	err = mse_config_get_avtp_rx_param(index, &avtp_rx_param);
 	if (err < 0) {
-		pr_err("[%s] irregular destination MAC\n", __func__);
+		pr_err("[%s] undefined avtp_rx_param\n", __func__);
 		ret = -EPERM;
 	}
-
-	err = mse_sysfs_get_config_str(index,
-				       MSE_SYSFS_NAME_STR_SRC_MAC,
-				       mac,
-				       sizeof(mac));
-	if (err < 0) {
-		pr_err("[%s] undefined source MAC\n", __func__);
-		ret = -EPERM;
-	}
-
-	err = change_mac_addr(network->source_addr, mac);
-	if (err < 0) {
-		pr_err("[%s] irregular source MAC\n", __func__);
-		ret = -EPERM;
-	}
-
-	err = mse_sysfs_get_config_int(index,
-				       MSE_SYSFS_NAME_STR_PRIORITY,
-				       &network->priority);
-	if (err < 0) {
-		pr_err("[%s] undefined priority\n", __func__);
-		ret = -EPERM;
-	}
-
-	err = mse_sysfs_get_config_int(index,
-				       MSE_SYSFS_NAME_STR_VLAN,
-				       &network->vlanid);
-	if (err < 0) {
-		pr_err("[%s] undefined VLAN ID\n", __func__);
-		ret = -EPERM;
-	}
-
-	err = mse_sysfs_get_config_int(index,
-				       MSE_SYSFS_NAME_STR_UNIQUE_ID,
-				       &network->uniqueid);
-	if (err < 0) {
-		pr_err("[%s] undefined unique ID\n", __func__);
-		ret = -EPERM;
-	}
+	memcpy(network->streamid, avtp_rx_param.streamid,
+	       sizeof(network->streamid));
 
 	switch (instance->media->type) {
 	case MSE_TYPE_ADAPTER_VIDEO:
-		err = mse_sysfs_get_config_int(index,
-					       MSE_SYSFS_NAME_STR_FPS_SECONDS,
-					       &video->fps.n);
+		err = mse_config_get_media_video_config(index,
+							&video_config);
 		if (err < 0) {
-			pr_err("[%s] undefined seconds of fps\n", __func__);
+			pr_err("[%s] undefined media_video_config\n",
+			       __func__);
 			ret = -EPERM;
 		}
-
-		err = mse_sysfs_get_config_int(index,
-					       MSE_SYSFS_NAME_STR_FPS_FRAMES,
-					       &video->fps.m);
-		if (err < 0) {
-			pr_err("[%s] undefined frames of fps\n", __func__);
-			ret = -EPERM;
-		}
-
-		err = mse_sysfs_get_config_int(index,
-					       MSE_SYSFS_NAME_STR_BITRATE,
-					       &video->bitrate);
-		if (err < 0) {
-			pr_err("[%s] undefined bitrate\n", __func__);
-			ret = -EPERM;
-		}
-
-		err = mse_sysfs_get_config_int(
-					index,
-					MSE_SYSFS_NAME_STR_BYTES_PER_FRAME,
-					&video->bytes_per_frame);
-		if (err < 0) {
-			pr_err("[%s] undefined payload size\n", __func__);
-			ret = -EPERM;
-		}
-
+		video->fps.m = video_config.fps_numerator;
+		video->fps.n = video_config.fps_denominator;
+		video->bitrate = video_config.bitrate;
+		video->bytes_per_frame = video_config.bytes_per_frame;
 		break;
 
 	case MSE_TYPE_ADAPTER_MPEG2TS:
-		err = mse_sysfs_get_config_int(index,
-					       MSE_SYSFS_NAME_STR_BITRATE,
-					       &mpeg2ts->bitrate);
+		err = mse_config_get_media_mpeg2ts_config(index,
+							  &mpeg2ts_config);
 		if (err < 0) {
-			pr_err("[%s] undefined bitrate\n", __func__);
+			pr_err("[%s] undefined media_mpeg2ts_config\n",
+			       __func__);
 			ret = -EPERM;
 		}
-
-		err = mse_sysfs_get_config_int(
-					index,
-					MSE_SYSFS_NAME_STR_BYTES_PER_FRAME,
-					&mpeg2ts->bytes_per_frame);
-		if (err < 0) {
-			pr_err("[%s] undefined payload size\n", __func__);
-			ret = -EPERM;
-		}
-
+		mpeg2ts->tspackets_per_frame =
+			mpeg2ts_config.tspackets_per_frame;
+		mpeg2ts->bitrate = mpeg2ts_config.bitrate;
+		mpeg2ts->pcr_pid = mpeg2ts_config.pcr_pid;
 		break;
 
 	case MSE_TYPE_ADAPTER_AUDIO:
-		err = mse_sysfs_get_config_int(
-					index,
-					MSE_SYSFS_NAME_STR_BYTES_PER_FRAME,
-					&audio->bytes_per_frame);
+		err = mse_config_get_media_audio_config(index,
+							&audio_config);
 		if (err < 0) {
-			pr_err("[%s] undefined payload size\n", __func__);
+			pr_err("[%s] undefined audio config\n", __func__);
 			ret = -EPERM;
 		}
+		audio->samples_per_frame = audio_config.samples_per_frame;
+		instance->send_clock =
+				(audio_config.crf_type == MSE_CRF_TYPE_TX);
 
-		/* MCH & CRF Setting */
-		mse_sysfs_get_config_int(index,
-					 MSE_SYSFS_NAME_STR_PTP_CLOCK,
-					 &instance->ptp_clock);
+		err = mse_config_get_ptp_config(index,
+						&ptp_config);
+		instance->ptp_clock_device = 0;
+		instance->ptp_clock = (ptp_config.type == MSE_PTP_TYPE_CAPTURE);
+		instance->ptp_clock_ch = ptp_config.capture_ch;
+		instance->ptp_capture_freq = ptp_config.capture_freq;
 
-		mse_sysfs_get_config_int(
-				index,
-				MSE_SYSFS_NAME_STR_PTP_CLOCK_DEVICE,
-				&instance->ptp_clock_device);
+		err = mse_config_get_mch_config(index,
+						&mch_config);
+		instance->media_clock_recovery = mch_config.enable;
+		instance->media_clock_type =
+			(audio_config.crf_type == MSE_CRF_TYPE_RX);
+		instance->media_capture_freq =
+			(ptp_config.recovery_capture_freq ==
+			 MSE_RECOVERY_CAPTURE_FREQ_NOT_FIXED);
 
-		mse_sysfs_get_config_int(
-				index,
-				MSE_SYSFS_NAME_STR_PTP_CAPTURE_CH,
-				&instance->ptp_clock_ch);
+		err = mse_config_get_avtp_tx_param_crf(index,
+						       &crf_tx);
+		memcpy(crf_network->dest_addr, crf_tx.dst_mac,
+		       sizeof(crf_network->dest_addr));
+		memcpy(crf_network->source_addr, crf_tx.src_mac,
+		       sizeof(crf_network->source_addr));
+		crf_network->priority = crf_tx.priority;
+		crf_network->vlanid = crf_tx.vlan;
+		crf_network->uniqueid = crf_tx.uniqueid;
 
-		mse_sysfs_get_config_int(
-				index,
-				MSE_SYSFS_NAME_STR_PTP_CAPTURE_FREQ,
-				&instance->ptp_capture_freq);
+		err = mse_config_get_avtp_rx_param_crf(index,
+						       &crf_rx);
+		memcpy(crf_network->streamid, crf_rx.streamid,
+		       sizeof(crf_network->streamid));
 
-		mse_sysfs_get_config_int(
-				index,
-				MSE_SYSFS_NAME_STR_MEDIA_CLOCK_RECOVERY,
-				&instance->media_clock_recovery);
-
-		mse_sysfs_get_config_int(
-				index,
-				MSE_SYSFS_NAME_STR_MEDIA_CLOCK_TYPE,
-				&instance->media_clock_type);
-
-		mse_sysfs_get_config_int(
-				index,
-				MSE_SYSFS_NAME_STR_RECOVERY_CAPTURE_FREQ,
-				&instance->media_capture_freq);
-
-		mse_sysfs_get_config_int(
-				index,
-				MSE_SYSFS_NAME_STR_SEND_CLOCK,
-				&instance->send_clock);
-
-		mse_sysfs_get_config_str(
-				index,
-				MSE_SYSFS_NAME_STR_SEND_CLOCK_DST_MAC,
-				mac,
-				sizeof(mac));
-
-		err = change_mac_addr(crf_network->dest_addr, mac);
-		mse_sysfs_get_config_str(
-				index,
-				MSE_SYSFS_NAME_STR_SEND_CLOCK_SRC_MAC,
-				mac,
-				sizeof(mac));
-
-		err = change_mac_addr(crf_network->source_addr, mac);
-		mse_sysfs_get_config_int(
-				index,
-				MSE_SYSFS_NAME_STR_SEND_CLOCK_UNIQUE_ID,
-				&instance->crf_net_config.uniqueid);
-
-		mse_sysfs_get_config_int(
-				index,
-				MSE_SYSFS_NAME_STR_MAX_TRANSIT_TIME,
-				&instance->max_transit_time);
-
-		mse_sysfs_get_config_int(
-				index,
-				MSE_SYSFS_NAME_STR_TALKER_DELAY_TIME,
-				&instance->talker_delay_time);
-
-		mse_sysfs_get_config_int(
-				index,
-				MSE_SYSFS_NAME_STR_LISTENER_DELAY_TIME,
-				&instance->listener_delay_time);
-
-		crf_network->priority = network->priority;
-		crf_network->vlanid = network->vlanid;
-
+		err = mse_config_get_delay_time(index,
+						&delay_time);
+		instance->max_transit_time = delay_time.max_transit_time_ns;
+		instance->talker_delay_time = delay_time.tx_delay_time_ns;
+		instance->listener_delay_time = delay_time.rx_delay_time_ns;
 		break;
 
 	default:
@@ -2059,27 +1860,28 @@ static void mse_work_crf_send(struct work_struct *work)
 static void mse_work_crf_receive(struct work_struct *work)
 {
 	struct mse_instance *instance;
-	u8 streamid[AVTP_STREAMID_SIZE];
+	struct mse_adapter *adapter;
 	int ret, err, count, i;
 	u64 ptimes[6];
 	unsigned long flags;
+	char *dev_name;
 
 	struct mse_packetizer_ops *crf = &mse_packetizer_crf_tstamp_audio_ops;
 
 	instance = container_of(work, struct mse_instance, wk_crf_receive);
+	adapter = instance->media;
 
 	pr_debug("[%s]\n", __func__);
-	ret = instance->network->open(instance->network_device_name_rx);
+
+	dev_name = adapter->config.network_device.device_name_rx_crf;
+	ret = instance->network->open(dev_name);
 	instance->crf_index_network = ret;
 	if (ret < 0)
 		pr_err("[%s] can not open %d\n", __func__, ret);
 
 	/* setup network */
-	mse_make_streamid(streamid,
-			  instance->crf_net_config.source_addr,
-			  instance->crf_net_config.uniqueid);
 	instance->network->set_streamid(instance->crf_index_network,
-					streamid);
+					instance->crf_net_config.streamid);
 
 	/* get packet memory */
 	instance->crf_packet_buffer = mse_packet_ctrl_alloc(
@@ -2500,6 +2302,26 @@ static void mse_work_start_transmission(struct work_struct *work)
 	spin_unlock_irqrestore(&instance->lock_timer, flags);
 }
 
+/* External function for configuration */
+int mse_dev_to_index(struct device *dev)
+{
+	struct mse_adapter *adapter;
+
+	adapter = container_of(dev, struct mse_adapter, device);
+
+	return adapter->index;
+}
+
+struct mse_config *mse_get_dev_config(int index)
+{
+	return &mse->media_table[index].config;
+}
+
+bool mse_dev_is_busy(int index)
+{
+	return mse->media_table[index].ro_config_f;
+}
+
 /* External function */
 int mse_register_adapter_media(enum MSE_TYPE type,
 			       char *name,
@@ -2532,6 +2354,7 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 		if (!mse->media_table[i].used_f) {
 			/* init table */
 			mse->media_table[i].used_f = true;
+			mse->media_table[i].index = i;
 			mse->media_table[i].type = type;
 			strncpy(mse->media_table[i].name, name,
 				MSE_NAME_LEN_MAX);
@@ -2539,11 +2362,10 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 			spin_unlock_irqrestore(&mse->lock_tables, flags);
 
 			/* create control device */
-			err = mse_create_config_device(i,
-						       &mse->media_table[i],
-						       device_name);
+			err = mse_create_config_device(i, device_name);
 			if (err < 0)
 				return -EPERM;
+
 			pr_debug("[%s] registered index=%d\n", __func__, i);
 			return i;
 		}
@@ -2576,7 +2398,7 @@ int mse_unregister_adapter_media(int index_media)
 	}
 
 	/* delete control device */
-	mse_delete_config_device(&mse->media_table[index_media]);
+	mse_delete_config_device(index_media);
 
 	spin_lock_irqsave(&mse->lock_tables, flags);
 
@@ -2669,12 +2491,8 @@ int mse_register_packetizer(struct mse_packetizer_ops *ops)
 		pr_err("[%s] invalid argument. ops\n", __func__);
 		return -EINVAL;
 	}
-	if (!ops->name) {
-		pr_err("[%s] empty data. ops->name\n", __func__);
-		return -EINVAL;
-	}
 
-	pr_debug("[%s] name=%s\n", __func__, ops->name);
+	pr_debug("[%s] id=%d\n", __func__, ops->id);
 
 	spin_lock_irqsave(&mse->lock_tables, flags);
 
@@ -2688,7 +2506,7 @@ int mse_register_packetizer(struct mse_packetizer_ops *ops)
 		}
 	}
 
-	pr_err("[%s] %s was unregistered\n", __func__, ops->name);
+	pr_err("[%s] id=%d is not registered\n", __func__, ops->id);
 
 	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
@@ -2700,7 +2518,7 @@ int mse_unregister_packetizer(int index)
 {
 	unsigned long flags;
 
-	if ((index < 0) || (index >= MSE_PACKETIZER_MAX)) {
+	if ((index < 0) || (index >= MSE_PACKETIZER_TABLE_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
 		return -EINVAL;
 	}
@@ -2771,6 +2589,9 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	instance = &mse->instance_table[index];
 	adapter = instance->media;
 
+	config->samples_per_frame =
+		adapter->config.media_audio_config.samples_per_frame;
+
 	/* set config */
 	memcpy(&instance->media_config.audio, config, sizeof(*config));
 
@@ -2797,13 +2618,8 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 		instance->network->set_cbs_param(instance->index_network,
 						 &cbs);
 	} else {
-		u8 streamid[AVTP_STREAMID_SIZE];
-
-		mse_make_streamid(streamid,
-				  instance->net_config.source_addr,
-				  instance->net_config.uniqueid);
 		instance->network->set_streamid(instance->index_network,
-						streamid);
+						instance->net_config.streamid);
 	}
 
 	/* use CRF packet */
@@ -2870,7 +2686,7 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 	memcpy(&instance->media_config.video, config, sizeof(*config));
 
 	/* calc timer value */
-	if (config->fps.n != 0 && config->fps.m != 0) {
+	if (instance->tx && config->fps.n != 0 && config->fps.m != 0) {
 		framerate = NSEC_SCALE * (u64)config->fps.n;
 		do_div(framerate, config->fps.m);
 		instance->timer_delay = framerate;
@@ -2895,13 +2711,8 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 		pr_debug("[%s] bandwidth fraction = %08x\n",
 			 __func__, cbs.bandwidthFraction);
 	} else {
-		u8 streamid[AVTP_STREAMID_SIZE];
-
-		mse_make_streamid(streamid,
-				  instance->net_config.source_addr,
-				  instance->net_config.uniqueid);
 		instance->network->set_streamid(instance->index_network,
-						streamid);
+						instance->net_config.streamid);
 	}
 
 	return 0;
@@ -2975,15 +2786,8 @@ int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 		pr_debug("[%s] bandwidth fraction = %08x\n",
 			 __func__, cbs.bandwidthFraction);
 	} else {
-		u8 streamid[AVTP_STREAMID_SIZE];
-
-		mse_make_streamid(
-			streamid,
-			instance->net_config.source_addr,
-			instance->net_config.uniqueid);
-		instance->network->set_streamid(
-			instance->index_network,
-			streamid);
+		instance->network->set_streamid(instance->index_network,
+						instance->net_config.streamid);
 	}
 
 	return 0;
@@ -2997,11 +2801,12 @@ int mse_open(int index_media, bool tx)
 	struct mse_adapter_network_ops *network;
 	struct mse_packetizer_ops *packetizer;
 	int ret, i, index;
-	char name[MSE_NAME_LEN_MAX];
-	char eavbname[MSE_NAME_LEN_MAX];
 	long link_speed;
 	struct mch_ops *m_ops;
 	unsigned long flags;
+	struct mse_network_device *network_device;
+	struct mse_packetizer *config_packetizer;
+	char *dev_name;
 
 	if ((index_media < 0) || (index_media >= MSE_ADAPTER_MEDIA_MAX)) {
 		pr_err("[%s] invalid argument. index=%d\n",
@@ -3035,22 +2840,13 @@ int mse_open(int index_media, bool tx)
 
 	instance = &mse->instance_table[index];
 	instance->used_f = true;
+	adapter->ro_config_f = true;
 	spin_lock_init(&instance->lock_timer);
 	spin_lock_init(&instance->lock_ques);
 
 	mutex_unlock(&mse->mutex_open);
 
-	/* get sysfs value */
-	memset(eavbname, 0, MSE_NAME_LEN_MAX);
-	ret = mse_sysfs_get_config_str(adapter->index_sysfs,
-				       MSE_SYSFS_NAME_STR_NETWORK_ADAPTER_NAME,
-				       eavbname,
-				       MSE_NAME_LEN_MAX);
-	if (ret < 0) {
-		pr_err("[%s] undefined network adapter name\n", __func__);
-		instance->used_f = false;
-		return -EPERM;
-	}
+	network_device = &adapter->config.network_device;
 
 	/* search network adapter name for configuration value */
 	for (i = 0; i < ARRAY_SIZE(mse->network_table); i++) {
@@ -3058,7 +2854,8 @@ int mse_open(int index_media, bool tx)
 		if (!network)
 			continue;
 
-		if (!sysfs_name_cmp(network->name, eavbname))
+		if (!sysfs_name_cmp(network->name,
+				    network_device->module_name))
 			break;
 	}
 
@@ -3066,57 +2863,35 @@ int mse_open(int index_media, bool tx)
 		pr_err("[%s] network adapter module is not loaded\n",
 		       __func__);
 		instance->used_f = false;
+		adapter->ro_config_f = false;
 		return -ENODEV;
 	}
 
 	pr_debug("[%s] network adapter index=%d name=%s\n",
 		 __func__, i, network->name);
 
-	/* get configuration value */
-	memset(name, 0, MSE_NAME_LEN_MAX);
-	ret = mse_sysfs_get_config_str(adapter->index_sysfs,
-				       MSE_SYSFS_NAME_STR_PACKETIZER_NAME,
-				       name,
-				       MSE_NAME_LEN_MAX);
-	if (ret < 0) {
-		pr_err("[%s] undefined packetizer name\n", __func__);
-		instance->used_f = false;
-		return -EPERM;
-	}
+	/* get config packetizer */
+	config_packetizer = &adapter->config.packetizer;
 
 	/* if mjpeg input */
-	if (sysfs_name_cmp(MSE_PACKETIZER_NAME_STR_CVF_MJPEG, name) == 0 &&
-	    tx) {
+	if (config_packetizer->packetizer == MSE_PACKETIZER_CVF_MJPEG && tx) {
 		pr_debug("[%s] use mjpeg\n",  __func__);
 		instance->use_temp_video_buffer_mjpeg = true;
 		instance->f_first_vframe = true;
 	}
 
 	/* if mpeg2-ts input */
-	if (sysfs_name_cmp(MSE_PACKETIZER_NAME_STR_IEC61883_4, name) == 0 &&
-	    tx) {
+	if (config_packetizer->packetizer == MSE_PACKETIZER_IEC61883_4 && tx) {
 		pr_err("[%s] use mpeg2-ts\n",  __func__);
 		instance->use_temp_video_buffer_mpeg2ts = true;
 		instance->f_first_vframe = true;
 	}
 
-	/* search packetizer name for configuration value */
-	for (i = 0; i < ARRAY_SIZE(mse->packetizer_table); i++) {
-		packetizer = mse->packetizer_table[i];
-		if (!packetizer)
-			continue;
+	/* packetizer for configuration value */
+	packetizer = mse->packetizer_table[config_packetizer->packetizer];
 
-		if (!sysfs_name_cmp(packetizer->name, name))
-			break;
-	}
-
-	if (i >= ARRAY_SIZE(mse->packetizer_table)) {
-		pr_err("[%s] packetizer not found\n", __func__);
-		instance->used_f = false;
-		return -ENODEV;
-	}
-	pr_debug("[%s] packetizer index=%d name=%s\n",
-		 __func__, i, packetizer->name);
+	pr_debug("[%s] packetizer index=%d\n",
+		 __func__, config_packetizer->packetizer);
 
 	/* ptp open */
 	instance->ptp_index = mse_ptp_get_first_index();
@@ -3124,30 +2899,22 @@ int mse_open(int index_media, bool tx)
 	if (ret < 0) {
 		pr_err("[%s] cannot mse_ptp_open()\n", __func__);
 		instance->used_f = false;
+		adapter->ro_config_f = false;
 		return ret;
 	}
 
 	/* open network adapter */
-	ret = mse_sysfs_get_config_str(
-		adapter->index_sysfs,
-		MSE_SYSFS_NAME_STR_NETWORK_DEVICE_NAME_RX,
-		instance->network_device_name_rx,
-		MSE_NAME_LEN_MAX);
-
-	ret = mse_sysfs_get_config_str(
-		adapter->index_sysfs,
-		MSE_SYSFS_NAME_STR_NETWORK_DEVICE_NAME_TX,
-		instance->network_device_name_tx,
-		MSE_NAME_LEN_MAX);
-
 	if (tx)
-		ret = network->open(instance->network_device_name_tx);
+		dev_name = network_device->device_name_tx;
 	else
-		ret = network->open(instance->network_device_name_rx);
+		dev_name = network_device->device_name_rx;
+
+	ret = network->open(dev_name);
 	if (ret < 0) {
 		pr_err("[%s] cannot open network adapter ret=%d\n",
 		       __func__, ret);
 		instance->used_f = false;
+		adapter->ro_config_f = false;
 		return ret;
 	}
 	instance->index_network = ret;
@@ -3162,6 +2929,7 @@ int mse_open(int index_media, bool tx)
 		pr_err("[%s] Link Down. ret=%ld\n", __func__, link_speed);
 		network->release(instance->index_network);
 		instance->used_f = false;
+		adapter->ro_config_f = false;
 		return -ENETDOWN;
 	}
 
@@ -3176,6 +2944,7 @@ int mse_open(int index_media, bool tx)
 		pr_err("[%s] cannot open packetizer ret=%d\n", __func__, ret);
 		network->release(instance->index_network);
 		instance->used_f = false;
+		adapter->ro_config_f = false;
 		return ret;
 	}
 	instance->index_packetizer = ret;
@@ -3228,7 +2997,7 @@ int mse_open(int index_media, bool tx)
 		instance->crf_timer.function = &mse_crf_callback;
 	}
 
-	ret = mse_get_default_config(adapter->index_sysfs, instance);
+	ret = mse_get_default_config(index_media, instance);
 	if (ret < 0)
 		pr_err("[%s] cannot get configurations\n", __func__);
 
@@ -3278,8 +3047,8 @@ int mse_open(int index_media, bool tx)
 		struct mse_packetizer_ops *crf =
 			&mse_packetizer_crf_tstamp_audio_ops;
 
-		ret = instance->network->open(
-			instance->network_device_name_tx);
+		dev_name = network_device->device_name_tx_crf;
+		ret = instance->network->open(dev_name);
 		if (ret < 0)
 			return -EINVAL;
 
@@ -3360,6 +3129,7 @@ int mse_close(int index)
 	instance->index_media = MSE_INDEX_UNDEFINED;
 	instance->index_network = MSE_INDEX_UNDEFINED;
 	instance->index_packetizer = MSE_INDEX_UNDEFINED;
+	adapter->ro_config_f = false;
 
 	return 0;
 }
@@ -3579,6 +3349,18 @@ static int mse_probe(void)
 	/* W/A for cannot using DMA APIs */
 	of_dma_configure(&mse->pdev->dev, NULL);
 
+	/* create class */
+	mse->class = class_create(THIS_MODULE, "ravb_mse");
+	if (IS_ERR(mse->class)) {
+		err = PTR_RET(mse->class);
+		pr_err("[%s] failed class_create() ret=%d\n", __func__, err);
+		kfree(mse);
+		return err;
+	}
+
+	/* init ioctl device */
+	major = mse_ioctl_init(major, mse_instance_max);
+
 	/* initialize packetizer */
 	err = mse_packetizer_init();
 	if (err)
@@ -3591,7 +3373,7 @@ static int mse_probe(void)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(mse->media_table); i++)
-		mse->media_table[i].index_sysfs = MSE_INDEX_UNDEFINED;
+		mse->media_table[i].index = MSE_INDEX_UNDEFINED;
 
 	pr_debug("[%s] success\n", __func__);
 
@@ -3605,6 +3387,10 @@ static int mse_remove(void)
 {
 	/* release packetizer */
 	mse_packetizer_exit();
+	/* release ioctl device */
+	mse_ioctl_exit(major, mse_instance_max);
+	/* destroy class */
+	class_destroy(mse->class);
 	/* unregister platform device */
 	platform_device_unregister(mse->pdev);
 	/* release device data */

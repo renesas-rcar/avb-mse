@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2016 Renesas Electronics Corporation
+ Copyright (C) 2016 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -59,11 +59,12 @@
  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */ /*************************************************************************/
 
-#ifndef __MSE_SYSFS_H__
-#define __MSE_SYSFS_H__
+#ifndef __MSE_IOCTL_LOCAL_H__
+#define __MSE_IOCTL_LOCAL_H__
 
-extern const struct attribute_group *mse_attr_groups_audio[];
-extern const struct attribute_group *mse_attr_groups_video[];
-extern const struct attribute_group *mse_attr_groups_mpeg2ts[];
+extern int mse_ioctl_register(int index);
+extern int mse_ioctl_unregister(int index);
+extern int mse_ioctl_init(int major, int mse_instance_max);
+extern int mse_ioctl_exit(int major, int mse_instance_max);
 
-#endif /* __MSE_SYSFS_H__ */
+#endif /* __MSE_IOCTL_LOCAL_H__ */

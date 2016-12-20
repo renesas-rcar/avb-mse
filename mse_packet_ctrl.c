@@ -434,8 +434,8 @@ int mse_packet_ctrl_take_out_packet(int index,
 		return -EINVAL;
 	}
 
-	pr_debug("[%s] packetizer=%s r=%d w=%d s=%d v=%p\n",
-		 __func__, ops->name, dma->read_p, dma->write_p, dma->size,
+	pr_debug("[%s] r=%d w=%d s=%d v=%p\n",
+		 __func__, dma->read_p, dma->write_p, dma->size,
 		 dma->packet_table[dma->read_p].vaddr);
 
 	*t_stored = 0;

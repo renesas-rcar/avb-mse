@@ -384,10 +384,9 @@ static int mse_packetizer_video_iec_packetize(int index,
 		pr_err("[%s] invalid data length %d\n", __func__, data_len);
 		return -EINVAL;
 	}
-	data_len = min(data_len, AVTP_PAYLOAD_MAX);
-	data_len = rounddown(data_len, src_packet_size);
-
 	payloads = data_len / src_packet_size;
+	if (payloads > mpeg2ts->mpeg2ts_config.tspackets_per_frame)
+		payloads = mpeg2ts->mpeg2ts_config.tspackets_per_frame;
 
 	/* header */
 	memcpy(packet,
@@ -396,7 +395,9 @@ static int mse_packetizer_video_iec_packetize(int index,
 
 	/* variable header */
 	avtp_set_sequence_num(packet, mpeg2ts->send_seq_num++);
-	avtp_set_stream_data_length(packet, data_len + AVTP_CIP_HEADER_SIZE);
+	avtp_set_stream_data_length(
+		packet,
+		payloads * AVTP_SOURCE_PACKET_SIZE + AVTP_CIP_HEADER_SIZE);
 	avtp_set_iec61883_dbc(packet, mpeg2ts->dbc);
 	mpeg2ts->dbc += payloads;
 
@@ -439,7 +440,7 @@ static int mse_packetizer_video_iec_packetize(int index,
 
 	pr_debug("[%s] bp=%zu/%zu, data_len=%d\n",
 		 __func__, *buffer_processed, buffer_size,
-		 data_len);
+		 src_packet_size * payloads);
 
 	if (*buffer_processed >= buffer_size) {
 		mpeg2ts->prev_timestamp = *timestamp;
@@ -530,8 +531,7 @@ static int mse_packetizer_video_iec_depacketize(int index,
 }
 
 struct mse_packetizer_ops mse_packetizer_video_iec61883_4_ops = {
-	.name = MSE_PACKETIZER_NAME_STR_IEC61883_4,
-	.priv = NULL,
+	.id = MSE_PACKETIZER_IEC61883_4,
 	.open = mse_packetizer_video_iec_open,
 	.release = mse_packetizer_video_iec_release,
 	.init = mse_packetizer_video_iec_packet_init,
