@@ -75,5 +75,5 @@ int mse_ptp_get_timestamps_dummy(int dev_id,
 				 int *count,
 				 struct ptp_clock_time timestamps[]);
 
-#endif /* __MSE_SYSFS_H__ */
+#endif /* __MSE_PTP_H__ */
 

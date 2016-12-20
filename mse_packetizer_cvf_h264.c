@@ -69,6 +69,7 @@
 #include <uapi/linux/if_ether.h>
 
 #include "ravb_mse_kernel.h"
+#include "mse_core.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
 
@@ -353,7 +354,7 @@ static int mse_packetizer_video_cvf_h264_set_video_config(
 }
 
 static int mse_packetizer_video_cvf_h264_calc_cbs(int index,
-						  struct eavb_cbsparam *cbs)
+						  struct mse_cbsparam *cbs)
 {
 	struct cvf_h264_packetizer *h264;
 	u64 value;
@@ -384,18 +385,18 @@ static int mse_packetizer_video_cvf_h264_calc_cbs(int index,
 		pr_err("[%s] cbs error value=0x%016llx\n", __func__, value);
 		return -EPERM;
 	}
-	cbs->bandwidthFraction = (u32)value;
+	cbs->bandwidth_fraction = (u32)value;
 
 	value = (u64)USHRT_MAX * bandwidth_fraction_numerator;
 	do_div(value, bandwidth_fraction_denominator);
 	do_div(value, h264->payload_max);
-	cbs->sendSlope = (u32)value;
+	cbs->send_slope = (u32)value;
 
 	value = (u64)USHRT_MAX * (bandwidth_fraction_denominator *
 			(u64)h264->payload_max - bandwidth_fraction_numerator);
 	do_div(value, bandwidth_fraction_denominator);
 	do_div(value, h264->payload_max);
-	cbs->idleSlope = (u32)value;
+	cbs->idle_slope = (u32)value;
 
 	return 0;
 }

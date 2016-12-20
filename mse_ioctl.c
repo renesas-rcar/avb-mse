@@ -70,7 +70,6 @@
 #include "mse_config.h"
 #include "mse_packetizer.h"
 
-/* defines */
 struct mse_ioctl_table {
 	int index;
 	bool used_f;

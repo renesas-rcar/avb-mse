@@ -59,50 +59,122 @@
  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */ /*************************************************************************/
 
-#include <linux/module.h>
-#include <linux/kernel.h>
+#ifndef __MSE_CORE_H__
+#define __MSE_CORE_H__
 
-#include "ravb_mse_kernel.h"
-#include "mse_core.h"
-#include "mse_packetizer.h"
-
-/* init function array */
-static struct {
-	int index;
-	struct mse_packetizer_ops *ops;
-} mse_packetizer_ops_table[] = {
-	{ -1, &mse_packetizer_audio_aaf_ops },
-	{ -1, &mse_packetizer_audio_iec61883_6_ops },
-	{ -1, &mse_packetizer_video_cvf_h264_ops },
-	{ -1, &mse_packetizer_video_cvf_h264_d13_ops },
-	{ -1, &mse_packetizer_video_cvf_mjpeg_ops },
-	{ -1, &mse_packetizer_video_iec61883_4_ops },
-	{ -1, NULL },
+/**
+ * @brief audio stream information
+ */
+struct mse_audio_info {
+	int avtp_packet_size;
+	int sample_per_packet;
+	int frame_interval_time;
 };
 
-int mse_packetizer_init(void)
+/**
+ * @brief packetizer status
+ */
+enum MSE_PACKETIZE_STATUS  {
+	MSE_PACKETIZE_STATUS_CONTINUE,
+	MSE_PACKETIZE_STATUS_COMPLETE,
+	MSE_PACKETIZE_STATUS_MAY_COMPLETE,
+	MSE_PACKETIZE_STATUS_NOT_ENOUGH,
+};
+
+/**
+ * @brief registered operations for packetizer
+ */
+struct mse_packetizer_ops {
+	/** @brief id */
+	enum MSE_PACKETIZER id;
+	/** @brief open function pointer */
+	int (*open)(void);
+	/** @brief release function pointer */
+	int (*release)(int index);
+	/** @brief init function pointer */
+	int (*init)(int index);
+	/** @brief set network config function pointer */
+	int (*set_network_config)(int index,
+				  struct mse_network_config *config);
+	/** @brief set audio config function pointer */
+	int (*set_audio_config)(int index, struct mse_audio_config *config);
+	/** @brief set video config function pointer */
+	int (*set_video_config)(int index, struct mse_video_config *config);
+	/** @brief set mpeg2ts config function pointer */
+	int (*set_mpeg2ts_config)(int index,
+				  struct mse_mpeg2ts_config *config);
+	/** @brief get audio info function pointer */
+	int (*get_audio_info)(int index, struct mse_audio_info *info);
+
+	/** @brief calc_cbs function pointer */
+	int (*calc_cbs)(int index, struct mse_cbsparam *cbs);
+
+	/** @brief packetize function pointer */
+	int (*packetize)(int index,
+			 void *packet,
+			 size_t *packet_size,
+			 void *buffer,
+			 size_t buffer_size,
+			 size_t *buffer_processed,
+			 unsigned int *timestamp);
+	/** @brief depacketize function pointer */
+	int (*depacketize)(int index,
+			   void *buffer,
+			   size_t buffer_size,
+			   size_t *buffer_processed,
+			   unsigned int *timestamp,
+			   void *packet,
+			   size_t packet_size);
+};
+
+static inline int mse_get_bit_depth(enum MSE_AUDIO_BIT bit_depth)
 {
-	int i, index;
-
-	for (i = 0; mse_packetizer_ops_table[i].ops != NULL; i++) {
-		index = mse_register_packetizer(mse_packetizer_ops_table[i].ops);
-		if (index < 0) {
-			pr_err("[%s] cannot register\n", __func__);
-			return -EPERM;
-		}
-		mse_packetizer_ops_table[i].index = index;
+	switch (bit_depth) {
+	case MSE_AUDIO_BIT_16:
+		return 16;
+	case MSE_AUDIO_BIT_18:
+		return 18;
+	case MSE_AUDIO_BIT_20:
+		return 20;
+	case MSE_AUDIO_BIT_24:
+		return 24;
+	case MSE_AUDIO_BIT_32:
+		return 32;
+	default:
+		return 0;
 	}
-
-	return 0;
 }
 
-void mse_packetizer_exit(void)
+static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
 {
-	int i, index;
-
-	for (i = 0; mse_packetizer_ops_table[i].ops != NULL; i++) {
-		index = mse_packetizer_ops_table[i].index;
-		if (index != -1)
-			mse_unregister_packetizer(index);
-	}
+	streamid[0] = mac[0];
+	streamid[1] = mac[1];
+	streamid[2] = mac[2];
+	streamid[3] = mac[3];
+	streamid[4] = mac[4];
+	streamid[5] = mac[5];
+	streamid[6] = (u8)((uid & 0xff00) >> 8);
+	streamid[7] = (u8)((uid & 0x00ff));
 }
+
+/**
+ * @brief register packetizer to MSE
+ *
+ * @param[in] ops packetizer operations
+ *
+ * @retval 0 MSE adapter ID
+ * @retval <0 Error
+ */
+extern int mse_register_packetizer(struct mse_packetizer_ops *ops);
+
+/**
+ * @brief unregister packetizer from MSE
+ *
+ * @param[in] index MSE adapter ID
+ *
+ * @retval 0 Success
+ * @retval <0 Error
+ */
+extern int mse_unregister_packetizer(int index);
+
+#endif /* __MSE_CORE_H__ */

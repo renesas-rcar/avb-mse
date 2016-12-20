@@ -64,7 +64,9 @@
 
 #include <linux/kernel.h>
 #include <linux/of_device.h>
+
 #include "ravb_mse_kernel.h"
+#include "mse_core.h"
 #include "mse_sysfs.h"
 #include "mse_config.h"
 #include "mse_packetizer.h"

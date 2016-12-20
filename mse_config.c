@@ -73,6 +73,7 @@
 #include <linux/init.h>
 #include "ravb_mse_kernel.h"
 #include "mse_config.h"
+#include "mse_core.h"
 
 int mse_config_get_info(int index, struct mse_info *data)
 {

@@ -77,6 +77,7 @@
 #include <linux/ptp_clock.h>
 #include "avtp.h"
 #include "ravb_mse_kernel.h"
+#include "mse_core.h"
 #include "mse_config.h"
 #include "mse_packet_ctrl.h"
 #include "mse_sysfs.h"
@@ -135,6 +136,7 @@
 #define MPEG2TS_CLOCK_D         (100000)              /* 10^9(NSEC) / 10K */
 #define MPEG2TS_PCR90K_BITS     (33)
 #define MPEG2TS_PCR90K_INVALID  (BIT(MPEG2TS_PCR90K_BITS))
+#define MPEG2TS_PCR_PID_IGNORE  (0x2000)
 
 /**
  * @brief main data for Adapter
@@ -527,7 +529,7 @@ static struct mse_config mse_config_default_mpeg2ts = {
 	.media_mpeg2ts_config = {
 		.tspackets_per_frame = 7,
 		.bitrate = 50000000,
-		.pcr_pid = PCR_PID_IGNORE,
+		.pcr_pid = MPEG2TS_PCR_PID_IGNORE,
 	},
 	.ptp_config = {
 		.type = MSE_PTP_TYPE_CURRENT_TIME,
@@ -698,8 +700,8 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 			       __func__);
 			ret = -EPERM;
 		}
-		video->fps.m = video_config.fps_numerator;
-		video->fps.n = video_config.fps_denominator;
+		video->fps.numerator = video_config.fps_numerator;
+		video->fps.denominator = video_config.fps_denominator;
 		video->bitrate = video_config.bitrate;
 		video->bytes_per_frame = video_config.bytes_per_frame;
 		break;
@@ -1416,9 +1418,9 @@ static int mse_initialize_crf_packetizer(struct mse_instance *instance)
 	config.sample_rate     = audio->sample_rate;
 	/* timestamp_interval */
 	if (!instance->ptp_clock) {
-		config.bytes_per_frame = audio->period_size;
+		config.samples_per_frame = audio->period_size;
 	} else {
-		config.bytes_per_frame = audio->sample_rate /
+		config.samples_per_frame = audio->sample_rate /
 			instance->ptp_capture_freq;
 	}
 	crf->set_audio_config(instance->crf_index, &config);
@@ -2167,8 +2169,9 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 			((u64)tsp[9] << 1) |
 			(((u64)tsp[10] & 0x80) >> 7);
 
-		if (pcr_pid == PCR_PID_IGNORE) {
-			if (instance->mpeg2ts_pre_pcr_pid != PCR_PID_IGNORE &&
+		if (pcr_pid == MPEG2TS_PCR_PID_IGNORE) {
+			if (instance->mpeg2ts_pre_pcr_pid !=
+			    MPEG2TS_PCR_PID_IGNORE &&
 			    (instance->mpeg2ts_pre_pcr_pid != pid ||
 			     compare_pcr(instance->mpeg2ts_pre_pcr_90k, pcr))) {
 				pr_info("[%s] change pid(%d -> %d) or rewind\n",
@@ -2655,7 +2658,7 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 		return ret;
 
 	if (instance->tx) {
-		struct eavb_cbsparam cbs;
+		struct mse_cbsparam cbs;
 
 		instance->packetizer->calc_cbs(instance->index_packetizer,
 					       &cbs);
@@ -2722,11 +2725,8 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 
 	pr_debug("[%s] index=%d data=%p\n", __func__, index, config);
 	pr_info("[%s]\n  format=%d bitrate=%d fps=%d/%d\n"
-		"  height=%d width=%d color_space=%d\n"
-		"  interlaced=%d bytes_per_frame=%d\n", __func__,
-		config->format, config->bitrate, config->fps.n, config->fps.m,
-		config->height, config->width,
-		config->color_space, config->interlaced,
+		"  bytes_per_frame=%d\n", __func__,
+		config->format, config->bitrate, config->fps.numerator, config->fps.denominator,
 		config->bytes_per_frame);
 
 	instance = &mse->instance_table[index];
@@ -2740,9 +2740,9 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 	memcpy(&instance->media_config.video, config, sizeof(*config));
 
 	/* calc timer value */
-	if (instance->tx && config->fps.n != 0 && config->fps.m != 0) {
-		framerate = NSEC_SCALE * (u64)config->fps.n;
-		do_div(framerate, config->fps.m);
+	if (instance->tx && config->fps.denominator != 0 && config->fps.numerator != 0) {
+		framerate = NSEC_SCALE * (u64)config->fps.denominator;
+		do_div(framerate, config->fps.numerator);
 		instance->timer_delay = framerate;
 		pr_notice("[%s] timer_delay=%d\n",
 			  __func__, instance->timer_delay);
@@ -2756,14 +2756,14 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 					       &instance->media_config.video);
 
 	if (instance->tx) {
-		struct eavb_cbsparam cbs;
+		struct mse_cbsparam cbs;
 
 		instance->packetizer->calc_cbs(instance->index_packetizer,
 					       &cbs);
 		instance->network->set_cbs_param(instance->index_network,
 						 &cbs);
 		pr_debug("[%s] bandwidth fraction = %08x\n",
-			 __func__, cbs.bandwidthFraction);
+			 __func__, cbs.bandwidth_fraction);
 	} else {
 		instance->network->set_streamid(instance->index_network,
 						instance->net_config.streamid);
@@ -2841,14 +2841,14 @@ int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 		&instance->media_config.mpeg2ts);
 
 	if (instance->tx) {
-		struct eavb_cbsparam cbs;
+		struct mse_cbsparam cbs;
 
 		instance->packetizer->calc_cbs(
 			instance->index_packetizer, &cbs);
 		instance->network->set_cbs_param(
 			instance->index_network, &cbs);
 		pr_debug("[%s] bandwidth fraction = %08x\n",
-			 __func__, cbs.bandwidthFraction);
+			 __func__, cbs.bandwidth_fraction);
 	} else {
 		instance->network->set_streamid(instance->index_network,
 						instance->net_config.streamid);
@@ -3110,7 +3110,7 @@ int mse_open(int index_media, bool tx)
 	/* send clock using CRF */
 	if (instance->send_clock) {
 		int ret;
-		struct eavb_cbsparam cbs;
+		struct mse_cbsparam cbs;
 		struct mse_packetizer_ops *crf =
 			&mse_packetizer_crf_tstamp_audio_ops;
 
@@ -3267,7 +3267,7 @@ int mse_start_streaming(int index)
 		   &instance->wk_start_stream);
 
 	instance->mpeg2ts_clock_90k = MPEG2TS_PCR90K_INVALID;
-	instance->mpeg2ts_pre_pcr_pid = PCR_PID_IGNORE;
+	instance->mpeg2ts_pre_pcr_pid = MPEG2TS_PCR_PID_IGNORE;
 	instance->mpeg2ts_pre_pcr_90k = 0;
 
 	return 0;
