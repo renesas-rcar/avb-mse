@@ -77,7 +77,7 @@
 #define MSE_EAVB_PACKET_LENGTH (1526)
 
 #define avb_compare_param_key(val, key) \
-	strncmp(val, key, strlen(key))
+	strncmp(val, key, MSE_NAME_LEN_MAX)
 
 struct mse_adapter_eavb {
 	bool used_f;
@@ -129,7 +129,7 @@ static enum AVB_DEVNAME mse_adapter_eavb_set_devname(const char *val)
 static int mse_adapter_eavb_open(char *name)
 {
 	int err, index;
-	enum AVB_DEVNAME id;
+	int id;
 	struct mse_adapter_eavb *eavb;
 	static struct eavb_option option = {
 		.id = EAVB_OPTIONID_BLOCKMODE,
@@ -140,13 +140,13 @@ static int mse_adapter_eavb_open(char *name)
 	id = mse_adapter_eavb_set_devname(name);
 	if (id < 0) {
 		pr_err("[%s] error unknown dev=%s\n", __func__, name);
-		id = AVB_DEVNAME_TX0;
+		return -EPERM;
 	}
 
 	pr_debug("[%s] dev=%s(%d)\n", __func__, name, id);
 
-	for (index = 0; eavb_table[index].used_f &&
-	     index < ARRAY_SIZE(eavb_table); index++)
+	for (index = 0; index < ARRAY_SIZE(eavb_table) &&
+	     eavb_table[index].used_f; index++)
 		;
 
 	if (index >= ARRAY_SIZE(eavb_table))
@@ -187,14 +187,18 @@ static int mse_adapter_eavb_release(int index)
 
 	eavb = &eavb_table[index];
 
+	if (!eavb->used_f)
+		return -EPERM;
+
 	pr_debug("[%s] index=%d\n", __func__, index);
 
 	err = ravb_streaming_release_stq_kernel(eavb->ravb.handle);
-	if (err)
+	if (err) {
 		pr_err("[%s] error release code=%d\n", __func__, err);
-
-	kfree(eavb->entry);
-	eavb->used_f = false;
+	} else {
+		kfree(eavb->entry);
+		eavb->used_f = false;
+	}
 
 	return err;
 }
@@ -208,7 +212,15 @@ static int mse_adapter_eavb_set_cbs_param(int index, struct eavb_cbsparam *cbs)
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
 
+	if (!cbs) {
+		pr_err("[%s] invalid argument. cbs\n", __func__);
+		return -EINVAL;
+	}
+
 	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 
@@ -220,9 +232,10 @@ static int mse_adapter_eavb_set_cbs_param(int index, struct eavb_cbsparam *cbs)
 	pr_debug(" loCredit          = %08x\n", txparam.cbs.loCredit);
 
 	err = eavb->ravb.set_txparam(eavb->ravb.handle, &txparam);
-	if (err)
+	if (err) {
 		pr_err("[%s] error %ld\n", __func__, err);
-
+		return err;
+	}
 	return 0;
 }
 
@@ -237,6 +250,9 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 
 	eavb = &eavb_table[index];
 
+	if (!eavb->used_f)
+		return -EPERM;
+
 	pr_debug("[%s] index=%d\n", __func__, index);
 
 	memcpy(rxparam.streamid, streamid, sizeof(rxparam.streamid));
@@ -247,9 +263,10 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 		 rxparam.streamid[6], rxparam.streamid[7]);
 
 	err = eavb->ravb.set_rxparam(eavb->ravb.handle, &rxparam);
-	if (err)
+	if (err) {
 		pr_err("[%s] error %ld\n", __func__, err);
-
+		return err;
+	}
 	return 0;
 }
 
@@ -263,6 +280,9 @@ static int mse_adapter_eavb_check_receive(int index)
 		return -EPERM;
 
 	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
 
 	err = eavb->ravb.get_entrynum(eavb->ravb.handle, &en);
 	pr_debug("[%s] index=%d ret=%ld entry=%d wait=%d log=%d\n",
@@ -285,7 +305,15 @@ static int mse_adapter_eavb_send_prepare(int index,
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
 
+	if (!packets) {
+		pr_err("[%s] invalid argument. packets\n", __func__);
+		return -EINVAL;
+	}
+
 	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
 
 	if (num_packets <= 0)
 		return -EPERM;
@@ -320,7 +348,15 @@ static int mse_adapter_eavb_send(int index,
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
 
+	if (!packets) {
+		pr_err("[%s] invalid argument. packets\n", __func__);
+		return -EINVAL;
+	}
+
 	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
 
 	if (num_packets <= 0)
 		return -EPERM;
@@ -411,7 +447,18 @@ static int mse_adapter_eavb_receive_prepare(int index,
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
 
+	if (!packets) {
+		pr_err("[%s] invalid argument. packets\n", __func__);
+		return -EINVAL;
+	}
+
 	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
+
+	if (num_packets <= 0)
+		return -EPERM;
 
 	pr_debug("[%s] index=%d addr=%p num=%d\n",
 		 __func__, index, packets, num_packets);
@@ -461,6 +508,12 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 		return -EPERM;
 
 	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
+
+	if (num_packets <= 0)
+		return -EPERM;
 
 	pr_debug("[%s] index=%d num=%d\n", __func__, index, num_packets);
 	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
@@ -530,6 +583,9 @@ static int mse_adapter_eavb_set_option(int index)
 
 	eavb = &eavb_table[index];
 
+	if (!eavb->used_f)
+		return -EPERM;
+
 	return eavb->ravb.set_option(eavb->ravb.handle, &option);
 }
 
@@ -541,6 +597,9 @@ static int mse_adapter_eavb_cancel(int index)
 		return -EPERM;
 
 	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
 
 	return eavb->ravb.blocking_cancel(eavb->ravb.handle);
 }
@@ -554,6 +613,9 @@ static int mse_adapter_eavb_get_link_speed(int index)
 		return -EPERM;
 
 	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 

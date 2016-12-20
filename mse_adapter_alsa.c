@@ -237,9 +237,9 @@ static inline struct alsa_stream *mse_adapter_alsa_pcm_to_io(
 
 static int mse_adapter_alsa_playback_open(struct snd_pcm_substream *substream)
 {
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
+	struct alsa_device *chip;
+	struct snd_pcm_runtime *runtime;
+	struct alsa_stream *io;
 	int index;
 	int ret;
 
@@ -250,6 +250,10 @@ static int mse_adapter_alsa_playback_open(struct snd_pcm_substream *substream)
 		pr_err("[%s] Invalid argument. substream\n", __func__);
 		return -EINVAL;
 	}
+
+	chip = snd_pcm_substream_chip(substream);
+	runtime = substream->runtime;
+	io = mse_adapter_alsa_pcm_to_io(chip, substream);
 
 	/* hw setting */
 	runtime->hw = g_mse_adapter_alsa_playback_hw;
@@ -279,9 +283,9 @@ static int mse_adapter_alsa_playback_open(struct snd_pcm_substream *substream)
 
 static int mse_adapter_alsa_capture_open(struct snd_pcm_substream *substream)
 {
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
+	struct alsa_device *chip;
+	struct snd_pcm_runtime *runtime;
+	struct alsa_stream *io;
 	int index;
 	int ret;
 
@@ -292,6 +296,10 @@ static int mse_adapter_alsa_capture_open(struct snd_pcm_substream *substream)
 		pr_err("[%s] Invalid argument. substream\n", __func__);
 		return -EINVAL;
 	}
+
+	chip = snd_pcm_substream_chip(substream);
+	runtime = substream->runtime;
+	io = mse_adapter_alsa_pcm_to_io(chip, substream);
 
 	/* hw setting */
 	runtime->hw = g_mse_adapter_alsa_capture_hw;
@@ -321,8 +329,8 @@ static int mse_adapter_alsa_capture_open(struct snd_pcm_substream *substream)
 
 static int mse_adapter_alsa_close(struct snd_pcm_substream *substream)
 {
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
+	struct alsa_device *chip;
+	struct alsa_stream *io;
 	int err;
 
 	pr_debug("[%s]\n", __func__);
@@ -332,6 +340,9 @@ static int mse_adapter_alsa_close(struct snd_pcm_substream *substream)
 		pr_err("[%s] Invalid argument. substream\n", __func__);
 		return -EINVAL;
 	}
+
+	chip = snd_pcm_substream_chip(substream);
+	io = mse_adapter_alsa_pcm_to_io(chip, substream);
 
 	/* MSE Core close */
 	err = mse_close(io->index);
@@ -347,9 +358,9 @@ static int mse_adapter_alsa_trigger(
 				struct snd_pcm_substream *substream,
 				int cmd)
 {
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
+	struct alsa_device *chip;
+	struct snd_pcm_runtime *runtime;
+	struct alsa_stream *io;
 	int rtn = 0;
 	int err;
 
@@ -360,6 +371,10 @@ static int mse_adapter_alsa_trigger(
 		pr_err("[%s] Invalid argument. substream\n", __func__);
 		return -EINVAL;
 	}
+
+	chip = snd_pcm_substream_chip(substream);
+	runtime = substream->runtime;
+	io = mse_adapter_alsa_pcm_to_io(chip, substream);
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
@@ -481,9 +496,9 @@ static bool is_alsa_big_endian(int alsa_format)
 
 static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 {
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
+	struct alsa_device *chip;
+	struct snd_pcm_runtime *runtime;
+	struct alsa_stream *io;
 	struct mse_audio_config config;
 	int err;
 
@@ -494,6 +509,10 @@ static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 		pr_err("[%s] Invalid argument. substream\n", __func__);
 		return -EINVAL;
 	}
+
+	chip = snd_pcm_substream_chip(substream);
+	runtime = substream->runtime;
+	io = mse_adapter_alsa_pcm_to_io(chip, substream);
 
 	err = mse_get_audio_config(io->index, &config);
 	if (err < 0) {
@@ -523,9 +542,18 @@ static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 static snd_pcm_uframes_t mse_adapter_alsa_pointer(
 					struct snd_pcm_substream *substream)
 {
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
+	struct alsa_device *chip;
+	struct snd_pcm_runtime *runtime;
+	struct alsa_stream *io;
+
+	if (!substream) {
+		pr_err("[%s] Invalid argument. substream\n", __func__);
+		return -EINVAL;
+	}
+
+	chip = snd_pcm_substream_chip(substream);
+	runtime = substream->runtime;
+	io = mse_adapter_alsa_pcm_to_io(chip, substream);
 
 	pr_debug("[%s]\n", __func__);
 	return bytes_to_frames(runtime, io->byte_pos);

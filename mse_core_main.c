@@ -2428,22 +2428,21 @@ int mse_unregister_adapter_media(int index_media)
 
 	if (!mse->media_table[index_media].used_f) {
 		pr_err("[%s] %d was unregistered\n", __func__, index_media);
-		return 0;
+		return -EINVAL;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
+		if (mse->instance_table[i].index_media == index_media) {
+			pr_err("[%s] module is in use. instance=%d\n",
+			       __func__, i);
+			return -EPERM;
+		}
 	}
 
 	/* delete control device */
 	mse_delete_config_device(index_media);
 
 	spin_lock_irqsave(&mse->lock_tables, flags);
-
-	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
-		if (mse->instance_table[i].index_media == index_media) {
-			pr_err("[%s] module is in use. instance=%d\n",
-			       __func__, i);
-			spin_unlock(&mse->lock_tables);
-			return -EPERM;
-		}
-	}
 
 	/* table delete */
 	memset(&mse->media_table[index_media], 0, sizeof(struct mse_adapter));
@@ -2586,6 +2585,11 @@ int mse_get_audio_config(int index, struct mse_audio_config *config)
 
 	instance = &mse->instance_table[index];
 
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
+
 	/* get config */
 	memcpy(config, &instance->media_config.audio, sizeof(*config));
 
@@ -2621,6 +2625,12 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 		config->is_big_endian);
 
 	instance = &mse->instance_table[index];
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
+
 	adapter = instance->media;
 
 	config->samples_per_frame =
@@ -2683,6 +2693,11 @@ int mse_get_video_config(int index, struct mse_video_config *config)
 
 	instance = &mse->instance_table[index];
 
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
+
 	/* get config */
 	memcpy(config, &instance->media_config.video, sizeof(*config));
 
@@ -2715,6 +2730,11 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 		config->bytes_per_frame);
 
 	instance = &mse->instance_table[index];
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
 
 	/* set config */
 	memcpy(&instance->media_config.video, config, sizeof(*config));
@@ -2771,6 +2791,11 @@ int mse_get_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 
 	instance = &mse->instance_table[index];
 
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
+
 	/* get config */
 	memcpy(config, &instance->media_config.mpeg2ts, sizeof(*config));
 
@@ -2793,6 +2818,11 @@ int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 	}
 
 	instance = &mse->instance_table[index];
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
 
 	/* set config */
 	memcpy(&instance->media_config.mpeg2ts, config, sizeof(*config));
@@ -2834,9 +2864,9 @@ int mse_open(int index_media, bool tx)
 	struct mse_adapter *adapter;
 	struct mse_adapter_network_ops *network;
 	struct mse_packetizer_ops *packetizer;
-	int ret, i, index;
+	int ret, i, index, err;
 	long link_speed;
-	struct mch_ops *m_ops;
+	struct mch_ops *m_ops = NULL;
 	unsigned long flags;
 	struct mse_network_device *network_device;
 	struct mse_packetizer *config_packetizer;
@@ -2896,9 +2926,9 @@ int mse_open(int index_media, bool tx)
 	if (i >= ARRAY_SIZE(mse->network_table)) {
 		pr_err("[%s] network adapter module is not loaded\n",
 		       __func__);
-		instance->used_f = false;
-		adapter->ro_config_f = false;
-		return -ENODEV;
+		err = -ENODEV;
+
+		goto error_network_adapter_not_found;
 	}
 
 	pr_debug("[%s] network adapter index=%d name=%s\n",
@@ -2933,9 +2963,9 @@ int mse_open(int index_media, bool tx)
 	ret = mse_ptp_open(instance->ptp_index, &instance->ptp_dev_id);
 	if (ret < 0) {
 		pr_err("[%s] cannot mse_ptp_open()\n", __func__);
-		instance->used_f = false;
-		adapter->ro_config_f = false;
-		return ret;
+		err = ret;
+
+		goto error_cannot_open_ptp;
 	}
 
 	/* open network adapter */
@@ -2948,9 +2978,9 @@ int mse_open(int index_media, bool tx)
 	if (ret < 0) {
 		pr_err("[%s] cannot open network adapter ret=%d\n",
 		       __func__, ret);
-		instance->used_f = false;
-		adapter->ro_config_f = false;
-		return ret;
+		err = ret;
+
+		goto error_cannot_open_network_adapter;
 	}
 	instance->index_network = ret;
 
@@ -2962,10 +2992,9 @@ int mse_open(int index_media, bool tx)
 	link_speed = network->get_link_speed(instance->index_network);
 	if (link_speed <= 0) {
 		pr_err("[%s] Link Down. ret=%ld\n", __func__, link_speed);
-		network->release(instance->index_network);
-		instance->used_f = false;
-		adapter->ro_config_f = false;
-		return -ENETDOWN;
+		err = -ENETDOWN;
+
+		goto error_network_interface_is_link_down;
 	}
 
 	pr_debug("[%s] Link Speed=%ldMbps\n", __func__, link_speed);
@@ -2977,10 +3006,9 @@ int mse_open(int index_media, bool tx)
 	ret = packetizer->open();
 	if (ret < 0) {
 		pr_err("[%s] cannot open packetizer ret=%d\n", __func__, ret);
-		network->release(instance->index_network);
-		instance->used_f = false;
-		adapter->ro_config_f = false;
-		return ret;
+		err = ret;
+
+		goto error_cannot_open_packetizer;
 	}
 	instance->index_packetizer = ret;
 
@@ -3047,14 +3075,18 @@ int mse_open(int index_media, bool tx)
 		}
 		if (instance->mch_index < 0) {
 			pr_err("[%s] mch is not registered.\n", __func__);
-			return -EINVAL;
+			err = -EINVAL;
+
+			goto error_mch_not_found;
 		}
 
 		ret = m_ops->open(&instance->mch_dev_id);
 		if (ret < 0) {
 			pr_err("[%s] mch open error(%d).\n", __func__, ret);
 			instance->mch_index = -1;
-			return -EINVAL;
+			err = -EINVAL;
+
+			goto error_mch_cannot_open;
 		}
 	}
 
@@ -3084,8 +3116,11 @@ int mse_open(int index_media, bool tx)
 
 		dev_name = network_device->device_name_tx_crf;
 		ret = instance->network->open(dev_name);
-		if (ret < 0)
-			return -EINVAL;
+		if (ret < 0) {
+			err = -EINVAL;
+
+			goto error_cannot_open_network_device_for_crf;
+		}
 
 		instance->crf_index_network = ret;
 
@@ -3099,8 +3134,11 @@ int mse_open(int index_media, bool tx)
 			&mse->pdev->dev,
 			MSE_DMA_MAX_PACKET,
 			MSE_DMA_MAX_PACKET_SIZE);
-		if (!instance->crf_packet_buffer)
-			return -EINVAL;
+		if (!instance->crf_packet_buffer) {
+			err = -EINVAL;
+
+			goto error_cannot_alloc_crf_packet_buffer;
+		}
 
 		/* prepare for send */
 		mse_packet_ctrl_send_prepare_packet(
@@ -3113,6 +3151,39 @@ int mse_open(int index_media, bool tx)
 	instance->packetizer->init(instance->index_packetizer);
 
 	return index;
+
+error_cannot_alloc_crf_packet_buffer:
+	network->release(instance->crf_index_network);
+
+error_cannot_open_network_device_for_crf:
+	mse_packet_ctrl_free(instance->packet_buffer);
+	if (m_ops)
+		m_ops->close(instance->mch_dev_id);
+
+error_mch_cannot_open:
+error_mch_not_found:
+	if (instance->wq_crf_packet)
+		destroy_workqueue(instance->wq_crf_packet);
+
+	destroy_workqueue(instance->wq_tstamp);
+	destroy_workqueue(instance->wq_packet);
+	destroy_workqueue(instance->wq_stream);
+
+	packetizer->release(instance->index_packetizer);
+
+error_cannot_open_packetizer:
+error_network_interface_is_link_down:
+	network->release(instance->index_network);
+
+error_cannot_open_network_adapter:
+	mse_ptp_close(instance->ptp_index, instance->ptp_dev_id);
+
+error_cannot_open_ptp:
+error_network_adapter_not_found:
+	instance->used_f = false;
+	adapter->ro_config_f = false;
+
+	return err;
 }
 EXPORT_SYMBOL(mse_open);
 
@@ -3131,6 +3202,11 @@ int mse_close(int index)
 
 	instance = &mse->instance_table[index];
 	adapter = instance->media;
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
 
 	/* wait stop */
 	flush_work(&instance->wk_stop);
@@ -3181,6 +3257,12 @@ int mse_start_streaming(int index)
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 	instance = &mse->instance_table[index];
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
+
 	queue_work(instance->wq_packet,
 		   &instance->wk_start_stream);
 
@@ -3203,6 +3285,11 @@ int mse_stop_streaming(int index)
 
 	pr_err("[%s] index=%d\n", __func__, index);
 	instance = &mse->instance_table[index];
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
 
 	instance->f_stopping = true;
 
@@ -3249,6 +3336,11 @@ int mse_start_transmission(int index,
 		 __func__, index, buffer, buffer_size);
 
 	instance = &mse->instance_table[index];
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
 
 	instance->start_buffer = buffer;
 	instance->start_buffer_size = buffer_size;
