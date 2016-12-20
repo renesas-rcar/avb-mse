@@ -88,11 +88,12 @@
 #define MSE_ADAPTER_V4L2_RTN_OK				0
 #define MSE_ADAPTER_V4L2_RTN_NG				-1
 
-/******************/
-/* Maximum number */
-/******************/
-#define MSE_ADAPTER_V4L2_DEVICE_VIDEO_MAX		2
-#define MSE_ADAPTER_V4L2_DEVICE_MPEG_MAX		2
+/*********************/
+/* Number of devices */
+/*********************/
+#define MSE_ADAPTER_V4L2_DEVICE_MAX		MSE_INSTANCE_MAX
+#define MSE_ADAPTER_V4L2_DEVICE_VIDEO_DEFAULT	2
+#define MSE_ADAPTER_V4L2_DEVICE_MPEG2TS_DEFAULT	2
 
 #define NUM_BUFFERS 2
 #define NUM_PLANES  1
@@ -219,9 +220,11 @@ static const struct v4l2_adapter_fmt g_mse_adapter_v4l2_fmt_sizes_mpeg[] = {
 /*******************/
 /* global variable */
 /*******************/
-static int dev_num_video = MSE_ADAPTER_V4L2_DEVICE_VIDEO_MAX;
-static int dev_num_mpeg = MSE_ADAPTER_V4L2_DEVICE_MPEG_MAX;
-static int dev_num_max;
+static int v4l2_video_devices = MSE_ADAPTER_V4L2_DEVICE_VIDEO_DEFAULT;
+module_param(v4l2_video_devices, int, 0440);
+static int v4l2_mpeg2ts_devices = MSE_ADAPTER_V4L2_DEVICE_MPEG2TS_DEFAULT;
+module_param(v4l2_mpeg2ts_devices, int, 0440);
+static int v4l2_devices;
 
 /************/
 /* Function */
@@ -1562,15 +1565,40 @@ static int __init mse_adapter_v4l2_init(void)
 
 	pr_debug("Start v4l2 adapter\n");
 
-	dev_num_max = dev_num_video + dev_num_mpeg;
+	if (v4l2_video_devices < 0) {
+		pr_err("[%s] Invalid devices video=%d\n",
+			__func__, v4l2_video_devices);
+		return -EINVAL;
+	}
 
-	g_v4l2_adapter = kcalloc(dev_num_max, sizeof(*g_v4l2_adapter),
+	if (v4l2_mpeg2ts_devices < 0) {
+		pr_err("[%s] Invalid devices mpeg2ts=%d\n",
+			__func__, v4l2_video_devices);
+		return -EINVAL;
+	}
+
+	v4l2_devices = v4l2_video_devices + v4l2_mpeg2ts_devices;
+	if (v4l2_devices > MSE_ADAPTER_V4L2_DEVICE_MAX) {
+		pr_err("[%s] Too many devices, %d (video=%d mpeg2ts=%d)\n",
+		       __func__, v4l2_devices, v4l2_video_devices,
+		       v4l2_mpeg2ts_devices);
+		return -EINVAL;
+	} else if (v4l2_devices <= 0) {
+		pr_err("[%s] Invalid devices, %d (video=%d mpeg2ts=%d)\n",
+		       __func__, v4l2_devices, v4l2_video_devices,
+		       v4l2_mpeg2ts_devices);
+		return -EINVAL;
+	} else {
+		;
+	}
+
+	g_v4l2_adapter = kcalloc(v4l2_devices, sizeof(*g_v4l2_adapter),
 				 GFP_KERNEL);
 	if (!g_v4l2_adapter)
 		return MSE_ADAPTER_V4L2_RTN_NG;
 
-	for (i = 0; i < dev_num_max; i++) {
-		if (i < dev_num_video)
+	for (i = 0; i < v4l2_devices; i++) {
+		if (i < v4l2_video_devices)
 			type = MSE_TYPE_ADAPTER_VIDEO;
 		else
 			type = MSE_TYPE_ADAPTER_MPEG2TS;
@@ -1585,7 +1613,7 @@ static int __init mse_adapter_v4l2_init(void)
 	return MSE_ADAPTER_V4L2_RTN_OK;
 
 init_fail:
-	for (i = 0; i < dev_num_max; i++)
+	for (i = 0; i < v4l2_devices; i++)
 		mse_adapter_v4l2_free(i);
 
 	kfree(g_v4l2_adapter);
@@ -1600,7 +1628,7 @@ static void __exit mse_adapter_v4l2_exit(void)
 
 	pr_debug("Stop v4l2 adapter\n");
 
-	for (i = 0; i < dev_num_max; i++)
+	for (i = 0; i < v4l2_devices; i++)
 		mse_adapter_v4l2_free(i);
 
 	kfree(g_v4l2_adapter);
