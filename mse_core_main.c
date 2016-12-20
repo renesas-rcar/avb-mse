@@ -2431,19 +2431,18 @@ int mse_unregister_adapter_media(int index_media)
 		return -EINVAL;
 	}
 
-	/* delete control device */
-	mse_delete_config_device(index_media);
-
-	spin_lock_irqsave(&mse->lock_tables, flags);
-
 	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
 		if (mse->instance_table[i].index_media == index_media) {
 			pr_err("[%s] module is in use. instance=%d\n",
 			       __func__, i);
-			spin_unlock(&mse->lock_tables);
 			return -EPERM;
 		}
 	}
+
+	/* delete control device */
+	mse_delete_config_device(index_media);
+
+	spin_lock_irqsave(&mse->lock_tables, flags);
 
 	/* table delete */
 	memset(&mse->media_table[index_media], 0, sizeof(struct mse_adapter));
