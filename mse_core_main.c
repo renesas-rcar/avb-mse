@@ -2585,6 +2585,11 @@ int mse_get_audio_config(int index, struct mse_audio_config *config)
 
 	instance = &mse->instance_table[index];
 
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
+
 	/* get config */
 	memcpy(config, &instance->media_config.audio, sizeof(*config));
 
@@ -2620,6 +2625,12 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 		config->is_big_endian);
 
 	instance = &mse->instance_table[index];
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
+
 	adapter = instance->media;
 
 	config->samples_per_frame =
@@ -2682,6 +2693,11 @@ int mse_get_video_config(int index, struct mse_video_config *config)
 
 	instance = &mse->instance_table[index];
 
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
+
 	/* get config */
 	memcpy(config, &instance->media_config.video, sizeof(*config));
 
@@ -2714,6 +2730,11 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 		config->bytes_per_frame);
 
 	instance = &mse->instance_table[index];
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
 
 	/* set config */
 	memcpy(&instance->media_config.video, config, sizeof(*config));
@@ -2770,6 +2791,11 @@ int mse_get_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 
 	instance = &mse->instance_table[index];
 
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
+
 	/* get config */
 	memcpy(config, &instance->media_config.mpeg2ts, sizeof(*config));
 
@@ -2792,6 +2818,11 @@ int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 	}
 
 	instance = &mse->instance_table[index];
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
 
 	/* set config */
 	memcpy(&instance->media_config.mpeg2ts, config, sizeof(*config));
@@ -3172,6 +3203,11 @@ int mse_close(int index)
 	instance = &mse->instance_table[index];
 	adapter = instance->media;
 
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
+
 	/* wait stop */
 	flush_work(&instance->wk_stop);
 
@@ -3221,6 +3257,12 @@ int mse_start_streaming(int index)
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 	instance = &mse->instance_table[index];
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
+
 	queue_work(instance->wq_packet,
 		   &instance->wk_start_stream);
 
@@ -3243,6 +3285,11 @@ int mse_stop_streaming(int index)
 
 	pr_err("[%s] index=%d\n", __func__, index);
 	instance = &mse->instance_table[index];
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
 
 	instance->f_stopping = true;
 
@@ -3289,6 +3336,11 @@ int mse_start_transmission(int index,
 		 __func__, index, buffer, buffer_size);
 
 	instance = &mse->instance_table[index];
+
+	if (!instance->used_f) {
+		pr_err("[%s] index=%d is not opened", __func__, index);
+		return -EINVAL;
+	}
 
 	instance->start_buffer = buffer;
 	instance->start_buffer_size = buffer_size;
