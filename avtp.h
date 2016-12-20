@@ -537,11 +537,11 @@ DEF_AVTP_ACCESSER_UINT16(crf_timestamp_interval, 18)
 /**
  * Template - IEEE1722
  */
-extern void avtp_copy_iec61883_4_template(void *data);
-extern void avtp_copy_iec61883_6_template(void *data);
-extern void avtp_copy_aaf_pcm_template(void *data);
-extern void avtp_copy_cvf_h264_template(void *data);
-extern void avtp_copy_cvf_mjpeg_template(void *data);
-extern void avtp_copy_crf_template(void *data);
+void avtp_copy_iec61883_4_template(void *data);
+void avtp_copy_iec61883_6_template(void *data);
+void avtp_copy_aaf_pcm_template(void *data);
+void avtp_copy_cvf_h264_template(void *data);
+void avtp_copy_cvf_mjpeg_template(void *data);
+void avtp_copy_crf_template(void *data);
 
 #endif /* __AVTP_H__ */

@@ -62,9 +62,9 @@
 #ifndef __MSE_IOCTL_LOCAL_H__
 #define __MSE_IOCTL_LOCAL_H__
 
-extern int mse_ioctl_register(int index);
-extern int mse_ioctl_unregister(int index);
-extern int mse_ioctl_init(int major, int mse_instance_max);
-extern int mse_ioctl_exit(int major, int mse_instance_max);
+int mse_ioctl_register(int index);
+int mse_ioctl_unregister(int index);
+int mse_ioctl_init(int major, int mse_instance_max);
+int mse_ioctl_exit(int major, int mse_instance_max);
 
 #endif /* __MSE_IOCTL_LOCAL_H__ */

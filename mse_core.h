@@ -165,7 +165,7 @@ static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
  * @retval 0 MSE adapter ID
  * @retval <0 Error
  */
-extern int mse_register_packetizer(struct mse_packetizer_ops *ops);
+int mse_register_packetizer(struct mse_packetizer_ops *ops);
 
 /**
  * @brief unregister packetizer from MSE
@@ -175,6 +175,6 @@ extern int mse_register_packetizer(struct mse_packetizer_ops *ops);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_unregister_packetizer(int index);
+int mse_unregister_packetizer(int index);
 
 #endif /* __MSE_CORE_H__ */

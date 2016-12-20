@@ -292,9 +292,9 @@ struct mse_ptp_ops {
  * @retval >=0 MSE adapter ID
  * @retval <0 Error
  */
-extern int mse_register_adapter_media(enum MSE_TYPE type,
-				      char *name,
-				      char *device_name);
+int mse_register_adapter_media(enum MSE_TYPE type,
+			       char *name,
+			       char *device_name);
 
 /**
  * @brief unregister media adapter from MSE
@@ -304,7 +304,7 @@ extern int mse_register_adapter_media(enum MSE_TYPE type,
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_unregister_adapter_media(int index_media);
+int mse_unregister_adapter_media(int index_media);
 
 /**
  * @brief register network adapter to MSE
@@ -314,7 +314,7 @@ extern int mse_unregister_adapter_media(int index_media);
  * @retval 0 MSE instance ID
  * @retval <0 Error
  */
-extern int mse_register_adapter_network(struct mse_adapter_network_ops *ops);
+int mse_register_adapter_network(struct mse_adapter_network_ops *ops);
 
 /**
  * @brief unregister network adapter from MSE
@@ -324,7 +324,7 @@ extern int mse_register_adapter_network(struct mse_adapter_network_ops *ops);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_unregister_adapter_network(int index);
+int mse_unregister_adapter_network(int index);
 
 /**
  * @brief get audio configuration
@@ -335,7 +335,7 @@ extern int mse_unregister_adapter_network(int index);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_get_audio_config(int index, struct mse_audio_config *config);
+int mse_get_audio_config(int index, struct mse_audio_config *config);
 
 /**
  * @brief set audio configuration
@@ -346,7 +346,7 @@ extern int mse_get_audio_config(int index, struct mse_audio_config *config);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_set_audio_config(int index, struct mse_audio_config *config);
+int mse_set_audio_config(int index, struct mse_audio_config *config);
 
 /**
  * @brief get video configuration
@@ -357,7 +357,7 @@ extern int mse_set_audio_config(int index, struct mse_audio_config *config);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_get_video_config(int index, struct mse_video_config *config);
+int mse_get_video_config(int index, struct mse_video_config *config);
 
 /**
  * @brief set video configuration
@@ -368,7 +368,7 @@ extern int mse_get_video_config(int index, struct mse_video_config *config);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_set_video_config(int index, struct mse_video_config *config);
+int mse_set_video_config(int index, struct mse_video_config *config);
 
 /**
  * @brief get mpeg2ts configuration
@@ -379,8 +379,8 @@ extern int mse_set_video_config(int index, struct mse_video_config *config);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_get_mpeg2ts_config(int index,
-				  struct mse_mpeg2ts_config *config);
+int mse_get_mpeg2ts_config(int index,
+			   struct mse_mpeg2ts_config *config);
 
 /**
  * @brief set mpeg2ts configuration
@@ -391,8 +391,8 @@ extern int mse_get_mpeg2ts_config(int index,
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_set_mpeg2ts_config(int index,
-				  struct mse_mpeg2ts_config *config);
+int mse_set_mpeg2ts_config(int index,
+			   struct mse_mpeg2ts_config *config);
 
 /**
  * @brief MSE open
@@ -403,7 +403,7 @@ extern int mse_set_mpeg2ts_config(int index,
  * @retval >=0 instance ID of MSE
  * @retval <0 Error
  */
-extern int mse_open(int index_media, bool tx);
+int mse_open(int index_media, bool tx);
 
 /**
  * @brief MSE close
@@ -413,7 +413,7 @@ extern int mse_open(int index_media, bool tx);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_close(int index);
+int mse_close(int index);
 
 /**
  * @brief MSE streaming on
@@ -423,7 +423,7 @@ extern int mse_close(int index);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_start_streaming(int index);
+int mse_start_streaming(int index);
 
 /**
  * @brief MSE streaming off
@@ -433,7 +433,7 @@ extern int mse_start_streaming(int index);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_stop_streaming(int index);
+int mse_stop_streaming(int index);
 
 /**
  * @brief MSE start transmission
@@ -447,11 +447,11 @@ extern int mse_stop_streaming(int index);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_start_transmission(int index,
-				  void *buffer,
-				  size_t buffer_size,
-				  void *priv,
-				  int (*mse_completion)(void *priv, int size));
+int mse_start_transmission(int index,
+			   void *buffer,
+			   size_t buffer_size,
+			   void *priv,
+			   int (*mse_completion)(void *priv, int size));
 
 /**
  * @brief register MCH to MSE
@@ -461,7 +461,7 @@ extern int mse_start_transmission(int index,
  * @retval 0 MCH table ID
  * @retval <0 Error
  */
-extern int mse_register_mch(struct mch_ops *ops);
+int mse_register_mch(struct mch_ops *ops);
 
 /**
  * @brief unregister MCH to MSE
@@ -471,7 +471,7 @@ extern int mse_register_mch(struct mch_ops *ops);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_unregister_mch(int index);
+int mse_unregister_mch(int index);
 
 /**
  * @brief register external PTP to MSE
@@ -481,7 +481,7 @@ extern int mse_unregister_mch(int index);
  * @retval 0 PTP table ID
  * @retval <0 Error
  */
-extern int mse_register_ptp(struct mse_ptp_ops *ops);
+int mse_register_ptp(struct mse_ptp_ops *ops);
 
 /**
  * @brief unregister external PTP to MSE
@@ -491,7 +491,7 @@ extern int mse_register_ptp(struct mse_ptp_ops *ops);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_unregister_ptp(int index);
+int mse_unregister_ptp(int index);
 
 #endif /* __KERNEL__ */
 #endif /* __RAVB_MSE_KERNEL_H__ */
