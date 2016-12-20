@@ -77,7 +77,7 @@
 #define MSE_EAVB_PACKET_LENGTH (1526)
 
 #define avb_compare_param_key(val, key) \
-	strncmp(val, key, strlen(key))
+	strncmp(val, key, MSE_NAME_LEN_MAX)
 
 struct mse_adapter_eavb {
 	bool used_f;
@@ -129,7 +129,7 @@ static enum AVB_DEVNAME mse_adapter_eavb_set_devname(const char *val)
 static int mse_adapter_eavb_open(char *name)
 {
 	int err, index;
-	enum AVB_DEVNAME id;
+	int id;
 	struct mse_adapter_eavb *eavb;
 	static struct eavb_option option = {
 		.id = EAVB_OPTIONID_BLOCKMODE,
@@ -140,7 +140,7 @@ static int mse_adapter_eavb_open(char *name)
 	id = mse_adapter_eavb_set_devname(name);
 	if (id < 0) {
 		pr_err("[%s] error unknown dev=%s\n", __func__, name);
-		id = AVB_DEVNAME_TX0;
+		return -EPERM;
 	}
 
 	pr_debug("[%s] dev=%s(%d)\n", __func__, name, id);
@@ -193,11 +193,12 @@ static int mse_adapter_eavb_release(int index)
 	pr_debug("[%s] index=%d\n", __func__, index);
 
 	err = ravb_streaming_release_stq_kernel(eavb->ravb.handle);
-	if (err)
+	if (err) {
 		pr_err("[%s] error release code=%d\n", __func__, err);
-
-	kfree(eavb->entry);
-	eavb->used_f = false;
+	} else {
+		kfree(eavb->entry);
+		eavb->used_f = false;
+	}
 
 	return err;
 }
@@ -226,9 +227,10 @@ static int mse_adapter_eavb_set_cbs_param(int index, struct eavb_cbsparam *cbs)
 	pr_debug(" loCredit          = %08x\n", txparam.cbs.loCredit);
 
 	err = eavb->ravb.set_txparam(eavb->ravb.handle, &txparam);
-	if (err)
+	if (err) {
 		pr_err("[%s] error %ld\n", __func__, err);
-
+		return err;
+	}
 	return 0;
 }
 
@@ -256,9 +258,10 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 		 rxparam.streamid[6], rxparam.streamid[7]);
 
 	err = eavb->ravb.set_rxparam(eavb->ravb.handle, &rxparam);
-	if (err)
+	if (err) {
 		pr_err("[%s] error %ld\n", __func__, err);
-
+		return err;
+	}
 	return 0;
 }
 
