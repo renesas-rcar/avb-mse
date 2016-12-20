@@ -101,14 +101,38 @@
 #define START_CODE        (0x00000001)
 
 enum NALU_TYPE {
-	NALU_TYPE_UNSPECIFIED    = 0,
-	NALU_TYPE_VCL_NON_IDR    = 1,
-	NALU_TYPE_VCL_PART_A     = 2,
-	NALU_TYPE_VCL_PART_B     = 3,
-	NALU_TYPE_VCL_PART_C     = 4,
-	NALU_TYPE_VCL_IDR_PIC    = 5,
-	NALU_TYPE_FU_A           = 28,
-	NALU_TYPE_UNSPECIFIED31  = 31,
+	NALU_TYPE_UNSPECIFIED0  = 0,
+	NALU_TYPE_VCL_NON_IDR   = 1,
+	NALU_TYPE_VCL_PART_A    = 2,
+	NALU_TYPE_VCL_PART_B    = 3,
+	NALU_TYPE_VCL_PART_C    = 4,
+	NALU_TYPE_VCL_IDR_PIC   = 5,
+	NALU_TYPE_SEI           = 6,
+	NALU_TYPE_SPS           = 7,
+	NALU_TYPE_PPS           = 8,
+	NALU_TYPE_AUD           = 9,
+	NALU_TYPE_END_OF_SEQ    = 10,
+	NALU_TYPE_END_OF_STREAM = 11,
+	NALU_TYPE_FILLER        = 12,
+	NALU_TYPE_SPS_EXT       = 13,
+	NALU_TYPE_PREFIX_NALU   = 14,
+	NALU_TYPE_SUBSET_SPS    = 15,
+	NALU_TYPE_RESERVED16    = 16,
+	NALU_TYPE_RESERVED17    = 17,
+	NALU_TYPE_RESERVED18    = 18,
+	NALU_TYPE_AUX           = 19,
+	NALU_TYPE_EXT           = 20,
+	NALU_TYPE_RESERVED21    = 21,
+	NALU_TYPE_RESERVED22    = 22,
+	NALU_TYPE_RESERVED23    = 23,
+	NALU_TYPE_STAP_A        = 24,
+	NALU_TYPE_STAP_B        = 25,
+	NALU_TYPE_MTAP16        = 26,
+	NALU_TYPE_MTAP24        = 27,
+	NALU_TYPE_FU_A          = 28,
+	NALU_TYPE_FU_B          = 29,
+	NALU_TYPE_UNSPECIFIED30 = 30,
+	NALU_TYPE_UNSPECIFIED31 = 31,
 };
 
 struct avtp_param {
@@ -133,10 +157,11 @@ struct cvf_h264_packetizer {
 	int additional_header_size;  /* additional .. defined IEEE1722 H.264 */
 	int payload_max;
 
+	unsigned char *vcl_start;
 	unsigned char *next_nal;
 	unsigned char fu_indicator;
 	unsigned char fu_header;
-	size_t avc_nal_header_offset;
+	size_t nal_header_offset;
 	unsigned char packet_template[ETHFRAMELEN_MAX];
 
 	struct mse_network_config net_config;
@@ -372,7 +397,8 @@ static inline bool is_single_nal(u8 fu_indicator)
 {
 	u8 nalu_type = fu_indicator & NALU_TYPE_MASK;
 
-	return nalu_type >= 1 && nalu_type <= 23;
+	return nalu_type > NALU_TYPE_UNSPECIFIED0 &&
+	       nalu_type < NALU_TYPE_STAP_A;
 }
 
 static int mse_packetizer_video_cvf_h264_packetize(int index,
@@ -426,7 +452,8 @@ static int mse_packetizer_video_cvf_h264_packetize(int index,
 			 nal_size);
 
 		switch (*cur_nal & NALU_TYPE_MASK) {
-		case NALU_TYPE_UNSPECIFIED:
+		case NALU_TYPE_UNSPECIFIED0:
+		case NALU_TYPE_UNSPECIFIED30:
 		case NALU_TYPE_UNSPECIFIED31:
 			pr_err("NAL format error\n");
 			/* invalid nal type, continue */
@@ -503,6 +530,50 @@ static int mse_packetizer_video_cvf_h264_packetize(int index,
 		return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
+static void set_nal_header(struct cvf_h264_packetizer *h264,
+			   unsigned char *buf,
+			   size_t data_len)
+{
+	u32 nal_header;
+
+	if (h264->f_start_code)
+		nal_header = htonl(START_CODE);
+	else
+		nal_header = htonl(data_len - h264->nal_header_offset -
+				   sizeof(u32));
+
+	memcpy(buf + h264->nal_header_offset, &nal_header, sizeof(u32));
+}
+
+static bool check_pic_end(struct cvf_h264_packetizer *h264,
+			  unsigned char *buf,
+			  u8 nalu_type)
+{
+	bool pic_end = false;
+
+	switch (nalu_type) {
+	case NALU_TYPE_VCL_NON_IDR:
+	case NALU_TYPE_VCL_PART_A:
+	case NALU_TYPE_VCL_PART_B:
+	case NALU_TYPE_VCL_PART_C:
+	case NALU_TYPE_VCL_IDR_PIC:
+		h264->is_vcl = true;
+		h264->vcl_start = buf + h264->nal_header_offset;
+		break;
+
+	case NALU_TYPE_AUD:
+		h264->is_vcl = false;
+		if (h264->vcl_start)
+			pic_end = true;
+		break;
+
+	default:
+		h264->is_vcl = false;
+	}
+
+	return pic_end;
+}
+
 static int mse_packetizer_video_cvf_h264_depacketize(int index,
 						     void *buffer,
 						     size_t buffer_size,
@@ -512,13 +583,17 @@ static int mse_packetizer_video_cvf_h264_depacketize(int index,
 						     size_t packet_size)
 {
 	struct cvf_h264_packetizer *h264;
-	u32 start_code = htonl(START_CODE);
+	u32 data_offset;
+	size_t data_len = *buffer_processed;
+	u8 nalu_nri;
+	u8 nalu_type;
 	int seq_num;
 	int payload_size;
+	int fu_size;
 	unsigned char *buf = (unsigned char *)buffer;
 	unsigned char *payload;
 	unsigned char fu_indicator, fu_header;
-	u32 avc_nal_header;
+	bool pic_end = false;
 
 	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
 		return -EPERM;
@@ -559,78 +634,84 @@ static int mse_packetizer_video_cvf_h264_depacketize(int index,
 	payload = (unsigned char *)packet + h264->header_size;
 
 	fu_indicator = payload[FU_ADDR_INDICATOR];
-
-	if ((fu_indicator & NALU_TYPE_MASK) == NALU_TYPE_FU_A)  {
+	nalu_nri = fu_indicator & FU_I_F_NRI_MASK;
+	if ((fu_indicator & NALU_TYPE_MASK) == NALU_TYPE_FU_A) {
+		data_offset = FU_HEADER_LEN;
+		fu_size = payload_size - data_offset;
 		fu_header = payload[FU_ADDR_HEADER];
-
+		nalu_type = fu_header & NALU_TYPE_MASK;
 		if (fu_header & FU_H_S_BIT) { /* start */
 			pr_debug("[%s] start size=%d\n",
 				 __func__, payload_size);
-			if (h264->f_start_code) {
-				/* start code & nal */
-				memcpy(buf + *buffer_processed,
-				       &start_code, sizeof(u32));
-			} else {
-				/* nal size & nal */
-				h264->avc_nal_header_offset =
-					*buffer_processed;
-			}
-			(*buffer_processed) += sizeof(u32);
-			*(buf + *buffer_processed)
-				= (fu_indicator & FU_I_F_NRI_MASK) |
-				(fu_header & NALU_TYPE_MASK);
-			(*buffer_processed)++;
-		}
-		if (payload_size > FU_HEADER_LEN) {
-			int fu_size = payload_size - FU_HEADER_LEN;
 
-			if (*buffer_processed + fu_size >= buffer_size) {
+			h264->nal_header_offset = data_len;
+
+			/* Increase data_len by 4 bytes for nal_header */
+			data_len += sizeof(u32);
+
+			*(buf + data_len) = nalu_nri | nalu_type;
+			data_len += sizeof(u8);
+		}
+		if (fu_size > 0) {
+			if (data_len + fu_size >= buffer_size) {
 				pr_err("[%s] buffer overrun %zu/%zu\n",
-				       __func__,
-				       *buffer_processed, buffer_size);
-				return -EPERM;
-			}
-			memcpy(buf + *buffer_processed,
-			       payload + FU_HEADER_LEN, fu_size);
+				       __func__, data_len, buffer_size);
 
-			(*buffer_processed) += fu_size;
+				set_nal_header(h264, buf, data_len);
+				(*buffer_processed) = data_len;
+				h264->vcl_start = NULL;
+
+				return MSE_PACKETIZE_STATUS_COMPLETE;
+			}
+
+			memcpy(buf + data_len, payload + data_offset, fu_size);
+			data_len += fu_size;
 		}
-		if (!h264->f_start_code && (fu_header & FU_H_E_BIT)) { /* end */
-			avc_nal_header = htonl(*buffer_processed -
-					       h264->avc_nal_header_offset -
-					       sizeof(u32));
-			memcpy(buf + h264->avc_nal_header_offset,
-			       &avc_nal_header, sizeof(u32));
+		if (fu_header & FU_H_E_BIT) { /* end */
+			set_nal_header(h264, buf, data_len);
+			if (h264->vcl_start)
+				pic_end = true;
+
+			if (!pic_end)
+				pic_end = check_pic_end(h264, buf, nalu_type);
 		}
 	} else if (is_single_nal(fu_indicator)) {
-		pr_debug("[%s] single nal %02x\n",
-			 __func__, fu_indicator);
-		if (h264->f_start_code) {
-			memcpy(buf + *buffer_processed,
-			       &start_code, sizeof(u32));
-		} else {
-			avc_nal_header = htonl(payload_size);
-			memcpy(buf + *buffer_processed,
-			       &avc_nal_header, sizeof(u32));
-		}
-		(*buffer_processed) += sizeof(u32);
-		*(buf + *buffer_processed)
-			= fu_indicator & (FU_I_F_NRI_MASK | NALU_TYPE_MASK);
-		memcpy(buf + *buffer_processed + 1,
-		       payload + 1, payload_size - 1);
-		*buffer_processed += payload_size;
+		pr_debug("[%s] single nal %02x\n", __func__, fu_indicator);
+
+		data_offset = sizeof(fu_indicator);
+		fu_size = payload_size - data_offset;
+		nalu_type = fu_indicator & NALU_TYPE_MASK;
+		h264->nal_header_offset = data_len;
+
+		/* Increase data_len by 4 bytes for nal_header */
+		data_len += sizeof(u32);
+
+		*(buf + data_len) = nalu_nri | nalu_type;
+		data_len += sizeof(u8);
+		memcpy(buf + data_len, payload + data_offset, fu_size);
+		data_len += fu_size;
+
+		pic_end = check_pic_end(h264, buf, nalu_type);
+		set_nal_header(h264, buf, fu_size);
 	} else {
 		pr_err("[%s] unkonwon nal unit = %02x\n",
 		       __func__, fu_indicator & NALU_TYPE_MASK);
 		return -EPERM;
 	}
 
+	*buffer_processed = data_len;
 	*timestamp = avtp_get_timestamp(packet);
 
 	avtp_set_sequence_num(packet, 0); /* for debug */
 
-	if (!(((unsigned char *)packet)[MBIT_ADDR] & MBIT_SET)) /* M bit */
+	if (((unsigned char *)packet)[MBIT_ADDR] & MBIT_SET) /* M bit */
+		pic_end = true;
+
+	if (!pic_end)
 		return MSE_PACKETIZE_STATUS_CONTINUE;
+
+	h264->vcl_start = NULL;
+	h264->is_vcl = false;
 
 	pr_debug("[%s] size = %zu\n", __func__, *buffer_processed);
 
