@@ -2428,7 +2428,7 @@ int mse_unregister_adapter_media(int index_media)
 
 	if (!mse->media_table[index_media].used_f) {
 		pr_err("[%s] %d was unregistered\n", __func__, index_media);
-		return 0;
+		return -EINVAL;
 	}
 
 	/* delete control device */
