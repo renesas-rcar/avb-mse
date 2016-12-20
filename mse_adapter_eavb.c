@@ -145,8 +145,8 @@ static int mse_adapter_eavb_open(char *name)
 
 	pr_debug("[%s] dev=%s(%d)\n", __func__, name, id);
 
-	for (index = 0; eavb_table[index].used_f &&
-	     index < ARRAY_SIZE(eavb_table); index++)
+	for (index = 0; index < ARRAY_SIZE(eavb_table) &&
+	     eavb_table[index].used_f; index++)
 		;
 
 	if (index >= ARRAY_SIZE(eavb_table))
