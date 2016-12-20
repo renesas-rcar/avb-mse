@@ -126,6 +126,7 @@ struct v4l2_adapter_device {
 	enum MSE_TYPE		type;
 	/* index for MSE instance */
 	int			index_instance;
+	bool                    f_opened;
 	bool			f_mse_open;
 };
 
@@ -299,12 +300,23 @@ static int mse_adapter_v4l2_fop_open(struct file *filp)
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
+	if (vadp_dev->f_opened) {
+		pr_err("[%s] v4l2 device is opened \n", __func__);
+		return -EPERM;
+	}
+
+	if (vadp_dev->f_mse_open) {
+		pr_err("[%s] using mse device \n", __func__);
+		return -EPERM;
+	}
+
 	err = v4l2_fh_open(filp);
 	if (err) {
 		pr_err("[%s]Failed v4l2_fh_open()\n", __func__);
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
+	vadp_dev->f_opened = true;
 	pr_debug("[%s]END\n", __func__);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
@@ -322,10 +334,17 @@ static int mse_adapter_v4l2_fop_release(struct file *filp)
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
-	err = try_mse_close(vadp_dev);
-	if (err) {
-		pr_err("[%s]Failed mse_close()\n", __func__);
-		return MSE_ADAPTER_V4L2_RTN_NG;
+	if (!vadp_dev->f_opened) {
+		pr_err("[%s] v4l2 device is not opened \n", __func__);
+		return -EPERM;
+	}
+
+	if (vadp_dev->f_mse_open) {
+		err = try_mse_close(vadp_dev);
+		if (err) {
+			pr_err("[%s]Failed mse_close()\n", __func__);
+			return MSE_ADAPTER_V4L2_RTN_NG;
+		}
 	}
 
 	err = v4l2_fh_release(filp);
@@ -334,6 +353,7 @@ static int mse_adapter_v4l2_fop_release(struct file *filp)
 		return MSE_ADAPTER_V4L2_RTN_NG;
 	}
 
+	vadp_dev->f_opened = false;
 	pr_debug("[%s]END\n", __func__);
 
 	return MSE_ADAPTER_V4L2_RTN_OK;
