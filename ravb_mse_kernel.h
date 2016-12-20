@@ -63,6 +63,7 @@
 #define __RAVB_MSE_KERNEL_H__
 #ifdef __KERNEL__
 
+#include <linux/ptp_clock.h>
 #include "ravb_eavb.h"
 
 /**
@@ -375,6 +376,17 @@ struct mch_ops {
 				  int *value);
 };
 
+/**
+ * @brief registered operations for external ptp
+ */
+struct mse_ptp_ops {
+	int (*open)(int *dev_id);
+	int (*close)(int dev_id);
+	int (*get_time)(int dev_id, struct ptp_clock_time *clock_time);
+	int (*get_timestamps)(int dev_id, int ch, int *count,
+			      struct ptp_clock_time timestamps[]);
+};
+
 static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
 {
 	streamid[0] = mac[0];
@@ -597,6 +609,26 @@ extern int mse_register_mch(struct mch_ops *ops);
  * @retval <0 Error
  */
 extern int mse_unregister_mch(int index);
+
+/**
+ * @brief register external PTP to MSE
+ *
+ * @param[in] ops
+ *
+ * @retval 0 PTP table ID
+ * @retval <0 Error
+ */
+extern int mse_register_ptp(struct mse_ptp_ops *ops);
+
+/**
+ * @brief unregister external PTP to MSE
+ *
+ * @param[in] index
+ *
+ * @retval 0 Success
+ * @retval <0 Error
+ */
+extern int mse_unregister_ptp(int index);
 
 #endif /* __KERNEL__ */
 #endif /* __RAVB_MSE_KERNEL_H__ */

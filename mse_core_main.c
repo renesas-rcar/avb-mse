@@ -100,6 +100,8 @@
 #define MSE_INSTANCE_MAX        (10)
 /** @brief MCH table max */
 #define MSE_MCH_MAX             (10)
+/** @brief PTP table max */
+#define MSE_PTP_MAX             (10)
 
 #define MSE_DMA_MAX_PACKET         (128)
 #define MSE_DMA_MAX_PACKET_SIZE    (1526)
@@ -247,6 +249,7 @@ struct mse_instance {
 
 	int ptp_dev_id;
 	int mch_dev_id;
+	int ptp_index;
 	int mch_index;
 	int mch_revovery_value;
 	bool f_match_ptp_clock;
@@ -363,6 +366,7 @@ struct mse_device {
 	struct mse_adapter_network_ops *network_table[MSE_ADAPTER_NETWORK_MAX];
 	struct mse_adapter media_table[MSE_ADAPTER_MEDIA_MAX];
 	struct mse_instance instance_table[MSE_INSTANCE_MAX];
+	struct mse_ptp_ops *ptp_table[MSE_PTP_MAX];
 	struct mch_ops *mch_table[MSE_MCH_MAX];
 };
 
@@ -967,6 +971,72 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 	return ret;
 }
 
+/*
+ * PTP related functions
+ */
+static struct mse_ptp_ops mse_ptp_ops_dummy = {
+	.open = mse_ptp_open_dummy,
+	.close = mse_ptp_close_dummy,
+	.get_time = mse_ptp_get_time_dummy,
+	.get_timestamps = mse_ptp_get_timestamps_dummy,
+};
+
+static int mse_ptp_get_first_index(void)
+{
+	int i;
+
+	for (i = 0; i < MSE_PTP_MAX; i++)
+		if (mse->ptp_table[i])
+			return i;
+
+	return -1; /* not found, use dummy ops */
+}
+
+static struct mse_ptp_ops *mse_ptp_find_ops(int index)
+{
+	if ((index < 0) || (index >= MSE_PTP_MAX))
+		return &mse_ptp_ops_dummy;
+	else
+		return mse->ptp_table[index];
+}
+
+static int mse_ptp_open(int index, int *dev_id)
+{
+	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
+
+	return p_ops->open(dev_id);
+}
+
+static int mse_ptp_close(int index, int dev_id)
+{
+	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
+
+	return p_ops->close(dev_id);
+}
+
+static int mse_ptp_get_time(int index,
+			    int dev_id,
+			    struct ptp_clock_time *clock_time)
+{
+	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
+
+	return p_ops->get_time(dev_id, clock_time);
+}
+
+static int mse_ptp_get_timestamps(int index,
+				  int dev_id,
+				  int ch,
+				  int *count,
+				  struct ptp_clock_time timestamps[])
+{
+	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
+
+	return p_ops->get_timestamps(dev_id,
+				     ch,
+				     count,
+				     timestamps);
+}
+
 static void mse_work_stream(struct work_struct *work)
 {
 	struct mse_instance *instance;
@@ -1378,7 +1448,8 @@ static void mse_work_timestamp(struct work_struct *work)
 		unsigned long flags;
 
 		/* get timestamps */
-		ret = mse_ptp_get_timestamps(instance->ptp_dev_id,
+		ret = mse_ptp_get_timestamps(instance->ptp_index,
+					     instance->ptp_dev_id,
 					     instance->ptp_clock_ch,
 					     &count,
 					     instance->timestamps);
@@ -1435,7 +1506,8 @@ static int tstamps_store_ptp_timestamp(struct mse_instance *instance)
 	unsigned long flags;
 
 	/* get now time form ptp and save */
-	mse_ptp_get_time(instance->ptp_dev_id, &now);
+	mse_ptp_get_time(instance->ptp_index,
+			 instance->ptp_dev_id, &now);
 
 	spin_lock_irqsave(&instance->lock_ques, flags);
 
@@ -1491,7 +1563,8 @@ static int create_avtp_timestamps(struct mse_instance *instance)
 		u64 t;
 
 		/* no data (ptp_clock + std_time) */
-		mse_ptp_get_time(instance->ptp_dev_id, &now);
+		mse_ptp_get_time(instance->ptp_index,
+				 instance->ptp_dev_id, &now);
 		t = (u64)now.sec * NSEC_SCALE + now.nsec;
 		for (i = 0; i < num_t; i++)
 			instance->avtp_timestamps[i] = t + d_t * i + offset;
@@ -1653,7 +1726,8 @@ static bool check_presentation_time(struct mse_instance *instance)
 		if (instance->temp_w < MSE_DECODE_BUFFER_NUM_START_MIN)
 			return false;
 	} else {
-		mse_ptp_get_time(instance->ptp_dev_id, &now);
+		mse_ptp_get_time(instance->ptp_index,
+				 instance->ptp_dev_id, &now);
 		t = (unsigned long)now.sec * NSEC_SCALE + now.nsec;
 		t_d = instance->timestamp - t;
 		if (t_d > UINT_MAX / 2 &&
@@ -2131,7 +2205,8 @@ static void mse_work_start_streaming(struct work_struct *work)
 	adapter = instance->media;
 
 	/* get timestamp(nsec) */
-	mse_ptp_get_time(instance->ptp_dev_id, &now);
+	mse_ptp_get_time(instance->ptp_index,
+			 instance->ptp_dev_id, &now);
 	instance->timestamp = (unsigned long)now.sec * NSEC_SCALE + now.nsec;
 	instance->timer_cnt = 0;
 
@@ -2164,7 +2239,8 @@ static void mse_work_start_streaming(struct work_struct *work)
 		if (instance->ptp_clock == 1) {
 			int count, i;
 			/* get timestamps */
-			ret = mse_ptp_get_timestamps(instance->ptp_dev_id,
+			ret = mse_ptp_get_timestamps(instance->ptp_index,
+						     instance->ptp_dev_id,
 						     instance->ptp_clock_ch,
 						     &count,
 						     instance->timestamps);
@@ -2920,7 +2996,7 @@ int mse_open(int index_media, bool tx)
 	struct mse_adapter *adapter;
 	struct mse_adapter_network_ops *network;
 	struct mse_packetizer_ops *packetizer;
-	int ret, i, j;
+	int ret, i, index;
 	char name[MSE_NAME_LEN_MAX];
 	char eavbname[MSE_NAME_LEN_MAX];
 	long link_speed;
@@ -2949,14 +3025,15 @@ int mse_open(int index_media, bool tx)
 		if (!mse->instance_table[i].used_f)
 			break;
 	}
+	index = i;
 
-	if (ARRAY_SIZE(mse->instance_table) <= i) {
+	if (ARRAY_SIZE(mse->instance_table) <= index) {
 		pr_err("[%s] resister instance full!\n", __func__);
 		mutex_unlock(&mse->mutex_open);
 		return -EBUSY;
 	}
 
-	instance = &mse->instance_table[i];
+	instance = &mse->instance_table[index];
 	instance->used_f = true;
 	spin_lock_init(&instance->lock_timer);
 	spin_lock_init(&instance->lock_ques);
@@ -2976,8 +3053,8 @@ int mse_open(int index_media, bool tx)
 	}
 
 	/* search network adapter name for configuration value */
-	for (j = 0; j < ARRAY_SIZE(mse->network_table); j++) {
-		network = mse->network_table[j];
+	for (i = 0; i < ARRAY_SIZE(mse->network_table); i++) {
+		network = mse->network_table[i];
 		if (!network)
 			continue;
 
@@ -2985,7 +3062,7 @@ int mse_open(int index_media, bool tx)
 			break;
 	}
 
-	if (j >= ARRAY_SIZE(mse->network_table)) {
+	if (i >= ARRAY_SIZE(mse->network_table)) {
 		pr_err("[%s] network adapter module is not loaded\n",
 		       __func__);
 		instance->used_f = false;
@@ -2993,7 +3070,7 @@ int mse_open(int index_media, bool tx)
 	}
 
 	pr_debug("[%s] network adapter index=%d name=%s\n",
-		 __func__, j, network->name);
+		 __func__, i, network->name);
 
 	/* get configuration value */
 	memset(name, 0, MSE_NAME_LEN_MAX);
@@ -3024,8 +3101,8 @@ int mse_open(int index_media, bool tx)
 	}
 
 	/* search packetizer name for configuration value */
-	for (j = 0; j < ARRAY_SIZE(mse->packetizer_table); j++) {
-		packetizer = mse->packetizer_table[j];
+	for (i = 0; i < ARRAY_SIZE(mse->packetizer_table); i++) {
+		packetizer = mse->packetizer_table[i];
 		if (!packetizer)
 			continue;
 
@@ -3033,16 +3110,17 @@ int mse_open(int index_media, bool tx)
 			break;
 	}
 
-	if (j >= ARRAY_SIZE(mse->packetizer_table)) {
+	if (i >= ARRAY_SIZE(mse->packetizer_table)) {
 		pr_err("[%s] packetizer not found\n", __func__);
 		instance->used_f = false;
 		return -ENODEV;
 	}
 	pr_debug("[%s] packetizer index=%d name=%s\n",
-		 __func__, j, packetizer->name);
+		 __func__, i, packetizer->name);
 
 	/* ptp open */
-	ret = mse_ptp_open(&instance->ptp_dev_id);
+	instance->ptp_index = mse_ptp_get_first_index();
+	ret = mse_ptp_open(instance->ptp_index, &instance->ptp_dev_id);
 	if (ret < 0) {
 		pr_err("[%s] cannot mse_ptp_open()\n", __func__);
 		instance->used_f = false;
@@ -3230,7 +3308,7 @@ int mse_open(int index_media, bool tx)
 	/* init paketizer */
 	instance->packetizer->init(instance->index_packetizer);
 
-	return i;
+	return index;
 }
 EXPORT_SYMBOL(mse_open);
 
@@ -3271,7 +3349,7 @@ int mse_close(int index)
 	/* release packetizer */
 	instance->packetizer->release(instance->index_packetizer);
 
-	ret = mse_ptp_close(instance->ptp_dev_id);
+	ret = mse_ptp_close(instance->ptp_index, instance->ptp_dev_id);
 	if (ret < 0)
 		pr_err("[%s] cannot mse_ptp_close()\n", __func__);
 
@@ -3425,6 +3503,55 @@ int mse_unregister_mch(int index)
 	return 0;
 }
 EXPORT_SYMBOL(mse_unregister_mch);
+
+int mse_register_ptp(struct mse_ptp_ops *ops)
+{
+	int i;
+	unsigned long flags;
+
+	if (!ops) {
+		pr_err("[%s] invalid argument. ops\n", __func__);
+		return -EINVAL;
+	}
+
+	spin_lock_irqsave(&mse->lock_tables, flags);
+
+	for (i = 0; i < (ARRAY_SIZE(mse->ptp_table) - 1); i++) {
+		if (!mse->ptp_table[i]) {
+			/* init table */
+			mse->ptp_table[i] = ops;
+			pr_debug("[%s] registered index=%d\n", __func__, i);
+			spin_unlock_irqrestore(&mse->lock_tables, flags);
+			return i;
+		}
+	}
+
+	pr_err("[%s] ops was unregistered\n", __func__);
+
+	spin_unlock_irqrestore(&mse->lock_tables, flags);
+
+	return -EBUSY;
+}
+EXPORT_SYMBOL(mse_register_ptp);
+
+int mse_unregister_ptp(int index)
+{
+	unsigned long flags;
+
+	if ((index < 0) || (index >= MSE_PTP_MAX)) {
+		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		return -EINVAL;
+	}
+
+	pr_debug("[%s] index=%d\n", __func__, index);
+
+	spin_lock_irqsave(&mse->lock_tables, flags);
+	mse->ptp_table[index] = NULL;
+	spin_unlock_irqrestore(&mse->lock_tables, flags);
+
+	return 0;
+}
+EXPORT_SYMBOL(mse_unregister_ptp);
 
 /*
  * initialize MSE API

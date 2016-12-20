@@ -59,21 +59,83 @@
  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */ /*************************************************************************/
 
+#undef pr_fmt
+#define pr_fmt(fmt) KBUILD_MODNAME "/" fmt
 
-#ifndef __MSE_PTP_H__
-#define __MSE_PTP_H__
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/slab.h>
+#include <linux/kernel.h>
+#include "ravb_mse_kernel.h"
 
+/* TODO: move to header */
+extern int mch_open(int *dev_id);
+extern int mch_close(int dev_id);
+extern int mch_send_timestamps(int dev_id,
+			       int time_rate_ns,
+			       int master_count,
+			       unsigned int master_timestamps[],
+			       int device_count,
+			       unsigned int device_timestamps[]);
+extern int mch_get_recovery_value(int dev_id, int *value);
 
-int mse_ptp_open_dummy(int *dev_id);
+extern int mch_ptp_open(int *dev_id);
+extern int mch_ptp_close(int dev_id);
+extern int mch_ptp_get_time(int dev_id,
+			    struct ptp_clock_time *clock_time);
+extern int mch_ptp_get_timestamps(int dev_id,
+				  int ch,
+				  int *count,
+				  struct ptp_clock_time timestamps[]);
 
-int mse_ptp_close_dummy(int dev_id);
+static struct mch_ops mch_mse_ops = {
+	.open = mch_open,
+	.close = mch_close,
+	.send_timestamps = mch_send_timestamps,
+	.get_recovery_value = mch_get_recovery_value,
+};
 
-int mse_ptp_get_time_dummy(int dev_id, struct ptp_clock_time *clock_time);
+static struct mse_ptp_ops ptp_mse_ops = {
+	.open = mch_ptp_open,
+	.close = mch_ptp_close,
+	.get_time = mch_ptp_get_time,
+	.get_timestamps = mch_ptp_get_timestamps,
+};
 
-int mse_ptp_get_timestamps_dummy(int dev_id,
-				 int ch,
-				 int *count,
-				 struct ptp_clock_time timestamps[]);
+static int mch_mse_if_instance_id;
+static int ptp_mse_if_instance_id;
 
-#endif /* __MSE_SYSFS_H__ */
+static int __init mse_adapter_mch_init(void)
+{
+	int inst_id;
 
+	pr_debug("[%s]\n", __func__);
+
+	inst_id = mse_register_mch(&mch_mse_ops);
+	if (inst_id < 0)
+		return inst_id;
+
+	mch_mse_if_instance_id = inst_id;
+
+	inst_id = mse_register_ptp(&ptp_mse_ops);
+	if (inst_id < 0)
+		return inst_id;
+
+	ptp_mse_if_instance_id = inst_id;
+
+	return 0;
+}
+
+static void __exit mse_adapter_mch_exit(void)
+{
+	pr_debug("[%s]\n", __func__);
+	mse_unregister_mch(mch_mse_if_instance_id);
+	mse_unregister_ptp(ptp_mse_if_instance_id);
+}
+
+module_init(mse_adapter_mch_init);
+module_exit(mse_adapter_mch_exit);
+
+MODULE_AUTHOR("Renesas Electronics Corporation");
+MODULE_DESCRIPTION("Renesas Media Streaming Engine");
+MODULE_LICENSE("Dual MIT/GPL");
