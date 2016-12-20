@@ -75,8 +75,13 @@
 
 #include "ravb_mse_kernel.h"
 
+/* TODO need expand device max */
 #define MSE_ADAPTER_ALSA_DEVICE_MAX	(2)
+#define MSE_ADAPTER_ALSA_DEVICE_DEFAULT	(2)
 #define MSE_ADAPTER_ALSA_PAGE_SIZE	(64 * 1024)
+
+static int alsa_devices = MSE_ADAPTER_ALSA_DEVICE_DEFAULT;
+module_param(alsa_devices, int, 0440);
 
 /*************/
 /* Structure */
@@ -582,7 +587,7 @@ struct snd_pcm_ops g_mse_adapter_alsa_capture_ops = {
 };
 
 /* Global variable */
-static struct alsa_device *g_rchip[MSE_ADAPTER_ALSA_DEVICE_MAX];
+static struct alsa_device **g_rchip;
 
 static int mse_adapter_alsa_free(struct alsa_device *chip)
 {
@@ -734,7 +739,23 @@ static int __init mse_adapter_alsa_init(void)
 
 	pr_debug("Start ALSA adapter\n");
 
-	for (i = 0; i < MSE_ADAPTER_ALSA_DEVICE_MAX; i++) {
+	if (alsa_devices > MSE_ADAPTER_ALSA_DEVICE_MAX) {
+		pr_err("[%s] Too many devices %d\n",
+		       __func__, alsa_devices);
+		return -EINVAL;
+	} else if (alsa_devices <= 0) {
+		pr_err("[%s] Invalid devices %d\n",
+		       __func__, alsa_devices);
+		return -EINVAL;
+	} else {
+		;
+	}
+
+	g_rchip = kcalloc(alsa_devices, sizeof(*g_rchip), GFP_KERNEL);
+	if (!g_rchip)
+		return -ENOMEM;
+
+	for (i = 0; i < alsa_devices; i++) {
 		err = mse_adapter_alsa_probe(i);
 		if (err < 0)
 			return err;
@@ -749,12 +770,14 @@ static void __exit mse_adapter_alsa_exit(void)
 
 	pr_debug("Stop ALSA adapter\n");
 
-	for (i = 0; i < MSE_ADAPTER_ALSA_DEVICE_MAX; i++) {
+	for (i = 0; i < alsa_devices; i++) {
 		err = snd_card_free(g_rchip[i]->card);
 		if (err < 0)
 			pr_err("[%s] Failed snd_card_free() err=%d\n",
 			       __func__, err);
 	}
+
+	kfree(g_rchip);
 }
 
 module_init(mse_adapter_alsa_init)
