@@ -74,8 +74,7 @@
 
 #define SEQNUM_INIT             (-1)
 
-#define ETHFRAMELEN_MAX_IPG     (ETHFRAMELEN_MAX + 12)
-#define AVTP_PAYLOAD_MAX        (ETHFRAMELEN_MAX - AVTP_IEC61883_4_PAYLOAD_OFFSET)
+#define ETH_IPG                 (12)
 #define AVTP_PAYLOAD_MIN        (AVTP_FRAME_SIZE_MIN - AVTP_IEC61883_4_PAYLOAD_OFFSET)
 
 #define AVTP_SOURCE_PACKET_SIZE (4 + 188) /* timestamp + TSP */
@@ -264,16 +263,24 @@ static int mse_packetizer_video_iec_calc_cbs(int index,
 	struct mpeg2ts_packetizer *mpeg2ts;
 	u64 value;
 	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
+	int payload_size, packet_size;
 
 	if (index >= ARRAY_SIZE(mpeg2ts_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	pr_err("[%s] index=%d\n", __func__, index);
 	mpeg2ts = &mpeg2ts_packetizer_table[index];
+	payload_size = mpeg2ts->mpeg2ts_config.tspackets_per_frame *
+		MSE_TS_PACKET_SIZE;
+	packet_size =
+		ETH_IPG + AVTP_IEC61883_4_PAYLOAD_OFFSET +
+		mpeg2ts->mpeg2ts_config.tspackets_per_frame *
+		AVTP_SOURCE_PACKET_SIZE;
+	pr_err("[%s] payload_size=%d packet_size=%d\n",
+	       __func__, payload_size, packet_size);
 
 	bandwidth_fraction_denominator =
-		(u64)mpeg2ts->net_config.port_transmit_rate /
-		TRANSMIT_RATE_BASE;
+		(u64)mpeg2ts->net_config.port_transmit_rate * (u64)payload_size;
 
 	if (!bandwidth_fraction_denominator) {
 		pr_err("[%s] Link speed %lu bps is not support\n",
@@ -282,13 +289,11 @@ static int mse_packetizer_video_iec_calc_cbs(int index,
 	}
 
 	bandwidth_fraction_numerator =
-		(u64)mpeg2ts->mpeg2ts_config.bitrate *
-		(u64)ETHFRAMELEN_MAX_IPG;
-
-	do_div(bandwidth_fraction_numerator, TRANSMIT_RATE_BASE);
+		(u64)mpeg2ts->mpeg2ts_config.bitrate * (u64)packet_size;
+	bandwidth_fraction_denominator >>= 8;
+	bandwidth_fraction_numerator >>= 8;
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
-	do_div(value, bandwidth_fraction_denominator);
-	do_div(value, AVTP_PAYLOAD_MAX);
+	value = div64_u64(value, bandwidth_fraction_denominator);
 	if (value > UINT_MAX) {
 		pr_err("[%s] cbs error value=0x%016llx\n", __func__, value);
 		return -EPERM;
@@ -296,16 +301,8 @@ static int mse_packetizer_video_iec_calc_cbs(int index,
 
 	cbs->bandwidthFraction = (u32)value;
 
-	value = (u64)USHRT_MAX * bandwidth_fraction_numerator;
-	do_div(value, bandwidth_fraction_denominator);
-	do_div(value, AVTP_PAYLOAD_MAX);
-	cbs->sendSlope = (u32)value;
-
-	value = (u64)USHRT_MAX * (bandwidth_fraction_denominator *
-			(u64)AVTP_PAYLOAD_MAX - bandwidth_fraction_numerator);
-	do_div(value, bandwidth_fraction_denominator);
-	do_div(value, AVTP_PAYLOAD_MAX);
-	cbs->idleSlope = (u32)value;
+	cbs->sendSlope = value >> 16;
+	cbs->idleSlope = USHRT_MAX - cbs->sendSlope;
 
 	return 0;
 }
