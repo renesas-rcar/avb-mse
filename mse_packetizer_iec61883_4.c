@@ -332,7 +332,7 @@ static int mse_packetizer_video_iec_packetize(int index,
 	bool is_top_on_buffer;
 
 	if (index >= ARRAY_SIZE(mpeg2ts_packetizer_table))
-		return -EINVAL;
+		return -EPERM;
 
 	mpeg2ts = &mpeg2ts_packetizer_table[index];
 	pr_debug("[%s] index=%d seqnum=%d process=%zu/%zu t=%d\n",
@@ -466,7 +466,7 @@ static int mse_packetizer_video_iec_depacketize(int index,
 	unsigned char *payload;
 
 	if (index >= ARRAY_SIZE(mpeg2ts_packetizer_table))
-		return -EINVAL;
+		return -EPERM;
 
 	mpeg2ts = &mpeg2ts_packetizer_table[index];
 	pr_debug("[%s] index=%d\n", __func__, index);
