@@ -2833,9 +2833,9 @@ int mse_open(int index_media, bool tx)
 	struct mse_adapter *adapter;
 	struct mse_adapter_network_ops *network;
 	struct mse_packetizer_ops *packetizer;
-	int ret, i, index;
+	int ret, i, index, err;
 	long link_speed;
-	struct mch_ops *m_ops;
+	struct mch_ops *m_ops = NULL;
 	unsigned long flags;
 	struct mse_network_device *network_device;
 	struct mse_packetizer *config_packetizer;
@@ -2895,9 +2895,9 @@ int mse_open(int index_media, bool tx)
 	if (i >= ARRAY_SIZE(mse->network_table)) {
 		pr_err("[%s] network adapter module is not loaded\n",
 		       __func__);
-		instance->used_f = false;
-		adapter->ro_config_f = false;
-		return -ENODEV;
+		err = -ENODEV;
+
+		goto error_network_adapter_not_found;
 	}
 
 	pr_debug("[%s] network adapter index=%d name=%s\n",
@@ -2932,9 +2932,9 @@ int mse_open(int index_media, bool tx)
 	ret = mse_ptp_open(instance->ptp_index, &instance->ptp_dev_id);
 	if (ret < 0) {
 		pr_err("[%s] cannot mse_ptp_open()\n", __func__);
-		instance->used_f = false;
-		adapter->ro_config_f = false;
-		return ret;
+		err = ret;
+
+		goto error_cannot_open_ptp;
 	}
 
 	/* open network adapter */
@@ -2947,9 +2947,9 @@ int mse_open(int index_media, bool tx)
 	if (ret < 0) {
 		pr_err("[%s] cannot open network adapter ret=%d\n",
 		       __func__, ret);
-		instance->used_f = false;
-		adapter->ro_config_f = false;
-		return ret;
+		err = ret;
+
+		goto error_cannot_open_network_adapter;
 	}
 	instance->index_network = ret;
 
@@ -2961,10 +2961,9 @@ int mse_open(int index_media, bool tx)
 	link_speed = network->get_link_speed(instance->index_network);
 	if (link_speed <= 0) {
 		pr_err("[%s] Link Down. ret=%ld\n", __func__, link_speed);
-		network->release(instance->index_network);
-		instance->used_f = false;
-		adapter->ro_config_f = false;
-		return -ENETDOWN;
+		err = -ENETDOWN;
+
+		goto error_network_interface_is_link_down;
 	}
 
 	pr_debug("[%s] Link Speed=%ldMbps\n", __func__, link_speed);
@@ -2976,10 +2975,9 @@ int mse_open(int index_media, bool tx)
 	ret = packetizer->open();
 	if (ret < 0) {
 		pr_err("[%s] cannot open packetizer ret=%d\n", __func__, ret);
-		network->release(instance->index_network);
-		instance->used_f = false;
-		adapter->ro_config_f = false;
-		return ret;
+		err = ret;
+
+		goto error_cannot_open_packetizer;
 	}
 	instance->index_packetizer = ret;
 
@@ -3046,14 +3044,18 @@ int mse_open(int index_media, bool tx)
 		}
 		if (instance->mch_index < 0) {
 			pr_err("[%s] mch is not registered.\n", __func__);
-			return -EINVAL;
+			err = -EINVAL;
+
+			goto error_mch_not_found;
 		}
 
 		ret = m_ops->open(&instance->mch_dev_id);
 		if (ret < 0) {
 			pr_err("[%s] mch open error(%d).\n", __func__, ret);
 			instance->mch_index = -1;
-			return -EINVAL;
+			err = -EINVAL;
+
+			goto error_mch_cannot_open;
 		}
 	}
 
@@ -3083,8 +3085,11 @@ int mse_open(int index_media, bool tx)
 
 		dev_name = network_device->device_name_tx_crf;
 		ret = instance->network->open(dev_name);
-		if (ret < 0)
-			return -EINVAL;
+		if (ret < 0) {
+			err = -EINVAL;
+
+			goto error_cannot_open_network_device_for_crf;
+		}
 
 		instance->crf_index_network = ret;
 
@@ -3098,8 +3103,11 @@ int mse_open(int index_media, bool tx)
 			&mse->pdev->dev,
 			MSE_DMA_MAX_PACKET,
 			MSE_DMA_MAX_PACKET_SIZE);
-		if (!instance->crf_packet_buffer)
-			return -EINVAL;
+		if (!instance->crf_packet_buffer) {
+			err = -EINVAL;
+
+			goto error_cannot_alloc_crf_packet_buffer;
+		}
 
 		/* prepare for send */
 		mse_packet_ctrl_send_prepare_packet(
@@ -3112,6 +3120,39 @@ int mse_open(int index_media, bool tx)
 	instance->packetizer->init(instance->index_packetizer);
 
 	return index;
+
+error_cannot_alloc_crf_packet_buffer:
+	network->release(instance->crf_index_network);
+
+error_cannot_open_network_device_for_crf:
+	mse_packet_ctrl_free(instance->packet_buffer);
+	if (m_ops)
+		m_ops->close(instance->mch_dev_id);
+
+error_mch_cannot_open:
+error_mch_not_found:
+	if (instance->wq_crf_packet)
+		destroy_workqueue(instance->wq_crf_packet);
+
+	destroy_workqueue(instance->wq_tstamp);
+	destroy_workqueue(instance->wq_packet);
+	destroy_workqueue(instance->wq_stream);
+
+	packetizer->release(instance->index_packetizer);
+
+error_cannot_open_packetizer:
+error_network_interface_is_link_down:
+	network->release(instance->index_network);
+
+error_cannot_open_network_adapter:
+	mse_ptp_close(instance->ptp_index, instance->ptp_dev_id);
+
+error_cannot_open_ptp:
+error_network_adapter_not_found:
+	instance->used_f = false;
+	adapter->ro_config_f = false;
+
+	return err;
 }
 EXPORT_SYMBOL(mse_open);
 
