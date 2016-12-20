@@ -212,6 +212,11 @@ static int mse_adapter_eavb_set_cbs_param(int index, struct eavb_cbsparam *cbs)
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
 
+	if (!cbs) {
+		pr_err("[%s] invalid argument. cbs\n", __func__);
+		return -EINVAL;
+	}
+
 	eavb = &eavb_table[index];
 
 	if (!eavb->used_f)
@@ -300,6 +305,11 @@ static int mse_adapter_eavb_send_prepare(int index,
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
 
+	if (!packets) {
+		pr_err("[%s] invalid argument. packets\n", __func__);
+		return -EINVAL;
+	}
+
 	eavb = &eavb_table[index];
 
 	if (!eavb->used_f)
@@ -337,6 +347,11 @@ static int mse_adapter_eavb_send(int index,
 
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
+
+	if (!packets) {
+		pr_err("[%s] invalid argument. packets\n", __func__);
+		return -EINVAL;
+	}
 
 	eavb = &eavb_table[index];
 
@@ -431,6 +446,11 @@ static int mse_adapter_eavb_receive_prepare(int index,
 
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
+
+	if (!packets) {
+		pr_err("[%s] invalid argument. packets\n", __func__);
+		return -EINVAL;
+	}
 
 	eavb = &eavb_table[index];
 
