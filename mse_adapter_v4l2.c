@@ -98,6 +98,11 @@
 #define NUM_BUFFERS 2
 #define NUM_PLANES  1
 
+#define MSE_ADAPTER_V4L2_MIN_VIDEO_SIZEIMAGE    (512 * 1024)
+#define MSE_ADAPTER_V4L2_MPEG2TS_BYTESPERLINE   (188 * 192)
+#define MSE_ADAPTER_V4L2_MPEG2TS_SIZEIMAGE \
+	(MSE_ADAPTER_V4L2_MPEG2TS_BYTESPERLINE * 14)
+
 /*************/
 /* Structure */
 /*************/
@@ -590,8 +595,18 @@ static int mse_adapter_v4l2_try_fmt_vid(struct file *filp,
 
 	get_fmt_sizes(vadp_fmt, vadp_fmt_size, fmt);
 
-	pix->bytesperline = pix->width * 2;
-	pix->sizeimage = pix->bytesperline * pix->height;
+	if (vadp_dev->type == MSE_TYPE_ADAPTER_VIDEO) {
+		pix->bytesperline = pix->width * 2;
+		pix->sizeimage = pix->bytesperline * pix->height;
+		if (pix->sizeimage < MSE_ADAPTER_V4L2_MIN_VIDEO_SIZEIMAGE) {
+			pix->sizeimage = rounddown(
+				MSE_ADAPTER_V4L2_MIN_VIDEO_SIZEIMAGE,
+				pix->bytesperline);
+		}
+	} else {
+		pix->bytesperline = MSE_ADAPTER_V4L2_MPEG2TS_BYTESPERLINE;
+		pix->sizeimage = MSE_ADAPTER_V4L2_MPEG2TS_SIZEIMAGE;
+	}
 
 	pr_debug("[%s]END\n", __func__);
 
