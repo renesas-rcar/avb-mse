@@ -274,6 +274,13 @@ static int mse_packetizer_video_iec_calc_cbs(int index,
 	bandwidth_fraction_denominator =
 		(u64)mpeg2ts->net_config.port_transmit_rate /
 		TRANSMIT_RATE_BASE;
+
+	if (!bandwidth_fraction_denominator) {
+		pr_err("[%s] Link speed %lu bps is not support\n",
+		       __func__, mpeg2ts->net_config.port_transmit_rate);
+		return -EPERM;
+	}
+
 	bandwidth_fraction_numerator =
 		(u64)mpeg2ts->mpeg2ts_config.bitrate *
 		(u64)ETHFRAMELEN_MAX_IPG;

@@ -293,6 +293,13 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 
 	bandwidth_fraction_denominator =
 		(u64)mjpg->net_config.port_transmit_rate / TRANSMIT_RATE_BASE;
+
+	if (!bandwidth_fraction_denominator) {
+		pr_err("[%s] Link speed %lu bps is not support\n",
+		       __func__, mjpg->net_config.port_transmit_rate);
+		return -EPERM;
+	}
+
 	bandwidth_fraction_numerator = (u64)mjpg->mjpeg_config.bitrate *
 						(u64)ETHFRAMELEN_MAX_IPG;
 	do_div(bandwidth_fraction_numerator, TRANSMIT_RATE_BASE);
