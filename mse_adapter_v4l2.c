@@ -738,7 +738,7 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 		err = mse_set_mpeg2ts_config(vadp_dev->index_instance,
 					     &config_ts);
 		if (err < 0) {
-			pr_err("[%s]Failed mse_get_mpeg2ts_config()\n",
+			pr_err("[%s]Failed mse_set_mpeg2ts_config()\n",
 			       __func__);
 			return MSE_ADAPTER_V4L2_RTN_NG;
 		}
@@ -795,7 +795,7 @@ static int mse_adapter_v4l2_g_parm(struct file *filp,
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
 	struct v4l2_fract *fract;
 
-	pr_err("[%s]START\n", __func__);
+	pr_debug("[%s]START\n", __func__);
 
 	if (!vadp_dev) {
 		pr_err("[%s]Failed video_drvdata()\n", __func__);
@@ -1085,8 +1085,8 @@ static int mse_adapter_v4l2_playback_callback(void *priv, int size)
 	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	if (!buf) {
-		pr_err("[%s]buf is NULL\n", __func__);
-		return MSE_ADAPTER_V4L2_RTN_NG;
+		pr_debug("[%s]buf is NULL\n", __func__);
+		return MSE_ADAPTER_V4L2_RTN_OK;
 	}
 
 	vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);

@@ -82,6 +82,11 @@
 #define MSE_INDEX_UNDEFINED	(-1)
 
 /**
+ * @brief ignore PCR PID on MPEG2-TS
+ */
+#define PCR_PID_IGNORE 0x2000
+
+/**
  * @brief Check Type of MSE
  */
 #define IS_MSE_TYPE_AUDIO(type) ((type) == MSE_TYPE_ADAPTER_AUDIO)
