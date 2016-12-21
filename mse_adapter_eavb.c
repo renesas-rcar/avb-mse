@@ -203,7 +203,7 @@ static int mse_adapter_eavb_release(int index)
 	return err;
 }
 
-static int mse_adapter_eavb_set_cbs_param(int index, struct eavb_cbsparam *cbs)
+static int mse_adapter_eavb_set_cbs_param(int index, struct mse_cbsparam *cbs)
 {
 	long err;
 	struct eavb_txparam txparam;
@@ -224,7 +224,12 @@ static int mse_adapter_eavb_set_cbs_param(int index, struct eavb_cbsparam *cbs)
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 
-	txparam.cbs = *cbs;
+	txparam.cbs.bandwidthFraction	= cbs->bandwidth_fraction;
+	txparam.cbs.idleSlope		= cbs->idle_slope;
+	txparam.cbs.sendSlope		= cbs->send_slope;
+	txparam.cbs.hiCredit		= cbs->hi_credit;
+	txparam.cbs.loCredit		= cbs->lo_credit;
+
 	pr_debug(" bandwidthFraction = %08x\n", txparam.cbs.bandwidthFraction);
 	pr_debug(" idleSlope         = %08x\n", txparam.cbs.idleSlope);
 	pr_debug(" sendSlope         = %08x\n", txparam.cbs.sendSlope);

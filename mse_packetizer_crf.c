@@ -70,6 +70,7 @@
 #include <linux/ptp_clock.h>
 
 #include "ravb_mse_kernel.h"
+#include "mse_core.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
 
@@ -243,7 +244,7 @@ static int mse_packetizer_crf_audio_set_audio_config(
 	param.priority              = crf->net_config.priority;
 	param.vid                   = crf->net_config.vlanid;
 	param.base_frequency        = crf->crf_audio_config.sample_rate;
-	param.timestamp_interval    = crf->crf_audio_config.bytes_per_frame;
+	param.timestamp_interval    = crf->crf_audio_config.samples_per_frame;
 
 	mse_packetizer_crf_audio_header_build(crf->packet_template, &param);
 
@@ -263,7 +264,7 @@ static int mse_packetizer_crf_audio_get_audio_info(
 }
 
 static int mse_packetizer_crf_audio_calc_cbs(int index,
-					     struct eavb_cbsparam *cbs)
+					     struct mse_cbsparam *cbs)
 {
 	struct crf_packetizer *crf;
 	u64 value;
@@ -296,20 +297,20 @@ static int mse_packetizer_crf_audio_calc_cbs(int index,
 		pr_err("[%s] cbs error(too big)\n", __func__);
 		return -EPERM;
 	}
-	cbs->bandwidthFraction = value;
+	cbs->bandwidth_fraction = value;
 
 	value = USHRT_MAX * bandwidth_fraction_numerator;
 	/* divide denominator into 2 */
 	do_div(value, crf->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	cbs->sendSlope = value;
+	cbs->send_slope = value;
 
 	value = USHRT_MAX * (bandwidth_fraction_denominator
 					 - bandwidth_fraction_numerator);
 	/* divide denominator into 2 */
 	do_div(value, crf->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	cbs->idleSlope = value;
+	cbs->idle_slope = value;
 
 	return 0;
 }

@@ -143,32 +143,32 @@ struct mjpeg_component {
 	u8 qt;
 };
 
-extern u8 jpeg_get_marker(const u8 *buf, size_t len, size_t *offset);
-extern int jpeg_read_sof(const u8 *buf,
-			 size_t len,
-			 size_t *offset,
-			 enum MJPEG_TYPE *type,
-			 u8 *max_comp,
-			 struct mjpeg_component comp[],
-			 struct mjpeg_quant_table qtable[],
-			 size_t qtable_num,
-			 s32 *height,
-			 s32 *width);
-extern int jpeg_read_dqt(const u8 *buf,
-			 size_t len,
-			 size_t *offset,
-			 struct mjpeg_quant_table qtable[]);
-extern int jpeg_read_dri(const u8 *buf,
-			 size_t len,
-			 size_t *offset,
-			 struct mjpeg_restart_header *rheader);
-extern u32 jpeg_make_header(enum MJPEG_TYPE type,
-			    u8 quant,
-			    u8 *p,
-			    u32 w,
-			    u32 h,
-			    u8 *qt,
-			    struct mjpeg_quant_header *qheader,
-			    u16 dri);
+u8 jpeg_get_marker(const u8 *buf, size_t len, size_t *offset);
+int jpeg_read_sof(const u8 *buf,
+		  size_t len,
+		  size_t *offset,
+		  enum MJPEG_TYPE *type,
+		  u8 *max_comp,
+		  struct mjpeg_component comp[],
+		  struct mjpeg_quant_table qtable[],
+		  size_t qtable_num,
+		  s32 *height,
+		  s32 *width);
+int jpeg_read_dqt(const u8 *buf,
+		  size_t len,
+		  size_t *offset,
+		  struct mjpeg_quant_table qtable[]);
+int jpeg_read_dri(const u8 *buf,
+		  size_t len,
+		  size_t *offset,
+		  struct mjpeg_restart_header *rheader);
+u32 jpeg_make_header(enum MJPEG_TYPE type,
+		     u8 quant,
+		     u8 *p,
+		     u32 w,
+		     u32 h,
+		     u8 *qt,
+		     struct mjpeg_quant_header *qheader,
+		     u16 dri);
 
 #endif /* __JPEG_H__ */

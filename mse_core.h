@@ -59,68 +59,122 @@
  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */ /*************************************************************************/
 
-#ifndef __MSE_PACKET_CTRL_H__
-#define __MSE_PACKET_CTRL_H__
+#ifndef __MSE_CORE_H__
+#define __MSE_CORE_H__
 
-struct mse_packet_ctrl {
-	struct device *dev;
-	int size;
-	int write_p;
-	int read_p;
-	int max_packet_size;
-	dma_addr_t dma_handle;
-	void *dma_vaddr;
-	struct mse_packet *packet_table;
+/**
+ * @brief audio stream information
+ */
+struct mse_audio_info {
+	int avtp_packet_size;
+	int sample_per_packet;
+	int frame_interval_time;
 };
 
-int mse_packet_ctrl_check_packet_remain(struct mse_packet_ctrl *dma);
-struct mse_packet_ctrl *mse_packet_ctrl_alloc(struct device *dev,
-					      int max_packet,
-					      int max_packet_size);
-void mse_packet_ctrl_free(struct mse_packet_ctrl *dma);
-int mse_packet_ctrl_make_packet(int index,
-				void *data,
-				size_t size,
-				int ptp_clock,
-				int *current_timestamp,
-				int timestamp_size,
-				unsigned int *timestamp,
-				struct mse_packet_ctrl *dma,
-				struct mse_packetizer_ops *ops,
-				size_t *processed);
-int mse_packet_ctrl_send_prepare_packet(int index,
-					struct mse_packet_ctrl *dma,
-					struct mse_adapter_network_ops *ops);
-int mse_packet_ctrl_send_packet(int index,
-				struct mse_packet_ctrl *dma,
-				struct mse_adapter_network_ops *ops);
-int mse_packet_ctrl_receive_prepare_packet(int index,
-					   struct mse_packet_ctrl *dma,
-					   struct mse_adapter_network_ops *ops);
-int mse_packet_ctrl_receive_packet(int index,
-				   int max_size,
-				   struct mse_packet_ctrl *dma,
-				   struct mse_adapter_network_ops *ops);
-int mse_packet_ctrl_receive_packet_crf(int index,
-				       int max_size,
-				       struct mse_packet_ctrl *dma,
-				       struct mse_adapter_network_ops *ops);
-int mse_packet_ctrl_take_out_packet(int index,
-				    void *data,
-				    size_t size,
-				    unsigned int *timestamps,
-				    int t_size,
-				    int *t_stored,
-				    struct mse_packet_ctrl *dma,
-				    struct mse_packetizer_ops *ops,
-				    size_t *processed);
-int mse_packet_ctrl_make_packet_crf(int index,
-				    struct ptp_clock_time *timestamps,
-				    int count,
-				    struct mse_packet_ctrl *dma);
-int mse_packet_ctrl_take_out_packet_crf(int index,
-					u64 *timestamp,
-					int size,
-					struct mse_packet_ctrl *dma);
+/**
+ * @brief packetizer status
+ */
+enum MSE_PACKETIZE_STATUS  {
+	MSE_PACKETIZE_STATUS_CONTINUE,
+	MSE_PACKETIZE_STATUS_COMPLETE,
+	MSE_PACKETIZE_STATUS_MAY_COMPLETE,
+	MSE_PACKETIZE_STATUS_NOT_ENOUGH,
+};
 
-#endif /* __MSE_PACKET_CTRL_H__ */
+/**
+ * @brief registered operations for packetizer
+ */
+struct mse_packetizer_ops {
+	/** @brief id */
+	enum MSE_PACKETIZER id;
+	/** @brief open function pointer */
+	int (*open)(void);
+	/** @brief release function pointer */
+	int (*release)(int index);
+	/** @brief init function pointer */
+	int (*init)(int index);
+	/** @brief set network config function pointer */
+	int (*set_network_config)(int index,
+				  struct mse_network_config *config);
+	/** @brief set audio config function pointer */
+	int (*set_audio_config)(int index, struct mse_audio_config *config);
+	/** @brief set video config function pointer */
+	int (*set_video_config)(int index, struct mse_video_config *config);
+	/** @brief set mpeg2ts config function pointer */
+	int (*set_mpeg2ts_config)(int index,
+				  struct mse_mpeg2ts_config *config);
+	/** @brief get audio info function pointer */
+	int (*get_audio_info)(int index, struct mse_audio_info *info);
+
+	/** @brief calc_cbs function pointer */
+	int (*calc_cbs)(int index, struct mse_cbsparam *cbs);
+
+	/** @brief packetize function pointer */
+	int (*packetize)(int index,
+			 void *packet,
+			 size_t *packet_size,
+			 void *buffer,
+			 size_t buffer_size,
+			 size_t *buffer_processed,
+			 unsigned int *timestamp);
+	/** @brief depacketize function pointer */
+	int (*depacketize)(int index,
+			   void *buffer,
+			   size_t buffer_size,
+			   size_t *buffer_processed,
+			   unsigned int *timestamp,
+			   void *packet,
+			   size_t packet_size);
+};
+
+static inline int mse_get_bit_depth(enum MSE_AUDIO_BIT bit_depth)
+{
+	switch (bit_depth) {
+	case MSE_AUDIO_BIT_16:
+		return 16;
+	case MSE_AUDIO_BIT_18:
+		return 18;
+	case MSE_AUDIO_BIT_20:
+		return 20;
+	case MSE_AUDIO_BIT_24:
+		return 24;
+	case MSE_AUDIO_BIT_32:
+		return 32;
+	default:
+		return 0;
+	}
+}
+
+static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
+{
+	streamid[0] = mac[0];
+	streamid[1] = mac[1];
+	streamid[2] = mac[2];
+	streamid[3] = mac[3];
+	streamid[4] = mac[4];
+	streamid[5] = mac[5];
+	streamid[6] = (u8)((uid & 0xff00) >> 8);
+	streamid[7] = (u8)((uid & 0x00ff));
+}
+
+/**
+ * @brief register packetizer to MSE
+ *
+ * @param[in] ops packetizer operations
+ *
+ * @retval 0 MSE adapter ID
+ * @retval <0 Error
+ */
+int mse_register_packetizer(struct mse_packetizer_ops *ops);
+
+/**
+ * @brief unregister packetizer from MSE
+ *
+ * @param[in] index MSE adapter ID
+ *
+ * @retval 0 Success
+ * @retval <0 Error
+ */
+int mse_unregister_packetizer(int index);
+
+#endif /* __MSE_CORE_H__ */

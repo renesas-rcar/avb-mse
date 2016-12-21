@@ -65,26 +65,11 @@
 
 #include <linux/ptp_clock.h>
 #include "ravb_mse.h"
-#include "ravb_eavb.h"
-
-/**
- * @brief Resistered adapter name length
- */
-#define MSE_NAME_LEN_MAX	(32)
-/**
- * @brief MAC address length
- */
-#define MSE_MAC_LEN_MAX		(6)
 
 /**
  * @brief Unresistered device index
  */
 #define MSE_INDEX_UNDEFINED	(-1)
-
-/**
- * @brief ignore PCR PID on MPEG2-TS
- */
-#define PCR_PID_IGNORE 0x2000
 
 /**
  * @brief Check Type of MSE
@@ -131,6 +116,9 @@ struct mse_network_config {
 	/* if need, add more parameters */
 };
 
+/**
+ * @brief audio stream configuration
+ */
 enum MSE_AUDIO_BIT {
 	MSE_AUDIO_BIT_INVALID,
 	MSE_AUDIO_BIT_16,
@@ -140,27 +128,6 @@ enum MSE_AUDIO_BIT {
 	MSE_AUDIO_BIT_32
 };
 
-static inline int mse_get_bit_depth(enum MSE_AUDIO_BIT bit_depth)
-{
-	switch (bit_depth) {
-	case MSE_AUDIO_BIT_16:
-		return 16;
-	case MSE_AUDIO_BIT_18:
-		return 18;
-	case MSE_AUDIO_BIT_20:
-		return 20;
-	case MSE_AUDIO_BIT_24:
-		return 24;
-	case MSE_AUDIO_BIT_32:
-		return 32;
-	default:
-		return 0;
-	}
-}
-
-/**
- * @brief aduio stream configuration
- */
 struct mse_audio_config {
 	/** @brief sampling rate */
 	int sample_rate;
@@ -174,22 +141,39 @@ struct mse_audio_config {
 	enum MSE_AUDIO_BIT sample_bit_depth;
 	/** @brief sample endian */
 	bool is_big_endian;
-	/** @brief bytes per frame */
-	int bytes_per_frame;
 	/** @brief samples per frame */
 	int samples_per_frame;
 	/* if need, add more parameters */
 };
 
 /**
- * @brief aduio stream information
+ * @brief video stream configuration
  */
-struct mse_audio_info {
-	int avtp_packet_size;
-	int sample_per_packet;
-	int frame_interval_time;
+enum MSE_VIDEO_FORMAT_TYPE {
+	MSE_VIDEO_FORMAT_H264_BYTE_STREAM,
+	MSE_VIDEO_FORMAT_H264_AVC,
+	MSE_VIDEO_FORMAT_MJPEG
 };
 
+struct mse_video_config {
+	/** @brief video format */
+	enum MSE_VIDEO_FORMAT_TYPE format;
+	/** @brief bitrate [bps] */
+	int bitrate;
+	/** @brief framerate */
+	struct {
+		/** @brief numerator */
+		int numerator;
+		/** @brief denominotor  */
+		int denominator;
+	} fps;
+	/** @brief bytes per frame is data size in 1 ether frame */
+	int bytes_per_frame;
+};
+
+/**
+ * @brief mpeg2ts stream configuration
+ */
 enum MSE_MPEG2TS_TYPE {
 	/** @brief TS */
 	MSE_MPEG2TS_TYPE_TS,
@@ -197,42 +181,6 @@ enum MSE_MPEG2TS_TYPE {
 	MSE_MPEG2TS_TYPE_M2TS,
 };
 
-enum MSE_VIDEO_FORMAT_TYPE {
-	MSE_VIDEO_FORMAT_H264_BYTE_STREAM,
-	MSE_VIDEO_FORMAT_H264_AVC,
-	MSE_VIDEO_FORMAT_MJPEG
-};
-
-/**
- * @brief video stream configuration
- */
-struct mse_video_config {
-	/** @brief video format */
-	enum MSE_VIDEO_FORMAT_TYPE format;
-	/** @brief bitrate [Mbps] */
-	int bitrate;
-	/** @brief framerate */
-	struct {
-		/** @brief seconds [sec]  */
-		int n;
-		/** @brief frame number */
-		int m;
-	} fps;
-	/** @brief height of the frame */
-	int height;
-	/** @brief width of the frame */
-	int width;
-	/** @brief color_space */
-	int color_space;
-	/** @brief interlaced */
-	int interlaced;
-	/** @brief bytes per frame is data size in 1 ether frame */
-	int bytes_per_frame;
-};
-
-/**
- * @brief video stream configuration
- */
 struct mse_mpeg2ts_config {
 	/** @brief bitrate [Mbps] */
 	int bitrate;
@@ -257,6 +205,17 @@ struct mse_packet {
 };
 
 /**
+ * @brief CBS parameters
+ */
+struct mse_cbsparam {
+	uint32_t bandwidth_fraction;
+	uint32_t idle_slope;
+	uint32_t send_slope;
+	uint32_t hi_credit;
+	uint32_t lo_credit;
+};
+
+/**
  * @brief registered operations for network adapter
  */
 struct mse_adapter_network_ops {
@@ -271,7 +230,7 @@ struct mse_adapter_network_ops {
 	/** @brief set_option function pointer */
 	int (*set_option)(int index);
 	/** @brief set CBS config function pointer */
-	int (*set_cbs_param)(int index, struct eavb_cbsparam *cbs);
+	int (*set_cbs_param)(int index, struct mse_cbsparam *cbs);
 	/** @brief set Stream ID config function pointer */
 	int (*set_streamid)(int index, u8 streamid[8]);
 	/** @brief send prepare function pointer */
@@ -294,62 +253,6 @@ struct mse_adapter_network_ops {
 	int (*cancel)(int index);
 	/** @brief get link speed function pointer */
 	int (*get_link_speed)(int index);
-};
-
-/**
- * @brief packetizer status
- */
-enum MSE_PACKETIZE_STATUS  {
-	MSE_PACKETIZE_STATUS_CONTINUE,
-	MSE_PACKETIZE_STATUS_COMPLETE,
-	MSE_PACKETIZE_STATUS_MAY_COMPLETE,
-	MSE_PACKETIZE_STATUS_NOT_ENOUGH,
-};
-
-/**
- * @brief registered operations for packetizer
- */
-struct mse_packetizer_ops {
-	/** @brief id */
-	enum MSE_PACKETIZER id;
-	/** @brief open function pointer */
-	int (*open)(void);
-	/** @brief release function pointer */
-	int (*release)(int index);
-	/** @brief init function pointer */
-	int (*init)(int index);
-	/** @brief set network config function pointer */
-	int (*set_network_config)(int index,
-				  struct mse_network_config *config);
-	/** @brief set audio config function pointer */
-	int (*set_audio_config)(int index, struct mse_audio_config *config);
-	/** @brief set video config function pointer */
-	int (*set_video_config)(int index, struct mse_video_config *config);
-	/** @brief set mpeg2ts config function pointer */
-	int (*set_mpeg2ts_config)(int index,
-				  struct mse_mpeg2ts_config *config);
-	/** @brief get audio info function pointer */
-	int (*get_audio_info)(int index, struct mse_audio_info *info);
-
-	/** @brief calc_cbs function pointer */
-	int (*calc_cbs)(int index, struct eavb_cbsparam *cbs);
-
-	/** @brief packetize function pointer */
-	int (*packetize)(int index,
-			 void *packet,
-			 size_t *packet_size,
-			 void *buffer,
-			 size_t buffer_size,
-			 size_t *buffer_processed,
-			 unsigned int *timestamp);
-	/** @brief depacketize function pointer */
-	int (*depacketize)(int index,
-			   void *buffer,
-			   size_t buffer_size,
-			   size_t *buffer_processed,
-			   unsigned int *timestamp,
-			   void *packet,
-			   size_t packet_size);
 };
 
 /**
@@ -379,18 +282,6 @@ struct mse_ptp_ops {
 			      struct ptp_clock_time timestamps[]);
 };
 
-static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
-{
-	streamid[0] = mac[0];
-	streamid[1] = mac[1];
-	streamid[2] = mac[2];
-	streamid[3] = mac[3];
-	streamid[4] = mac[4];
-	streamid[5] = mac[5];
-	streamid[6] = (u8)((uid & 0xff00) >> 8);
-	streamid[7] = (u8)((uid & 0x00ff));
-}
-
 /**
  * @brief register media adapter to MSE
  *
@@ -401,9 +292,9 @@ static inline void mse_make_streamid(u8 *streamid, char *mac, int uid)
  * @retval >=0 MSE adapter ID
  * @retval <0 Error
  */
-extern int mse_register_adapter_media(enum MSE_TYPE type,
-				      char *name,
-				      char *device_name);
+int mse_register_adapter_media(enum MSE_TYPE type,
+			       char *name,
+			       char *device_name);
 
 /**
  * @brief unregister media adapter from MSE
@@ -413,7 +304,7 @@ extern int mse_register_adapter_media(enum MSE_TYPE type,
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_unregister_adapter_media(int index_media);
+int mse_unregister_adapter_media(int index_media);
 
 /**
  * @brief register network adapter to MSE
@@ -423,7 +314,7 @@ extern int mse_unregister_adapter_media(int index_media);
  * @retval 0 MSE instance ID
  * @retval <0 Error
  */
-extern int mse_register_adapter_network(struct mse_adapter_network_ops *ops);
+int mse_register_adapter_network(struct mse_adapter_network_ops *ops);
 
 /**
  * @brief unregister network adapter from MSE
@@ -433,27 +324,7 @@ extern int mse_register_adapter_network(struct mse_adapter_network_ops *ops);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_unregister_adapter_network(int index);
-
-/**
- * @brief register packetizer to MSE
- *
- * @param[in] ops packetizer operations
- *
- * @retval 0 MSE adapter ID
- * @retval <0 Error
- */
-extern int mse_register_packetizer(struct mse_packetizer_ops *ops);
-
-/**
- * @brief unregister packetizer from MSE
- *
- * @param[in] index MSE adapter ID
- *
- * @retval 0 Success
- * @retval <0 Error
- */
-extern int mse_unregister_packetizer(int index);
+int mse_unregister_adapter_network(int index);
 
 /**
  * @brief get audio configuration
@@ -464,7 +335,7 @@ extern int mse_unregister_packetizer(int index);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_get_audio_config(int index, struct mse_audio_config *config);
+int mse_get_audio_config(int index, struct mse_audio_config *config);
 
 /**
  * @brief set audio configuration
@@ -475,7 +346,7 @@ extern int mse_get_audio_config(int index, struct mse_audio_config *config);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_set_audio_config(int index, struct mse_audio_config *config);
+int mse_set_audio_config(int index, struct mse_audio_config *config);
 
 /**
  * @brief get video configuration
@@ -486,7 +357,7 @@ extern int mse_set_audio_config(int index, struct mse_audio_config *config);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_get_video_config(int index, struct mse_video_config *config);
+int mse_get_video_config(int index, struct mse_video_config *config);
 
 /**
  * @brief set video configuration
@@ -497,7 +368,7 @@ extern int mse_get_video_config(int index, struct mse_video_config *config);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_set_video_config(int index, struct mse_video_config *config);
+int mse_set_video_config(int index, struct mse_video_config *config);
 
 /**
  * @brief get mpeg2ts configuration
@@ -508,8 +379,8 @@ extern int mse_set_video_config(int index, struct mse_video_config *config);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_get_mpeg2ts_config(int index,
-				  struct mse_mpeg2ts_config *config);
+int mse_get_mpeg2ts_config(int index,
+			   struct mse_mpeg2ts_config *config);
 
 /**
  * @brief set mpeg2ts configuration
@@ -520,8 +391,8 @@ extern int mse_get_mpeg2ts_config(int index,
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_set_mpeg2ts_config(int index,
-				  struct mse_mpeg2ts_config *config);
+int mse_set_mpeg2ts_config(int index,
+			   struct mse_mpeg2ts_config *config);
 
 /**
  * @brief MSE open
@@ -532,7 +403,7 @@ extern int mse_set_mpeg2ts_config(int index,
  * @retval >=0 instance ID of MSE
  * @retval <0 Error
  */
-extern int mse_open(int index_media, bool tx);
+int mse_open(int index_media, bool tx);
 
 /**
  * @brief MSE close
@@ -542,7 +413,7 @@ extern int mse_open(int index_media, bool tx);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_close(int index);
+int mse_close(int index);
 
 /**
  * @brief MSE streaming on
@@ -552,7 +423,7 @@ extern int mse_close(int index);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_start_streaming(int index);
+int mse_start_streaming(int index);
 
 /**
  * @brief MSE streaming off
@@ -562,7 +433,7 @@ extern int mse_start_streaming(int index);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_stop_streaming(int index);
+int mse_stop_streaming(int index);
 
 /**
  * @brief MSE start transmission
@@ -576,11 +447,11 @@ extern int mse_stop_streaming(int index);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_start_transmission(int index,
-				  void *buffer,
-				  size_t buffer_size,
-				  void *priv,
-				  int (*mse_completion)(void *priv, int size));
+int mse_start_transmission(int index,
+			   void *buffer,
+			   size_t buffer_size,
+			   void *priv,
+			   int (*mse_completion)(void *priv, int size));
 
 /**
  * @brief register MCH to MSE
@@ -590,7 +461,7 @@ extern int mse_start_transmission(int index,
  * @retval 0 MCH table ID
  * @retval <0 Error
  */
-extern int mse_register_mch(struct mch_ops *ops);
+int mse_register_mch(struct mch_ops *ops);
 
 /**
  * @brief unregister MCH to MSE
@@ -600,7 +471,7 @@ extern int mse_register_mch(struct mch_ops *ops);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_unregister_mch(int index);
+int mse_unregister_mch(int index);
 
 /**
  * @brief register external PTP to MSE
@@ -610,7 +481,7 @@ extern int mse_unregister_mch(int index);
  * @retval 0 PTP table ID
  * @retval <0 Error
  */
-extern int mse_register_ptp(struct mse_ptp_ops *ops);
+int mse_register_ptp(struct mse_ptp_ops *ops);
 
 /**
  * @brief unregister external PTP to MSE
@@ -620,7 +491,7 @@ extern int mse_register_ptp(struct mse_ptp_ops *ops);
  * @retval 0 Success
  * @retval <0 Error
  */
-extern int mse_unregister_ptp(int index);
+int mse_unregister_ptp(int index);
 
 #endif /* __KERNEL__ */
 #endif /* __RAVB_MSE_KERNEL_H__ */

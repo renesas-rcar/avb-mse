@@ -68,7 +68,9 @@
 #include <linux/kernel.h>
 #include <uapi/linux/if_ether.h>
 #include <linux/math64.h>
+
 #include "ravb_mse_kernel.h"
+#include "mse_core.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
 
@@ -258,7 +260,7 @@ static int mse_packetizer_video_iec_set_mpeg2ts_config(
 }
 
 static int mse_packetizer_video_iec_calc_cbs(int index,
-					     struct eavb_cbsparam *cbs)
+					     struct mse_cbsparam *cbs)
 {
 	struct mpeg2ts_packetizer *mpeg2ts;
 	u64 value;
@@ -299,10 +301,10 @@ static int mse_packetizer_video_iec_calc_cbs(int index,
 		return -EPERM;
 	}
 
-	cbs->bandwidthFraction = (u32)value;
+	cbs->bandwidth_fraction = (u32)value;
 
-	cbs->sendSlope = value >> 16;
-	cbs->idleSlope = USHRT_MAX - cbs->sendSlope;
+	cbs->send_slope = value >> 16;
+	cbs->idle_slope = USHRT_MAX - cbs->send_slope;
 
 	return 0;
 }

@@ -63,6 +63,7 @@
 #include <linux/kernel.h>
 
 #include "ravb_mse_kernel.h"
+#include "mse_core.h"
 #include "mse_packetizer.h"
 
 /* init function array */

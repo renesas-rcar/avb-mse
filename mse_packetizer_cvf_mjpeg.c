@@ -69,6 +69,7 @@
 #include <uapi/linux/if_ether.h>
 
 #include "ravb_mse_kernel.h"
+#include "mse_core.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
 #include "jpeg.h"
@@ -108,6 +109,8 @@ struct cvf_mjpeg_packetizer {
 	enum MJPEG_TYPE type;
 	u8 quant;
 	u8 max_comp;
+	int width;
+	int height;
 
 	size_t eoi_offset;
 	size_t jpeg_offset;
@@ -279,7 +282,7 @@ static int mse_packetizer_cvf_mjpeg_set_video_config(
 }
 
 static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
-					     struct eavb_cbsparam *cbs)
+					     struct mse_cbsparam *cbs)
 {
 	struct cvf_mjpeg_packetizer *mjpg;
 	u64 value;
@@ -311,18 +314,18 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 		return -EPERM;
 	}
 
-	cbs->bandwidthFraction = (u32)value;
+	cbs->bandwidth_fraction = (u32)value;
 
 	value = (u64)USHRT_MAX * bandwidth_fraction_numerator;
 	do_div(value, bandwidth_fraction_denominator);
 	do_div(value, AVTP_PAYLOAD_MAX);
-	cbs->sendSlope = (u32)value;
+	cbs->send_slope = (u32)value;
 
 	value = (u64)USHRT_MAX * (bandwidth_fraction_denominator *
 			(u64)AVTP_PAYLOAD_MAX - bandwidth_fraction_numerator);
 	do_div(value, bandwidth_fraction_denominator);
 	do_div(value, AVTP_PAYLOAD_MAX);
-	cbs->idleSlope = (u32)value;
+	cbs->idle_slope = (u32)value;
 
 	return 0;
 }
@@ -336,7 +339,6 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 					      unsigned int *timestamp)
 {
 	struct cvf_mjpeg_packetizer *mjpg;
-	struct mse_video_config *cnf;
 	struct mjpeg_restart_header rheader;
 	struct mjpeg_quant_header qheader;
 	struct mjpeg_quant_table qtable[JPEG_QUANT_NUM];
@@ -356,7 +358,6 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 		 __func__, index, mjpg->send_seq_num, *buffer_processed,
 		 buffer_size, *timestamp);
 
-	cnf = &mjpg->mjpeg_config;
 	buf = (u8 *)(buffer + *buffer_processed);
 	data_len = buffer_size - *buffer_processed;
 	memset(qtable, 0, sizeof(qtable));
@@ -384,8 +385,8 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 					    comp,
 					    qtable,
 					    ARRAY_SIZE(qtable),
-					    &cnf->height,
-					    &cnf->width);
+					    &mjpg->height,
+					    &mjpg->width);
 			if (ret) {
 				pr_err("[%s] invalid SOF0\n", __func__);
 				goto header_error;
@@ -485,8 +486,8 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	avtp_set_cvf_mjpeg_offset(packet, mjpg->jpeg_offset);
 	avtp_set_cvf_mjpeg_type(packet, mjpg->type);
 	avtp_set_cvf_mjpeg_q(packet, mjpg->quant);
-	avtp_set_cvf_mjpeg_width(packet, cnf->width);
-	avtp_set_cvf_mjpeg_height(packet, cnf->height);
+	avtp_set_cvf_mjpeg_width(packet, mjpg->width);
+	avtp_set_cvf_mjpeg_height(packet, mjpg->height);
 
 	payload = packet + AVTP_CVF_MJPEG_PAYLOAD_OFFSET;
 

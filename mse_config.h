@@ -84,55 +84,49 @@ struct mse_config {
 	struct mse_delay_time delay_time;
 };
 
-extern int mse_dev_to_index(struct device *dev);
-extern bool mse_dev_is_busy(int index);
-extern struct mse_config *mse_get_dev_config(int index);
-extern int mse_config_get_info(int index, struct mse_info *data);
-extern int mse_config_set_network_device(int index,
-					 struct mse_network_device *data);
-extern int mse_config_get_network_device(int index,
-					 struct mse_network_device *data);
-extern int mse_config_set_packetizer(int index, struct mse_packetizer *data);
-extern int mse_config_get_packetizer(int index, struct mse_packetizer *data);
-extern int mse_config_set_avtp_tx_param(int index,
-					struct mse_avtp_tx_param *data);
-extern int mse_config_get_avtp_tx_param(int index,
-					struct mse_avtp_tx_param *data);
-extern int mse_config_set_avtp_rx_param(int index,
-					struct mse_avtp_rx_param *data);
-extern int mse_config_get_avtp_rx_param(int index,
-					struct mse_avtp_rx_param *data);
-extern int mse_config_set_media_audio_config(
-					int index,
-					struct mse_media_audio_config *data);
-extern int mse_config_get_media_audio_config(
-					int index,
-					struct mse_media_audio_config *data);
-extern int mse_config_set_media_video_config(
-					int index,
-					struct mse_media_video_config *data);
-extern int mse_config_get_media_video_config(
-					int index,
-					struct mse_media_video_config *data);
-extern int mse_config_set_media_mpeg2ts_config(
-					int index,
+int mse_dev_to_index(struct device *dev);
+bool mse_dev_is_busy(int index);
+struct mse_config *mse_get_dev_config(int index);
+int mse_config_get_info(int index, struct mse_info *data);
+int mse_config_set_network_device(int index,
+				  struct mse_network_device *data);
+int mse_config_get_network_device(int index,
+				  struct mse_network_device *data);
+int mse_config_set_packetizer(int index, struct mse_packetizer *data);
+int mse_config_get_packetizer(int index, struct mse_packetizer *data);
+int mse_config_set_avtp_tx_param(int index,
+				 struct mse_avtp_tx_param *data);
+int mse_config_get_avtp_tx_param(int index,
+				 struct mse_avtp_tx_param *data);
+int mse_config_set_avtp_rx_param(int index,
+				 struct mse_avtp_rx_param *data);
+int mse_config_get_avtp_rx_param(int index,
+				 struct mse_avtp_rx_param *data);
+int mse_config_set_media_audio_config(int index,
+				      struct mse_media_audio_config *data);
+int mse_config_get_media_audio_config(int index,
+				      struct mse_media_audio_config *data);
+int mse_config_set_media_video_config(int index,
+				      struct mse_media_video_config *data);
+int mse_config_get_media_video_config(int index,
+				      struct mse_media_video_config *data);
+int mse_config_set_media_mpeg2ts_config(int index,
 					struct mse_media_mpeg2ts_config *data);
-extern int mse_config_get_media_mpeg2ts_config(
-					int index,
+int mse_config_get_media_mpeg2ts_config(int index,
 					struct mse_media_mpeg2ts_config *data);
-extern int mse_config_set_ptp_config(int index, struct mse_ptp_config *data);
-extern int mse_config_get_ptp_config(int index, struct mse_ptp_config *data);
-extern int mse_config_set_mch_config(int index, struct mse_mch_config *data);
-extern int mse_config_get_mch_config(int index, struct mse_mch_config *data);
-extern int mse_config_set_avtp_tx_param_crf(int index,
-					    struct mse_avtp_tx_param *data);
-extern int mse_config_get_avtp_tx_param_crf(int index,
-					    struct mse_avtp_tx_param *data);
-extern int mse_config_set_avtp_rx_param_crf(int index,
-					    struct mse_avtp_rx_param *data);
-extern int mse_config_get_avtp_rx_param_crf(int index,
-					    struct mse_avtp_rx_param *data);
-extern int mse_config_set_delay_time(int index, struct mse_delay_time *data);
-extern int mse_config_get_delay_time(int index, struct mse_delay_time *data);
+int mse_config_set_ptp_config(int index, struct mse_ptp_config *data);
+int mse_config_get_ptp_config(int index, struct mse_ptp_config *data);
+int mse_config_set_mch_config(int index, struct mse_mch_config *data);
+int mse_config_get_mch_config(int index, struct mse_mch_config *data);
+int mse_config_set_avtp_tx_param_crf(int index,
+				     struct mse_avtp_tx_param *data);
+int mse_config_get_avtp_tx_param_crf(int index,
+				     struct mse_avtp_tx_param *data);
+int mse_config_set_avtp_rx_param_crf(int index,
+				     struct mse_avtp_rx_param *data);
+int mse_config_get_avtp_rx_param_crf(int index,
+				     struct mse_avtp_rx_param *data);
+int mse_config_set_delay_time(int index, struct mse_delay_time *data);
+int mse_config_get_delay_time(int index, struct mse_delay_time *data);
 
 #endif /* __MSE_CONFIG_H__ */

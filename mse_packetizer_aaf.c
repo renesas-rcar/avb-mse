@@ -67,8 +67,10 @@
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <uapi/linux/if_ether.h>
+#include <linux/of_device.h>
 
 #include "ravb_mse_kernel.h"
+#include "mse_core.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
 
@@ -455,7 +457,7 @@ static int mse_packetizer_audio_aaf_get_audio_info(
 }
 
 static int mse_packetizer_audio_aaf_calc_cbs(int index,
-					     struct eavb_cbsparam *cbs)
+					     struct mse_cbsparam *cbs)
 {
 	struct aaf_packetizer *aaf;
 	u64 value;
@@ -488,20 +490,20 @@ static int mse_packetizer_audio_aaf_calc_cbs(int index,
 		pr_err("[%s] cbs error(too big)\n", __func__);
 		return -EPERM;
 	}
-	cbs->bandwidthFraction = value;
+	cbs->bandwidth_fraction = value;
 
 	value = USHRT_MAX * bandwidth_fraction_numerator;
 	/* divide denominator into 2 */
 	do_div(value, aaf->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	cbs->sendSlope = value;
+	cbs->send_slope = value;
 
 	value = USHRT_MAX * (bandwidth_fraction_denominator -
 					 bandwidth_fraction_numerator);
 	/* divide denominator into 2 */
 	do_div(value, aaf->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	cbs->idleSlope = value;
+	cbs->idle_slope = value;
 
 	return 0;
 }

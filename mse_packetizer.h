@@ -85,7 +85,7 @@ extern struct mse_packetizer_ops mse_packetizer_crf_tstamp_audio_ops;
 /* Video Packetizer for IEC61883-4 */
 extern struct mse_packetizer_ops mse_packetizer_video_iec61883_4_ops;
 
-extern int mse_packetizer_init(void);
-extern void mse_packetizer_exit(void);
+int mse_packetizer_init(void);
+void mse_packetizer_exit(void);
 
 #endif /* __MSE_PACKETIZER_H__ */

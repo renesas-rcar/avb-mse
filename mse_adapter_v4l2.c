@@ -91,7 +91,7 @@
 /*********************/
 /* Number of devices */
 /*********************/
-#define MSE_ADAPTER_V4L2_DEVICE_MAX		MSE_INSTANCE_MAX
+#define MSE_ADAPTER_V4L2_DEVICE_MAX		MSE_ADAPTER_MEDIA_MAX
 #define MSE_ADAPTER_V4L2_DEVICE_VIDEO_DEFAULT	2
 #define MSE_ADAPTER_V4L2_DEVICE_MPEG2TS_DEFAULT	2
 
@@ -810,8 +810,8 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 
 		if (vadp_dev->frameintervals.numerator > 0 &&
 		    vadp_dev->frameintervals.denominator > 0) {
-			config.fps.n = vadp_dev->frameintervals.numerator;
-			config.fps.m = vadp_dev->frameintervals.denominator;
+			config.fps.denominator = vadp_dev->frameintervals.numerator;
+			config.fps.numerator = vadp_dev->frameintervals.denominator;
 		}
 
 		err = mse_set_video_config(vadp_dev->index_instance, &config);

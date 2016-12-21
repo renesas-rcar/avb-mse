@@ -62,12 +62,30 @@
 #ifndef __RAVB_MSE_H__
 #define __RAVB_MSE_H__
 
-/** @brief MSE's media adapter max */
+/**
+ * @brief MSE's media adapter max
+ */
 #define MSE_ADAPTER_MEDIA_MAX   (10)
-/** @brief MSE's network adapter max */
+
+/**
+ * @brief MSE's network adapter max
+ */
 #define MSE_ADAPTER_NETWORK_MAX (10)
-/** @brief MSE's instance max */
+
+/**
+ * @brief MSE's instance max
+ */
 #define MSE_INSTANCE_MAX        (10)
+
+/**
+ * @brief Resistered adapter name length
+ */
+#define MSE_NAME_LEN_MAX	(32)
+
+/**
+ * @brief MAC address length
+ */
+#define MSE_MAC_LEN_MAX		(6)
 
 enum MSE_STREAM_TYPE {
 	MSE_STREAM_TYPE_AUDIO,
