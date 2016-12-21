@@ -74,14 +74,17 @@
 #define MSE_EAVB_ADAPTER_PACKET_MAX (1024)
 #define MSE_EAVB_ADAPTER_ENTRY_MAX (128)
 
+#define MSE_EAVB_PACKET_LENGTH (1526)
+
 #define avb_compare_param_key(val, key) \
-	strncmp(val, key, strlen(key))
+	strncmp(val, key, MSE_NAME_LEN_MAX)
 
 struct mse_adapter_eavb {
 	bool used_f;
 	struct eavb_entry *entry;
 	int num_entry;
 	int entried, unentry;
+	int num_send;
 	struct ravb_streaming_kernel_if ravb;
 	struct eavb_entry read_entry[MSE_EAVB_ADAPTER_ENTRY_MAX];
 };
@@ -92,24 +95,24 @@ static struct {
 	const char *key;
 	enum AVB_DEVNAME value;
 } avb_devname_table[] = {
-	{ "ravb_rx15", AVB_DEVNAME_RX15 },
-	{ "ravb_rx14", AVB_DEVNAME_RX14 },
-	{ "ravb_rx13", AVB_DEVNAME_RX13 },
-	{ "ravb_rx12", AVB_DEVNAME_RX12 },
-	{ "ravb_rx11", AVB_DEVNAME_RX11 },
-	{ "ravb_rx10", AVB_DEVNAME_RX10 },
-	{ "ravb_rx9", AVB_DEVNAME_RX9 },
-	{ "ravb_rx8", AVB_DEVNAME_RX8 },
-	{ "ravb_rx7", AVB_DEVNAME_RX7 },
-	{ "ravb_rx6", AVB_DEVNAME_RX6 },
-	{ "ravb_rx5", AVB_DEVNAME_RX5 },
-	{ "ravb_rx4", AVB_DEVNAME_RX4 },
-	{ "ravb_rx3", AVB_DEVNAME_RX3 },
-	{ "ravb_rx2", AVB_DEVNAME_RX2 },
-	{ "ravb_rx1", AVB_DEVNAME_RX1 },
-	{ "ravb_rx0", AVB_DEVNAME_RX0 },
-	{ "ravb_tx1", AVB_DEVNAME_TX1 },
-	{ "ravb_tx0", AVB_DEVNAME_TX0 },
+	{ "avb_rx15", AVB_DEVNAME_RX15 },
+	{ "avb_rx14", AVB_DEVNAME_RX14 },
+	{ "avb_rx13", AVB_DEVNAME_RX13 },
+	{ "avb_rx12", AVB_DEVNAME_RX12 },
+	{ "avb_rx11", AVB_DEVNAME_RX11 },
+	{ "avb_rx10", AVB_DEVNAME_RX10 },
+	{ "avb_rx9", AVB_DEVNAME_RX9 },
+	{ "avb_rx8", AVB_DEVNAME_RX8 },
+	{ "avb_rx7", AVB_DEVNAME_RX7 },
+	{ "avb_rx6", AVB_DEVNAME_RX6 },
+	{ "avb_rx5", AVB_DEVNAME_RX5 },
+	{ "avb_rx4", AVB_DEVNAME_RX4 },
+	{ "avb_rx3", AVB_DEVNAME_RX3 },
+	{ "avb_rx2", AVB_DEVNAME_RX2 },
+	{ "avb_rx1", AVB_DEVNAME_RX1 },
+	{ "avb_rx0", AVB_DEVNAME_RX0 },
+	{ "avb_tx1", AVB_DEVNAME_TX1 },
+	{ "avb_tx0", AVB_DEVNAME_TX0 },
 };
 
 static enum AVB_DEVNAME mse_adapter_eavb_set_devname(const char *val)
@@ -126,7 +129,7 @@ static enum AVB_DEVNAME mse_adapter_eavb_set_devname(const char *val)
 static int mse_adapter_eavb_open(char *name)
 {
 	int err, index;
-	enum AVB_DEVNAME id;
+	int id;
 	struct mse_adapter_eavb *eavb;
 	static struct eavb_option option = {
 		.id = EAVB_OPTIONID_BLOCKMODE,
@@ -137,13 +140,13 @@ static int mse_adapter_eavb_open(char *name)
 	id = mse_adapter_eavb_set_devname(name);
 	if (id < 0) {
 		pr_err("[%s] error unknown dev=%s\n", __func__, name);
-		id = AVB_DEVNAME_TX0;
+		return -EPERM;
 	}
 
 	pr_debug("[%s] dev=%s(%d)\n", __func__, name, id);
 
-	for (index = 0; eavb_table[index].used_f &&
-	     index < ARRAY_SIZE(eavb_table); index++)
+	for (index = 0; index < ARRAY_SIZE(eavb_table) &&
+	     eavb_table[index].used_f; index++)
 		;
 
 	if (index >= ARRAY_SIZE(eavb_table))
@@ -184,19 +187,23 @@ static int mse_adapter_eavb_release(int index)
 
 	eavb = &eavb_table[index];
 
+	if (!eavb->used_f)
+		return -EPERM;
+
 	pr_debug("[%s] index=%d\n", __func__, index);
 
 	err = ravb_streaming_release_stq_kernel(eavb->ravb.handle);
-	if (err)
+	if (err) {
 		pr_err("[%s] error release code=%d\n", __func__, err);
-
-	kfree(eavb->entry);
-	eavb->used_f = false;
+	} else {
+		kfree(eavb->entry);
+		eavb->used_f = false;
+	}
 
 	return err;
 }
 
-static int mse_adapter_eavb_set_cbs_param(int index, struct eavb_cbsparam *cbs)
+static int mse_adapter_eavb_set_cbs_param(int index, struct mse_cbsparam *cbs)
 {
 	long err;
 	struct eavb_txparam txparam;
@@ -205,11 +212,24 @@ static int mse_adapter_eavb_set_cbs_param(int index, struct eavb_cbsparam *cbs)
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
 
+	if (!cbs) {
+		pr_err("[%s] invalid argument. cbs\n", __func__);
+		return -EINVAL;
+	}
+
 	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 
-	txparam.cbs = *cbs;
+	txparam.cbs.bandwidthFraction	= cbs->bandwidth_fraction;
+	txparam.cbs.idleSlope		= cbs->idle_slope;
+	txparam.cbs.sendSlope		= cbs->send_slope;
+	txparam.cbs.hiCredit		= cbs->hi_credit;
+	txparam.cbs.loCredit		= cbs->lo_credit;
+
 	pr_debug(" bandwidthFraction = %08x\n", txparam.cbs.bandwidthFraction);
 	pr_debug(" idleSlope         = %08x\n", txparam.cbs.idleSlope);
 	pr_debug(" sendSlope         = %08x\n", txparam.cbs.sendSlope);
@@ -217,9 +237,10 @@ static int mse_adapter_eavb_set_cbs_param(int index, struct eavb_cbsparam *cbs)
 	pr_debug(" loCredit          = %08x\n", txparam.cbs.loCredit);
 
 	err = eavb->ravb.set_txparam(eavb->ravb.handle, &txparam);
-	if (err)
+	if (err) {
 		pr_err("[%s] error %ld\n", __func__, err);
-
+		return err;
+	}
 	return 0;
 }
 
@@ -234,6 +255,9 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 
 	eavb = &eavb_table[index];
 
+	if (!eavb->used_f)
+		return -EPERM;
+
 	pr_debug("[%s] index=%d\n", __func__, index);
 
 	memcpy(rxparam.streamid, streamid, sizeof(rxparam.streamid));
@@ -244,27 +268,10 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 		 rxparam.streamid[6], rxparam.streamid[7]);
 
 	err = eavb->ravb.set_rxparam(eavb->ravb.handle, &rxparam);
-	if (err)
+	if (err) {
 		pr_err("[%s] error %ld\n", __func__, err);
-
-	return 0;
-}
-
-static int mse_adapter_eavb_start(int index)
-{
-	pr_debug("[%s] index=%d\n", __func__, index);
-
-	/* do nothing */
-
-	return 0;
-}
-
-static int mse_adapter_eavb_stop(int index)
-{
-	pr_debug("[%s] index=%d\n", __func__, index);
-
-	/* todo streaming stop */
-
+		return err;
+	}
 	return 0;
 }
 
@@ -279,6 +286,9 @@ static int mse_adapter_eavb_check_receive(int index)
 
 	eavb = &eavb_table[index];
 
+	if (!eavb->used_f)
+		return -EPERM;
+
 	err = eavb->ravb.get_entrynum(eavb->ravb.handle, &en);
 	pr_debug("[%s] index=%d ret=%ld entry=%d wait=%d log=%d\n",
 		 __func__, index, err,
@@ -287,27 +297,34 @@ static int mse_adapter_eavb_check_receive(int index)
 	return en.completed;
 }
 
-static int mse_adapter_eavb_send(int index,
-				 struct mse_packet *packets,
-				 int num_packets)
+static int mse_adapter_eavb_send_prepare(int index,
+					 struct mse_packet *packets,
+					 int num_packets)
 {
 	int i;
-	ssize_t wret, rret;
 	struct mse_adapter_eavb *eavb;
-
-	if (index >= ARRAY_SIZE(eavb_table))
-		return -EPERM;
-
-	eavb = &eavb_table[index];
-
-	if (num_packets <= 0)
-		return -EPERM;
 
 	pr_debug("[%s] index=%d addr=%p num=%d\n",
 		 __func__, index, packets, num_packets);
 
-	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
-		pr_err("[%s] too much packets\n", __func__);
+	if (index >= ARRAY_SIZE(eavb_table))
+		return -EPERM;
+
+	if (!packets) {
+		pr_err("[%s] invalid argument. packets\n", __func__);
+		return -EINVAL;
+	}
+
+	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
+
+	if (num_packets <= 0)
+		return -EPERM;
+
+	if (num_packets > MSE_EAVB_ADAPTER_PACKET_MAX) {
+		pr_err("[%s] too much packets %d\n", __func__, num_packets);
 		return -EPERM;
 	}
 
@@ -317,29 +334,109 @@ static int mse_adapter_eavb_send(int index,
 		(eavb->entry + i)->vec[0].len = packets[i].len;
 	}
 
-	/* entry queue */
-	wret = eavb->ravb.write(eavb->ravb.handle, eavb->entry, num_packets);
+	eavb->entried = 0;
+	eavb->unentry = 0;
+	eavb->num_send = 0;
+	eavb->num_entry = num_packets;
+
+	return 0;
+}
+
+static int mse_adapter_eavb_send(int index,
+				 struct mse_packet *packets,
+				 int num_packets)
+{
+	int num_dequeue, i, ofs;
+	ssize_t wret, rret = 0, wret2;
+	struct mse_adapter_eavb *eavb;
+
+	if (index >= ARRAY_SIZE(eavb_table))
+		return -EPERM;
+
+	if (!packets) {
+		pr_err("[%s] invalid argument. packets\n", __func__);
+		return -EINVAL;
+	}
+
+	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
+
+	if (num_packets <= 0)
+		return -EPERM;
+
+	pr_debug("[%s] index=%d num=%d\n",
+		 __func__, index, num_packets);
+
+	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
+		pr_err("[%s] too much packets\n", __func__);
+		return -EPERM;
+	}
+
+	num_dequeue = eavb->num_send + num_packets -
+		MSE_EAVB_ADAPTER_ENTRY_MAX;
+	if (num_dequeue > 0) {
+		/* dequeue before send */
+		rret = eavb->ravb.read(eavb->ravb.handle, eavb->read_entry,
+				       num_dequeue);
+		if (rret != num_dequeue) {
+			/* TODO: Error recover */
+			mse_adapter_eavb_check_receive(index);
+			if (rret < 0) {
+				pr_err("[%s] read error %d\n",
+				       __func__, (int)rret);
+				return rret;
+			}
+			pr_err("[%s] read is short %d/%d\n",
+			       __func__, (int)rret, num_dequeue);
+		}
+		eavb->entried = (eavb->entried + rret) % eavb->num_entry;
+		eavb->num_send -= rret;
+	}
+
+	/* update packet size */
+	for (i = 0; i < num_packets; i++) {
+		ofs = (eavb->unentry + i) % eavb->num_entry;
+		(eavb->entry + ofs)->vec[0].len = packets[ofs].len;
+	}
+	/* enqueue */
+	if (eavb->unentry + num_packets <= eavb->num_entry) {
+		wret = eavb->ravb.write(eavb->ravb.handle,
+					eavb->entry + eavb->unentry,
+					num_packets);
+		if (wret < 0) {
+			pr_err("[%s] write error %d\n", __func__, (int)wret);
+			return wret;
+		}
+	} else {
+		wret = eavb->ravb.write(eavb->ravb.handle,
+					eavb->entry + eavb->unentry,
+					eavb->num_entry - eavb->unentry);
+		if (wret < 0) {
+			pr_err("[%s] write error %d\n", __func__, (int)wret);
+			return wret;
+		}
+		wret2 = eavb->ravb.write(
+				eavb->ravb.handle,
+				eavb->entry,
+				num_packets - eavb->num_entry + eavb->unentry);
+		if (wret2 < 0) {
+			pr_err("[%s] write error %d\n", __func__, (int)wret);
+			return wret2;
+		}
+		wret += wret2;
+	}
+
 	if (wret != num_packets) {
 		/* TODO: Error recover */
 		mse_adapter_eavb_check_receive(index);
-		if (wret < 0)
-			pr_err("[%s] write error %d\n", __func__, (int)wret);
-		else
-			pr_err("[%s] write is short %d/%d\n", __func__,
-			       (int)wret, num_packets);
+		pr_err("[%s] write is short %d/%d\n", __func__,
+		       (int)wret, num_packets);
 	}
-
-	/* dequeue */
-	rret = eavb->ravb.read(eavb->ravb.handle, eavb->entry, num_packets);
-	if (rret != num_packets) {
-		/* TODO: Error recover */
-		mse_adapter_eavb_check_receive(index);
-		if (rret < 0)
-			pr_err("[%s] read error %d\n", __func__, (int)rret);
-		else
-			pr_err("[%s] read is short %d/%d\n", __func__,
-			       (int)rret, num_packets);
-	}
+	eavb->unentry = (eavb->unentry + wret) % eavb->num_entry;
+	eavb->num_send += wret;
+	pr_debug("[%s] read %zd write %zd\n", __func__, rret, wret);
 
 	return (int)wret;
 }
@@ -355,7 +452,18 @@ static int mse_adapter_eavb_receive_prepare(int index,
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
 
+	if (!packets) {
+		pr_err("[%s] invalid argument. packets\n", __func__);
+		return -EINVAL;
+	}
+
 	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
+
+	if (num_packets <= 0)
+		return -EPERM;
 
 	pr_debug("[%s] index=%d addr=%p num=%d\n",
 		 __func__, index, packets, num_packets);
@@ -396,14 +504,21 @@ static int mse_adapter_eavb_receive_prepare(int index,
 
 static int mse_adapter_eavb_receive(int index, int num_packets)
 {
-	int receive;
+	int receive, i, ofs;
 	ssize_t ret;
 	struct mse_adapter_eavb *eavb;
+	int read_packets;
 
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
 
 	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
+
+	if (num_packets <= 0)
+		return -EPERM;
 
 	pr_debug("[%s] index=%d num=%d\n", __func__, index, num_packets);
 	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
@@ -411,10 +526,16 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 		return -EPERM;
 	}
 
+	read_packets = mse_adapter_eavb_check_receive(index);
+	if (read_packets == 0)
+		read_packets = 1;
+	if (read_packets > num_packets)
+		read_packets = num_packets;
+
 	/* dequeue */
 	ret = eavb->ravb.read(eavb->ravb.handle,
 			      eavb->read_entry,
-			      num_packets);
+			      read_packets);
 	if (ret == -EINTR || ret == -EAGAIN) {
 		pr_info("[%s] receive error %zd\n", __func__, ret);
 		return ret;
@@ -429,6 +550,11 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 	receive = ret;
 	eavb->entried = (eavb->entried + receive) % eavb->num_entry;
 
+	/* update packet size */
+	for (i = 0; i < receive; i++) {
+		ofs = (eavb->unentry + i) % eavb->num_entry;
+		(eavb->entry + ofs)->vec[0].len = MSE_EAVB_PACKET_LENGTH;
+	}
 	/* enqueue */
 	if (eavb->unentry + receive <= eavb->num_entry) {
 		ret = eavb->ravb.write(eavb->ravb.handle,
@@ -462,6 +588,9 @@ static int mse_adapter_eavb_set_option(int index)
 
 	eavb = &eavb_table[index];
 
+	if (!eavb->used_f)
+		return -EPERM;
+
 	return eavb->ravb.set_option(eavb->ravb.handle, &option);
 }
 
@@ -474,25 +603,52 @@ static int mse_adapter_eavb_cancel(int index)
 
 	eavb = &eavb_table[index];
 
+	if (!eavb->used_f)
+		return -EPERM;
+
 	return eavb->ravb.blocking_cancel(eavb->ravb.handle);
+}
+
+static int mse_adapter_eavb_get_link_speed(int index)
+{
+	long link_speed;
+	struct mse_adapter_eavb *eavb;
+
+	if (index >= ARRAY_SIZE(eavb_table))
+		return -EPERM;
+
+	eavb = &eavb_table[index];
+
+	if (!eavb->used_f)
+		return -EPERM;
+
+	pr_debug("[%s] index=%d\n", __func__, index);
+
+	link_speed = eavb->ravb.get_linkspeed(eavb->ravb.handle);
+	if (link_speed < 0)
+		pr_err("[%s] error get link speed code=%ld\n",
+		       __func__,
+		       link_speed);
+
+	/* return speed as Mbps */
+	return link_speed;
 }
 
 static struct mse_adapter_network_ops mse_adapter_eavb_ops = {
 	.name = "ravb",
-	.type = MSE_TYPE_ADAPTER_NETWORK_EAVB,
-	.priv = NULL,
+	.type = MSE_TYPE_ADAPTER_NETWORK,
 	.open = mse_adapter_eavb_open,
 	.release = mse_adapter_eavb_release,
 	.set_option = mse_adapter_eavb_set_option,
 	.set_cbs_param = mse_adapter_eavb_set_cbs_param,
 	.set_streamid = mse_adapter_eavb_set_streamid,
-	.start = mse_adapter_eavb_start,
-	.stop = mse_adapter_eavb_stop,
+	.send_prepare = mse_adapter_eavb_send_prepare,
 	.send = mse_adapter_eavb_send,
 	.receive_prepare = mse_adapter_eavb_receive_prepare,
 	.receive = mse_adapter_eavb_receive,
 	.check_receive = mse_adapter_eavb_check_receive,
 	.cancel = mse_adapter_eavb_cancel,
+	.get_link_speed = mse_adapter_eavb_get_link_speed,
 };
 
 static int adapter_index;

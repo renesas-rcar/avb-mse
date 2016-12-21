@@ -62,65 +62,8 @@
 #ifndef __MSE_SYSFS_H__
 #define __MSE_SYSFS_H__
 
-#define MSE_SYSFS_NAME_STR_TYPE                      "type"
-#define MSE_SYSFS_NAME_STR_KIND                      "kind"
-#define MSE_SYSFS_NAME_STR_DST_MAC                   "dst_mac"
-#define MSE_SYSFS_NAME_STR_SRC_MAC                   "src_mac"
-#define MSE_SYSFS_NAME_STR_VLAN                      "vlan"
-#define MSE_SYSFS_NAME_STR_PRIORITY                  "priority"
-#define MSE_SYSFS_NAME_STR_UNIQUE_ID                 "unique_id"
-#define MSE_SYSFS_NAME_STR_NETWORK_ADAPTER_NAME      "network_adapter_name"
-#define MSE_SYSFS_NAME_STR_NETWORK_DEVICE_NAME_TX    "network_device_name_tx"
-#define MSE_SYSFS_NAME_STR_NETWORK_DEVICE_NAME_RX    "network_device_name_rx"
-#define MSE_SYSFS_NAME_STR_PACKETIZER_NAME           "packetizer_name"
-#define MSE_SYSFS_NAME_STR_FPS_SECONDS               "fps_seconds"
-#define MSE_SYSFS_NAME_STR_FPS_FRAMES                "fps_frames"
-#define MSE_SYSFS_NAME_STR_BITRATE                   "bitrate"
-#define MSE_SYSFS_NAME_STR_BYTES_PER_FRAME           "bytes_per_frame"
-#define MSE_SYSFS_NAME_STR_DEVICE                    "device"
-#define MSE_SYSFS_NAME_STR_PTP_CLOCK                 "ptp_clock"
-#define MSE_SYSFS_NAME_STR_PTP_CLOCK_DEVICE          "ptp_clock_device"
-#define MSE_SYSFS_NAME_STR_PTP_CAPTURE_CH            "ptp_capture_ch"
-#define MSE_SYSFS_NAME_STR_PTP_CAPTURE_FREQ          "ptp_capture_freq"
-#define MSE_SYSFS_NAME_STR_MEDIA_CLOCK_RECOVERY      "media_clock_recovery"
-#define MSE_SYSFS_NAME_STR_MEDIA_CLOCK_TYPE          "media_clock_type"
-#define MSE_SYSFS_NAME_STR_RECOVERY_CAPTURE_FREQ     "recovery_capture_freq"
-#define MSE_SYSFS_NAME_STR_SEND_CLOCK                "send_clock"
-#define MSE_SYSFS_NAME_STR_SEND_CLOCK_DST_MAC        "send_clock_dst_mac"
-#define MSE_SYSFS_NAME_STR_SEND_CLOCK_SRC_MAC        "send_clock_src_mac"
-#define MSE_SYSFS_NAME_STR_SEND_CLOCK_UNIQUE_ID      "send_clock_unique_id"
-#define MSE_SYSFS_NAME_STR_MAX_TRANSIT_TIME          "max_transit_time"
-#define MSE_SYSFS_NAME_STR_TALKER_DELAY_TIME         "talker_delay_time"
-#define MSE_SYSFS_NAME_STR_LISTENER_DELAY_TIME       "listener_delay_time"
-
-enum MSE_SYSFS_CONFIG_TYPE {
-	MSE_TYPE_INT,
-	MSE_TYPE_STR,
-	MSE_TYPE_ENUM,
-	MSE_TYPE_MEM,
-};
-
-struct mse_sysfs_config {
-	char *name;
-	enum MSE_SYSFS_CONFIG_TYPE type;
-	int int_value;
-	union {
-		char str_value[255];
-		char *enum_list[10];
-	};
-};
-
-extern int mse_sysfs_init(struct mse_sysfs_config *config);
-extern void mse_sysfs_exit(int index);
-extern int mse_sysfs_get_config_int(int index, char *name, int *value);
-extern int mse_sysfs_get_config_str(int index,
-				    char *name,
-				    char *buf,
-				    int buf_size);
-extern int mse_sysfs_set_config_int(int index, char *name, int value);
-extern int mse_sysfs_set_config_str(int index,
-				    char *name,
-				    char *buf,
-				    int buf_size);
+extern const struct attribute_group *mse_attr_groups_audio[];
+extern const struct attribute_group *mse_attr_groups_video[];
+extern const struct attribute_group *mse_attr_groups_mpeg2ts[];
 
 #endif /* __MSE_SYSFS_H__ */

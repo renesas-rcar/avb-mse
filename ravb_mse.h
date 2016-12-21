@@ -62,16 +62,30 @@
 #ifndef __RAVB_MSE_H__
 #define __RAVB_MSE_H__
 
-struct mse_info {
-	uint8_t device[32];
-};
+/**
+ * @brief MSE's media adapter max
+ */
+#define MSE_ADAPTER_MEDIA_MAX   (10)
 
-enum MSE_STREAM_DIRECTION {
-	MSE_STREAM_DIRECTION_RX,
-	MSE_STREAM_DIRECTION_TX,
-	MSE_STREAM_DIRECTION_RX_TX,
-	MSE_STREAM_DIRECTION_MAX,
-};
+/**
+ * @brief MSE's network adapter max
+ */
+#define MSE_ADAPTER_NETWORK_MAX (10)
+
+/**
+ * @brief MSE's instance max
+ */
+#define MSE_INSTANCE_MAX        (10)
+
+/**
+ * @brief Resistered adapter name length
+ */
+#define MSE_NAME_LEN_MAX	(32)
+
+/**
+ * @brief MAC address length
+ */
+#define MSE_MAC_LEN_MAX		(6)
 
 enum MSE_STREAM_TYPE {
 	MSE_STREAM_TYPE_AUDIO,
@@ -80,13 +94,21 @@ enum MSE_STREAM_TYPE {
 	MSE_STREAM_TYPE_MAX,
 };
 
-struct mse_caps {
-	enum MSE_STREAM_DIRECTION dir;
-	enum MSE_STREAM_TYPE      type;
+struct mse_info {
+	uint8_t              device[32];
+	enum MSE_STREAM_TYPE type;
 };
 
+#define MSE_CONFIG_DEFAULT_MODULE_NAME    "ravb"
+#define MSE_CONFIG_DEFAULT_DEVICE_NAME_TX "avb_tx0"
+#define MSE_CONFIG_DEFAULT_DEVICE_NAME_RX "avb_rx0"
+
 struct mse_network_device {
-	uint8_t network_device_name[32];
+	uint8_t module_name[32];
+	uint8_t device_name_tx[32];
+	uint8_t device_name_rx[32];
+	uint8_t device_name_tx_crf[32];
+	uint8_t device_name_rx_crf[32];
 };
 
 enum MSE_PACKETIZER {
@@ -103,10 +125,9 @@ struct mse_packetizer {
 	enum MSE_PACKETIZER packetizer;
 };
 
-#define MSE_CONFIG_VLAN_MIN     (1)
-#define MSE_CONFIG_VLAN_MAX     (4095)
+#define MSE_CONFIG_VLAN_MAX     (4094)
 #define MSE_CONFIG_PRIORITY_MAX (7)
-#define MSE_CONFIG_UNIQUEID_MAX (0xFFFF)
+#define MSE_CONFIG_UNIQUEID_MAX (65535)
 
 struct mse_avtp_tx_param {
 	uint8_t  dst_mac[6];
@@ -120,6 +141,8 @@ struct mse_avtp_rx_param {
 	uint8_t streamid[8];
 };
 
+#define MSE_CONFIG_SAMPLE_PER_FRAME_MAX (740)
+
 enum MSE_CRF_TYPE {
 	MSE_CRF_TYPE_NOT_USE,
 	MSE_CRF_TYPE_RX,
@@ -127,17 +150,15 @@ enum MSE_CRF_TYPE {
 	MSE_CRF_TYPE_MAX,
 };
 
-#define MSE_CONFIG_SAMPLE_PER_FRAME_MAX (1500)
-
 struct mse_media_audio_config {
 	uint32_t          samples_per_frame;
-	enum MSE_CRF_TYPE crf;
+	enum MSE_CRF_TYPE crf_type;
 };
 
-#define MSE_CONFIG_BYTES_PER_FRAME_MAX (1500)
-#define MSE_CONFIG_FPS_MAX             (65535)
-#define MSE_CONFIG_BITRATE_MIN         (10000000) /* T.B.D. */
-#define MSE_CONFIG_BITRATE_MAX         (100000000) /* T.B.D. */
+#define MSE_CONFIG_BYTES_PER_FRAME_MAX (1480)
+#define MSE_CONFIG_FPS_DENOMINATOR_MAX (60000)
+#define MSE_CONFIG_FPS_NUMERATOR_MAX   (1001)
+#define MSE_CONFIG_BITRATE_MIN         (1)
 
 struct mse_media_video_config {
 	uint32_t bytes_per_frame;
@@ -146,12 +167,14 @@ struct mse_media_video_config {
 	uint32_t bitrate;
 };
 
-#define MSE_CONFIG_PCR_PID_MAX (8191)
+#define MSE_CONFIG_TSPACKET_PER_FRAME_MIN (1)
+#define MSE_CONFIG_TSPACKET_PER_FRAME_MAX (7)
+#define MSE_CONFIG_PCR_PID_MAX            (8192)
 
 struct mse_media_mpeg2ts_config {
-	uint32_t bytes_per_frame;
+	uint32_t tspackets_per_frame;
 	uint32_t bitrate;
-	uint32_t pcr_pid; /* T.B.D. */
+	uint32_t pcr_pid;
 };
 
 enum MSE_PTP_TYPE {
@@ -160,17 +183,17 @@ enum MSE_PTP_TYPE {
 	MSE_PTP_TYPE_MAX,
 };
 
+#define MSE_CONFIG_CAPTURE_CH_MAX   (16)
+
 enum MSE_RECOVERY_CAPTURE_FREQ {
 	MSE_RECOVERY_CAPTURE_FREQ_FIXED,
 	MSE_RECOVERY_CAPTURE_FREQ_NOT_FIXED,
 	MSE_RECOVERY_CAPTURE_FREQ_MAX,
 };
 
-#define MSE_CONFIG_CAPTURE_CH_MAX   (16)
-
 struct mse_ptp_config {
 	enum MSE_PTP_TYPE              type;
-	uint32_t                       device_id;
+	uint32_t                       deviceid;
 	uint32_t                       capture_ch;
 	uint32_t                       capture_freq;
 	enum MSE_RECOVERY_CAPTURE_FREQ recovery_capture_freq;
@@ -189,37 +212,35 @@ struct mse_delay_time {
 #define MSE_MAGIC               (0x21)
 
 #define MSE_G_INFO              _IOR(MSE_MAGIC, 1, struct mse_info)
-#define MSE_S_CAPS              _IOW(MSE_MAGIC, 2, struct mse_caps)
-#define MSE_G_CAPS              _IOR(MSE_MAGIC, 3, struct mse_caps)
-#define MSE_S_NETWORK_DEVICE    _IOW(MSE_MAGIC, 4, struct mse_network_device)
-#define MSE_G_NETWORK_DEVICE    _IOR(MSE_MAGIC, 5, struct mse_network_device)
-#define MSE_S_PACKETIZER        _IOW(MSE_MAGIC, 6, struct mse_packetizer)
-#define MSE_G_PACKETIZER        _IOR(MSE_MAGIC, 7, struct mse_packetizer)
-#define MSE_S_AVTP_TX_PARAM     _IOW(MSE_MAGIC, 8, struct mse_avtp_tx_param)
-#define MSE_G_AVTP_TX_PARAM     _IOR(MSE_MAGIC, 9, struct mse_avtp_tx_param)
-#define MSE_S_AVTP_RX_PARAM     _IOW(MSE_MAGIC, 10, struct mse_avtp_rx_param)
-#define MSE_G_AVTP_RX_PARAM     _IOR(MSE_MAGIC, 11, struct mse_avtp_rx_param)
+#define MSE_S_NETWORK_DEVICE    _IOW(MSE_MAGIC, 2, struct mse_network_device)
+#define MSE_G_NETWORK_DEVICE    _IOR(MSE_MAGIC, 3, struct mse_network_device)
+#define MSE_S_PACKETIZER        _IOW(MSE_MAGIC, 4, struct mse_packetizer)
+#define MSE_G_PACKETIZER        _IOR(MSE_MAGIC, 5, struct mse_packetizer)
+#define MSE_S_AVTP_TX_PARAM     _IOW(MSE_MAGIC, 6, struct mse_avtp_tx_param)
+#define MSE_G_AVTP_TX_PARAM     _IOR(MSE_MAGIC, 7, struct mse_avtp_tx_param)
+#define MSE_S_AVTP_RX_PARAM     _IOW(MSE_MAGIC, 8, struct mse_avtp_rx_param)
+#define MSE_G_AVTP_RX_PARAM     _IOR(MSE_MAGIC, 9, struct mse_avtp_rx_param)
 #define MSE_S_MEDIA_AUDIO_CONFIG \
-			_IOW(MSE_MAGIC, 12, struct mse_media_audio_config)
+			_IOW(MSE_MAGIC, 10, struct mse_media_audio_config)
 #define MSE_G_MEDIA_AUDIO_CONFIG \
-			_IOR(MSE_MAGIC, 13, struct mse_media_audio_config)
+			_IOR(MSE_MAGIC, 11, struct mse_media_audio_config)
 #define MSE_S_MEDIA_VIDEO_CONFIG \
-			_IOW(MSE_MAGIC, 14, struct mse_media_video_config)
+			_IOW(MSE_MAGIC, 12, struct mse_media_video_config)
 #define MSE_G_MEDIA_VIDEO_CONFIG \
-			_IOR(MSE_MAGIC, 15, struct mse_media_video_config)
+			_IOR(MSE_MAGIC, 13, struct mse_media_video_config)
 #define MSE_S_MEDIA_MPEG2TS_CONFIG \
-			_IOW(MSE_MAGIC, 16, struct mse_media_mpeg2ts_config)
+			_IOW(MSE_MAGIC, 14, struct mse_media_mpeg2ts_config)
 #define MSE_G_MEDIA_MPEG2TS_CONFIG \
-			_IOR(MSE_MAGIC, 17, struct mse_media_mpeg2ts_config)
-#define MSE_S_PTP_CONFIG        _IOW(MSE_MAGIC, 18, struct mse_ptp_config)
-#define MSE_G_PTP_CONFIG        _IOR(MSE_MAGIC, 19, struct mse_ptp_config)
-#define MSE_S_MCH_CONFIG        _IOW(MSE_MAGIC, 20, struct mse_mch_config)
-#define MSE_G_MCH_CONFIG        _IOR(MSE_MAGIC, 21, struct mse_mch_config)
-#define MSE_S_AVTP_TX_PARAM_CRF _IOW(MSE_MAGIC, 22, struct mse_avtp_tx_param)
-#define MSE_G_AVTP_TX_PARAM_CRF _IOR(MSE_MAGIC, 23, struct mse_avtp_tx_param)
-#define MSE_S_AVTP_RX_PARAM_CRF _IOW(MSE_MAGIC, 24, struct mse_avtp_rx_param)
-#define MSE_G_AVTP_RX_PARAM_CRF _IOR(MSE_MAGIC, 25, struct mse_avtp_rx_param)
-#define MSE_S_DELAY_TIME        _IOW(MSE_MAGIC, 26, struct mse_delay_time)
-#define MSE_G_DELAY_TIME        _IOR(MSE_MAGIC, 27, struct mse_delay_time)
+			_IOR(MSE_MAGIC, 15, struct mse_media_mpeg2ts_config)
+#define MSE_S_PTP_CONFIG        _IOW(MSE_MAGIC, 16, struct mse_ptp_config)
+#define MSE_G_PTP_CONFIG        _IOR(MSE_MAGIC, 17, struct mse_ptp_config)
+#define MSE_S_MCH_CONFIG        _IOW(MSE_MAGIC, 18, struct mse_mch_config)
+#define MSE_G_MCH_CONFIG        _IOR(MSE_MAGIC, 19, struct mse_mch_config)
+#define MSE_S_AVTP_TX_PARAM_CRF _IOW(MSE_MAGIC, 20, struct mse_avtp_tx_param)
+#define MSE_G_AVTP_TX_PARAM_CRF _IOR(MSE_MAGIC, 21, struct mse_avtp_tx_param)
+#define MSE_S_AVTP_RX_PARAM_CRF _IOW(MSE_MAGIC, 22, struct mse_avtp_rx_param)
+#define MSE_G_AVTP_RX_PARAM_CRF _IOR(MSE_MAGIC, 23, struct mse_avtp_rx_param)
+#define MSE_S_DELAY_TIME        _IOW(MSE_MAGIC, 24, struct mse_delay_time)
+#define MSE_G_DELAY_TIME        _IOR(MSE_MAGIC, 25, struct mse_delay_time)
 
 #endif /* __RAVB_MSE_H__ */

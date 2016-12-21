@@ -12,6 +12,7 @@ menuconfig AVB_MSE
 	  - MSE EAVB Adapter
 	  - MSE ALSA Adapter
 	  - MSE V4L2 Adapter
+	  - MSE MCH Adapter
 
 if AVB_MSE
 
@@ -50,5 +51,14 @@ config MSE_ADAPTER_V4L2
 	---help---
 	  Renesas Ethernet AVB software.
 	  Support MSE Adapter for V4L2.
+
+config MSE_ADAPTER_MCH
+	tristate "MSE MCH Adapter"
+	depends on MSE_CORE
+	depends on MCH_CORE
+	default n
+	---help---
+	  Renesas Ethernet AVB software.
+	  Support MSE Adapter for MCH.
 
 endif

@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2016 Renesas Electronics Corporation
+ Copyright (C) 2016 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -59,68 +59,12 @@
  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */ /*************************************************************************/
 
-#ifndef __MSE_PACKET_CTRL_H__
-#define __MSE_PACKET_CTRL_H__
+#ifndef __MSE_IOCTL_LOCAL_H__
+#define __MSE_IOCTL_LOCAL_H__
 
-struct mse_packet_ctrl {
-	struct device *dev;
-	int size;
-	int write_p;
-	int read_p;
-	int max_packet_size;
-	dma_addr_t dma_handle;
-	void *dma_vaddr;
-	struct mse_packet *packet_table;
-};
+int mse_ioctl_register(int index);
+int mse_ioctl_unregister(int index);
+int mse_ioctl_init(int major, int mse_instance_max);
+int mse_ioctl_exit(int major, int mse_instance_max);
 
-int mse_packet_ctrl_check_packet_remain(struct mse_packet_ctrl *dma);
-struct mse_packet_ctrl *mse_packet_ctrl_alloc(struct device *dev,
-					      int max_packet,
-					      int max_packet_size);
-void mse_packet_ctrl_free(struct mse_packet_ctrl *dma);
-int mse_packet_ctrl_make_packet(int index,
-				void *data,
-				size_t size,
-				int ptp_clock,
-				int *current_timestamp,
-				int timestamp_size,
-				unsigned int *timestamp,
-				struct mse_packet_ctrl *dma,
-				struct mse_packetizer_ops *ops,
-				size_t *processed);
-int mse_packet_ctrl_send_prepare_packet(int index,
-					struct mse_packet_ctrl *dma,
-					struct mse_adapter_network_ops *ops);
-int mse_packet_ctrl_send_packet(int index,
-				struct mse_packet_ctrl *dma,
-				struct mse_adapter_network_ops *ops);
-int mse_packet_ctrl_receive_prepare_packet(int index,
-					   struct mse_packet_ctrl *dma,
-					   struct mse_adapter_network_ops *ops);
-int mse_packet_ctrl_receive_packet(int index,
-				   int max_size,
-				   struct mse_packet_ctrl *dma,
-				   struct mse_adapter_network_ops *ops);
-int mse_packet_ctrl_receive_packet_crf(int index,
-				       int max_size,
-				       struct mse_packet_ctrl *dma,
-				       struct mse_adapter_network_ops *ops);
-int mse_packet_ctrl_take_out_packet(int index,
-				    void *data,
-				    size_t size,
-				    unsigned int *timestamps,
-				    int t_size,
-				    int *t_stored,
-				    struct mse_packet_ctrl *dma,
-				    struct mse_packetizer_ops *ops,
-				    size_t *processed);
-int mse_packet_ctrl_make_packet_crf(int index,
-				    struct ptp_clock_time *timestamps,
-				    int count,
-				    struct mse_packet_ctrl *dma);
-int mse_packet_ctrl_take_out_packet_crf(int index,
-					u64 *timestamp,
-					int size,
-					struct mse_packet_ctrl *dma);
-
-#endif /* __MSE_PACKET_CTRL_H__ */
+#endif /* __MSE_IOCTL_LOCAL_H__ */

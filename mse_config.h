@@ -59,21 +59,74 @@
  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */ /*************************************************************************/
 
+#ifndef __MSE_CONFIG_H__
+#define __MSE_CONFIG_H__
 
-#ifndef __MSE_PTP_H__
-#define __MSE_PTP_H__
+/**
+ * @brief configuration data
+ */
+struct mse_config {
+	/** @brief spin lock for config access */
+	spinlock_t lock;
 
+	struct mse_info info;
+	struct mse_network_device network_device;
+	struct mse_packetizer packetizer;
+	struct mse_avtp_tx_param avtp_tx_param;
+	struct mse_avtp_rx_param avtp_rx_param;
+	struct mse_media_audio_config media_audio_config;
+	struct mse_media_video_config media_video_config;
+	struct mse_media_mpeg2ts_config media_mpeg2ts_config;
+	struct mse_ptp_config ptp_config;
+	struct mse_mch_config mch_config;
+	struct mse_avtp_tx_param avtp_tx_param_crf;
+	struct mse_avtp_rx_param avtp_rx_param_crf;
+	struct mse_delay_time delay_time;
+};
 
-int mse_ptp_open_dummy(int *dev_id);
+int mse_dev_to_index(struct device *dev);
+bool mse_dev_is_busy(int index);
+struct mse_config *mse_get_dev_config(int index);
+int mse_config_get_info(int index, struct mse_info *data);
+int mse_config_set_network_device(int index,
+				  struct mse_network_device *data);
+int mse_config_get_network_device(int index,
+				  struct mse_network_device *data);
+int mse_config_set_packetizer(int index, struct mse_packetizer *data);
+int mse_config_get_packetizer(int index, struct mse_packetizer *data);
+int mse_config_set_avtp_tx_param(int index,
+				 struct mse_avtp_tx_param *data);
+int mse_config_get_avtp_tx_param(int index,
+				 struct mse_avtp_tx_param *data);
+int mse_config_set_avtp_rx_param(int index,
+				 struct mse_avtp_rx_param *data);
+int mse_config_get_avtp_rx_param(int index,
+				 struct mse_avtp_rx_param *data);
+int mse_config_set_media_audio_config(int index,
+				      struct mse_media_audio_config *data);
+int mse_config_get_media_audio_config(int index,
+				      struct mse_media_audio_config *data);
+int mse_config_set_media_video_config(int index,
+				      struct mse_media_video_config *data);
+int mse_config_get_media_video_config(int index,
+				      struct mse_media_video_config *data);
+int mse_config_set_media_mpeg2ts_config(int index,
+					struct mse_media_mpeg2ts_config *data);
+int mse_config_get_media_mpeg2ts_config(int index,
+					struct mse_media_mpeg2ts_config *data);
+int mse_config_set_ptp_config(int index, struct mse_ptp_config *data);
+int mse_config_get_ptp_config(int index, struct mse_ptp_config *data);
+int mse_config_set_mch_config(int index, struct mse_mch_config *data);
+int mse_config_get_mch_config(int index, struct mse_mch_config *data);
+int mse_config_set_avtp_tx_param_crf(int index,
+				     struct mse_avtp_tx_param *data);
+int mse_config_get_avtp_tx_param_crf(int index,
+				     struct mse_avtp_tx_param *data);
+int mse_config_set_avtp_rx_param_crf(int index,
+				     struct mse_avtp_rx_param *data);
+int mse_config_get_avtp_rx_param_crf(int index,
+				     struct mse_avtp_rx_param *data);
+int mse_config_set_delay_time(int index, struct mse_delay_time *data);
+int mse_config_get_delay_time(int index, struct mse_delay_time *data);
 
-int mse_ptp_close_dummy(int dev_id);
-
-int mse_ptp_get_time_dummy(int dev_id, struct ptp_clock_time *clock_time);
-
-int mse_ptp_get_timestamps_dummy(int dev_id,
-				 int ch,
-				 int *count,
-				 struct ptp_clock_time timestamps[]);
-
-#endif /* __MSE_PTP_H__ */
-
+#endif /* __MSE_CONFIG_H__ */

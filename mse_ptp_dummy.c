@@ -145,18 +145,19 @@ static enum hrtimer_restart ptp_timestamp_callbak(struct hrtimer *arg)
 	ktime_t ktime;
 	struct ptp_queue *queue;
 	struct ptp_clock_time *clock_time;
+	unsigned long flags;
 	int ret;
 
 	dev = container_of(arg, struct ptp_device, timer);
 
-	spin_lock(&dev->qlock);
+	spin_lock_irqsave(&dev->qlock, flags);
 
 	ktime = ktime_set(0, dev->timer_delay);
 	hrtimer_forward(&dev->timer,
 			hrtimer_get_expires(&dev->timer),
 			ktime);
 
-	clock_time = kzalloc(sizeof(*clock_time), GFP_KERNEL);
+	clock_time = kzalloc(sizeof(*clock_time), GFP_ATOMIC);
 	if (!clock_time) {
 		pr_warn("[%s] failed allocate clock_time\n", __func__);
 		spin_unlock(&dev->qlock);
@@ -174,7 +175,7 @@ static enum hrtimer_restart ptp_timestamp_callbak(struct hrtimer *arg)
 	queue = &dev->que;
 	enqueue(queue, clock_time);
 
-	spin_unlock(&dev->qlock);
+	spin_unlock_irqrestore(&dev->qlock, flags);
 
 	return HRTIMER_RESTART;
 }
@@ -204,7 +205,7 @@ static int init_ptp_device(struct ptp_device *dev)
 	return 0;
 }
 
-int mse_ptp_open(int *dev_id)
+int mse_ptp_open_dummy(int *dev_id)
 {
 	int i;
 	int ret;
@@ -236,7 +237,7 @@ int mse_ptp_open(int *dev_id)
 	return -1;
 }
 
-int mse_ptp_close(int dev_id)
+int mse_ptp_close_dummy(int dev_id)
 {
 	int ret;
 	struct ptp_device *dev;
@@ -261,7 +262,7 @@ int mse_ptp_close(int dev_id)
 	return 0;
 }
 
-int mse_ptp_get_time(int dev_id, struct ptp_clock_time *clock_time)
+int mse_ptp_get_time_dummy(int dev_id, struct ptp_clock_time *clock_time)
 {
 	int ret = 0;
 
@@ -280,10 +281,10 @@ int mse_ptp_get_time(int dev_id, struct ptp_clock_time *clock_time)
 	return ret;
 }
 
-int mse_ptp_get_timestamps(int dev_id,
-		       int ch,
-		       int *count,
-		       struct ptp_clock_time timestamps[])
+int mse_ptp_get_timestamps_dummy(int dev_id,
+				 int ch,
+				 int *count,
+				 struct ptp_clock_time timestamps[])
 {
 	struct ptp_device *dev;
 	struct ptp_queue *queue;

@@ -63,6 +63,7 @@
 #include <linux/kernel.h>
 
 #include "ravb_mse_kernel.h"
+#include "mse_core.h"
 #include "mse_packetizer.h"
 
 /* init function array */
@@ -75,6 +76,7 @@ static struct {
 	{ -1, &mse_packetizer_video_cvf_h264_ops },
 	{ -1, &mse_packetizer_video_cvf_h264_d13_ops },
 	{ -1, &mse_packetizer_video_cvf_mjpeg_ops },
+	{ -1, &mse_packetizer_video_iec61883_4_ops },
 	{ -1, NULL },
 };
 

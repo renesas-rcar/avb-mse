@@ -75,8 +75,13 @@
 
 #include "ravb_mse_kernel.h"
 
+/* TODO need expand device max */
 #define MSE_ADAPTER_ALSA_DEVICE_MAX	(2)
+#define MSE_ADAPTER_ALSA_DEVICE_DEFAULT	(2)
 #define MSE_ADAPTER_ALSA_PAGE_SIZE	(64 * 1024)
+
+static int alsa_devices = MSE_ADAPTER_ALSA_DEVICE_DEFAULT;
+module_param(alsa_devices, int, 0440);
 
 /*************/
 /* Structure */
@@ -99,8 +104,7 @@ struct alsa_device {
 	struct snd_card			*card;
 	struct snd_pcm			*pcm;
 	int				adapter_index;
-	/* spin lock */
-	spinlock_t			lock;
+
 	struct alsa_stream		playback;
 	struct alsa_stream		capture;
 };
@@ -114,17 +118,25 @@ struct snd_pcm_hardware g_mse_adapter_alsa_playback_hw = {
 	.formats		= SNDRV_PCM_FMTBIT_S16_LE |
 				  SNDRV_PCM_FMTBIT_S16_BE |
 				  SNDRV_PCM_FMTBIT_S24_LE |
-				  SNDRV_PCM_FMTBIT_S24_BE,
-	.rates			= SNDRV_PCM_RATE_8000_96000,
+				  SNDRV_PCM_FMTBIT_S24_BE |
+				  SNDRV_PCM_FMTBIT_S32_LE |
+				  SNDRV_PCM_FMTBIT_S32_BE |
+				  SNDRV_PCM_FMTBIT_S18_3LE |
+				  SNDRV_PCM_FMTBIT_S18_3BE |
+				  SNDRV_PCM_FMTBIT_S20_3LE |
+				  SNDRV_PCM_FMTBIT_S20_3BE |
+				  SNDRV_PCM_FMTBIT_S24_3LE |
+				  SNDRV_PCM_FMTBIT_S24_3BE,
+	.rates			= SNDRV_PCM_RATE_8000_192000,
 	.rate_min		= 8000,
-	.rate_max		= 96000,
-	.channels_min		= 2,
-	.channels_max		= 2,
+	.rate_max		= 192000,
+	.channels_min		= 1,
+	.channels_max		= 24,
 	.buffer_bytes_max	= 65536,
 	.period_bytes_min	= 64,
 	.period_bytes_max	= 8192,
 	.periods_min		= 2,
-	.periods_max		= 1024,
+	.periods_max		= 32,
 };
 
 /* hw - Capture */
@@ -136,56 +148,57 @@ struct snd_pcm_hardware g_mse_adapter_alsa_capture_hw = {
 	.formats		= SNDRV_PCM_FMTBIT_S16_LE |
 				  SNDRV_PCM_FMTBIT_S16_BE |
 				  SNDRV_PCM_FMTBIT_S24_LE |
-				  SNDRV_PCM_FMTBIT_S24_BE,
-	.rates			= SNDRV_PCM_RATE_8000_96000,
+				  SNDRV_PCM_FMTBIT_S24_BE |
+				  SNDRV_PCM_FMTBIT_S32_LE |
+				  SNDRV_PCM_FMTBIT_S32_BE |
+				  SNDRV_PCM_FMTBIT_S18_3LE |
+				  SNDRV_PCM_FMTBIT_S18_3BE |
+				  SNDRV_PCM_FMTBIT_S20_3LE |
+				  SNDRV_PCM_FMTBIT_S20_3BE |
+				  SNDRV_PCM_FMTBIT_S24_3LE |
+				  SNDRV_PCM_FMTBIT_S24_3BE,
+	.rates			= SNDRV_PCM_RATE_8000_192000,
 	.rate_min		= 8000,
-	.rate_max		= 96000,
-	.channels_min		= 2,
-	.channels_max		= 2,
+	.rate_max		= 192000,
+	.channels_min		= 1,
+	.channels_max		= 24,
 	.buffer_bytes_max	= 65536,
 	.period_bytes_min	= 64,
 	.period_bytes_max	= 8192,
 	.periods_min		= 2,
-	.periods_max		= 1024,
+	.periods_max		= 32,
 };
 
 /************/
 /* Function */
 /************/
-static inline struct alsa_stream *mse_adapter_alsa_mse_to_io(
-						struct alsa_device *chip,
-						int index)
+static int mse_adapter_alsa_callback(void *priv, int size)
 {
-	if (mse_get_inout(index) == MSE_DIRECTION_INPUT)
-		return &chip->playback;
-	else if (mse_get_inout(index) == MSE_DIRECTION_OUTPUT)
-		return &chip->capture;
-	else
-		return NULL;
-}
-
-static int mse_adapter_alsa_callback(int index, int size)
-{
-	struct alsa_device *chip = NULL;
 	struct snd_pcm_runtime *runtime;
-	struct alsa_stream *io;
+	struct alsa_stream *io = priv;
 	int err;
 
 	pr_debug("[%s]\n", __func__);
 
-	err = mse_get_private_data(index, (void **)&chip);
-	if (err < 0) {
-		pr_err("[%s] Failed mse_get_private_data() err=%d\n",
-		       __func__, err);
+	if (!io) {
+		pr_err("[%s] private data is NULL\n", __func__);
 		return -EPERM;
 	}
+	runtime = io->substream->runtime;
 
-	io = mse_adapter_alsa_mse_to_io(chip, index);
-	if (!io) {
-		pr_err("[%s] Failed mse_adapter_alsa_mse_to_io()\n", __func__);
+	if (size < 0) {
+		unsigned long flags;
+
+		pr_err("[%s] error from mse core %d\n", __func__, size);
+
+		snd_pcm_stream_lock_irqsave(io->substream, flags);
+		if (snd_pcm_running(io->substream))  {
+			snd_pcm_stop(io->substream,
+				     SNDRV_PCM_STATE_DISCONNECTED);
+		}
+		snd_pcm_stream_unlock_irqrestore(io->substream, flags);
 		return 0;
 	}
-	runtime = io->substream->runtime;
 
 	io->byte_pos += io->byte_per_period;
 	io->period_pos++;
@@ -206,6 +219,7 @@ static int mse_adapter_alsa_callback(int index, int size)
 	err = mse_start_transmission(io->index,
 				     runtime->dma_area + io->byte_pos,
 				     io->byte_per_period,
+				     io,
 				     mse_adapter_alsa_callback);
 	if (err < 0) {
 		pr_err("[%s] Failed mse_start_transmission() err=%d\n",
@@ -228,10 +242,11 @@ static inline struct alsa_stream *mse_adapter_alsa_pcm_to_io(
 
 static int mse_adapter_alsa_playback_open(struct snd_pcm_substream *substream)
 {
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
+	struct alsa_device *chip;
+	struct snd_pcm_runtime *runtime;
+	struct alsa_stream *io;
 	int index;
+	int ret;
 
 	pr_debug("[%s]\n", __func__);
 
@@ -241,14 +256,27 @@ static int mse_adapter_alsa_playback_open(struct snd_pcm_substream *substream)
 		return -EINVAL;
 	}
 
+	chip = snd_pcm_substream_chip(substream);
+	runtime = substream->runtime;
+	io = mse_adapter_alsa_pcm_to_io(chip, substream);
+
 	/* hw setting */
 	runtime->hw = g_mse_adapter_alsa_playback_hw;
 
 	/* substream init */
 	io->substream = substream;
 
+	/* constraint to be buffer size multiple of period size */
+	ret = snd_pcm_hw_constraint_integer(runtime,
+					    SNDRV_PCM_HW_PARAM_PERIODS);
+	if (ret < 0) {
+		pr_err("[%s] snd_pcm_hw_constraint_integer() %d\n",
+		       __func__, ret);
+		return ret;
+	}
+
 	/* MSE Core open */
-	index = mse_open(chip->adapter_index, MSE_DIRECTION_INPUT);
+	index = mse_open(chip->adapter_index, true);
 	if (index < 0) {
 		pr_err("[%s] Failed mse_open() index=%d\n", __func__, index);
 		return -EPERM;
@@ -258,10 +286,56 @@ static int mse_adapter_alsa_playback_open(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static int mse_adapter_alsa_playback_close(struct snd_pcm_substream *substream)
+static int mse_adapter_alsa_capture_open(struct snd_pcm_substream *substream)
 {
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
+	struct alsa_device *chip;
+	struct snd_pcm_runtime *runtime;
+	struct alsa_stream *io;
+	int index;
+	int ret;
+
+	pr_debug("[%s]\n", __func__);
+
+	/* parameter check */
+	if (!substream) {
+		pr_err("[%s] Invalid argument. substream\n", __func__);
+		return -EINVAL;
+	}
+
+	chip = snd_pcm_substream_chip(substream);
+	runtime = substream->runtime;
+	io = mse_adapter_alsa_pcm_to_io(chip, substream);
+
+	/* hw setting */
+	runtime->hw = g_mse_adapter_alsa_capture_hw;
+
+	/* substream init */
+	io->substream = substream;
+
+	/* constraint to be buffer size multiple of period size */
+	ret = snd_pcm_hw_constraint_integer(runtime,
+					    SNDRV_PCM_HW_PARAM_PERIODS);
+	if (ret < 0) {
+		pr_err("[%s] snd_pcm_hw_constraint_integer() %d\n",
+		       __func__, ret);
+		return ret;
+	}
+
+	/* MSE Core open */
+	index = mse_open(chip->adapter_index, false);
+	if (index < 0) {
+		pr_err("[%s] Failed mse_open() index=%d\n", __func__, index);
+		return -EPERM;
+	}
+	io->index = index;
+
+	return 0;
+}
+
+static int mse_adapter_alsa_close(struct snd_pcm_substream *substream)
+{
+	struct alsa_device *chip;
+	struct alsa_stream *io;
 	int err;
 
 	pr_debug("[%s]\n", __func__);
@@ -271,6 +345,9 @@ static int mse_adapter_alsa_playback_close(struct snd_pcm_substream *substream)
 		pr_err("[%s] Invalid argument. substream\n", __func__);
 		return -EINVAL;
 	}
+
+	chip = snd_pcm_substream_chip(substream);
+	io = mse_adapter_alsa_pcm_to_io(chip, substream);
 
 	/* MSE Core close */
 	err = mse_close(io->index);
@@ -282,141 +359,13 @@ static int mse_adapter_alsa_playback_close(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static int mse_adapter_alsa_playback_trigger(
-					struct snd_pcm_substream *substream,
-					int cmd)
+static int mse_adapter_alsa_trigger(
+				struct snd_pcm_substream *substream,
+				int cmd)
 {
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
-	int rtn = 0;
-	int err;
-
-	pr_debug("[%s]\n", __func__);
-
-	/* parameter check */
-	if (!substream) {
-		pr_err("[%s] Invalid argument. substream\n", __func__);
-		return -EINVAL;
-	}
-
-	switch (cmd) {
-	case SNDRV_PCM_TRIGGER_START:
-		io->substream		= substream;
-		io->byte_pos		= 0;
-		io->period_pos		= 0;
-		io->byte_per_period	= runtime->period_size
-					  * runtime->channels
-					  * samples_to_bytes(runtime, 1);
-		io->next_period_byte	= io->byte_per_period;
-
-		/* config check */
-		pr_debug("[%s] ch=%u period_size=%lu fmt_size=%zu\n",
-			 __func__, runtime->channels, runtime->period_size,
-			 samples_to_bytes(runtime, 1));
-
-		err = mse_start_streaming(io->index);
-		if (err < 0) {
-			pr_err("[%s] Failed mse_start_streaming() err=%d\n",
-			       __func__, err);
-			rtn = -EPERM;
-			break;
-		}
-		io->streaming = true;
-		err = mse_start_transmission(io->index,
-					     runtime->dma_area + io->byte_pos,
-					     io->byte_per_period,
-					     mse_adapter_alsa_callback);
-		if (err < 0) {
-			pr_err("[%s] Failed mse_start_transmission() err=%d\n",
-			       __func__, err);
-			rtn = -EPERM;
-			break;
-		}
-		break;
-
-	case SNDRV_PCM_TRIGGER_STOP:
-		err = mse_stop_streaming(io->index);
-		if (err < 0) {
-			pr_err("[%s] Failed mse_stop_streaming() err=%d\n",
-			       __func__, err);
-			rtn = -EPERM;
-			break;
-		}
-		io->streaming = false;
-		break;
-
-	default:
-		pr_err("[%s] Invalid argument. cmd=%d\n", __func__, cmd);
-		rtn = -EINVAL;
-		break;
-	}
-
-	return rtn;
-}
-
-static int mse_adapter_alsa_capture_open(struct snd_pcm_substream *substream)
-{
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
-	int index;
-
-	pr_debug("[%s]\n", __func__);
-
-	/* parameter check */
-	if (!substream) {
-		pr_err("[%s] Invalid argument. substream\n", __func__);
-		return -EINVAL;
-	}
-
-	/* hw setting */
-	runtime->hw = g_mse_adapter_alsa_capture_hw;
-
-	/* substream init */
-	io->substream = substream;
-
-	/* MSE Core open */
-	index = mse_open(chip->adapter_index, MSE_DIRECTION_OUTPUT);
-	if (index < 0) {
-		pr_err("[%s] Failed mse_open() index=%d\n", __func__, index);
-		return -EPERM;
-	}
-	io->index = index;
-
-	return 0;
-}
-
-static int mse_adapter_alsa_capture_close(struct snd_pcm_substream *substream)
-{
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
-	int err;
-
-	pr_debug("[%s]\n", __func__);
-
-	/* parameter check */
-	if (!substream) {
-		pr_err("[%s] Invalid argument. substream\n", __func__);
-		return -EINVAL;
-	}
-
-	err = mse_close(io->index);
-	if (err < 0) {
-		pr_err("[%s] Failed mse_close() err=%d\n", __func__, err);
-		return -EPERM;
-	}
-
-	return 0;
-}
-
-static int mse_adapter_alsa_capture_trigger(
-					struct snd_pcm_substream *substream,
-					int cmd)
-{
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
+	struct alsa_device *chip;
+	struct snd_pcm_runtime *runtime;
+	struct alsa_stream *io;
 	int rtn = 0;
 	int err;
 
@@ -428,6 +377,10 @@ static int mse_adapter_alsa_capture_trigger(
 		return -EINVAL;
 	}
 
+	chip = snd_pcm_substream_chip(substream);
+	runtime = substream->runtime;
+	io = mse_adapter_alsa_pcm_to_io(chip, substream);
+
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 		io->substream		= substream;
@@ -454,6 +407,7 @@ static int mse_adapter_alsa_capture_trigger(
 		err = mse_start_transmission(io->index,
 					     runtime->dma_area + io->byte_pos,
 					     io->byte_per_period,
+					     io,
 					     mse_adapter_alsa_callback);
 		if (err < 0) {
 			pr_err("[%s] Failed mse_start_transmission() err=%d\n",
@@ -505,11 +459,51 @@ static int mse_adapter_alsa_hw_free(struct snd_pcm_substream *substream)
 	return snd_pcm_lib_free_pages(substream);
 }
 
+static enum MSE_AUDIO_BIT get_alsa_bit_depth(int alsa_format)
+{
+	switch (alsa_format) {
+	case SNDRV_PCM_FORMAT_S32_LE:
+	case SNDRV_PCM_FORMAT_S32_BE:
+		return MSE_AUDIO_BIT_32;
+	case SNDRV_PCM_FORMAT_S24_LE:
+	case SNDRV_PCM_FORMAT_S24_BE:
+	case SNDRV_PCM_FORMAT_S24_3LE:
+	case SNDRV_PCM_FORMAT_S24_3BE:
+		return MSE_AUDIO_BIT_24;
+	case SNDRV_PCM_FORMAT_S20_3LE:
+	case SNDRV_PCM_FORMAT_S20_3BE:
+		return MSE_AUDIO_BIT_20;
+	case SNDRV_PCM_FORMAT_S18_3LE:
+	case SNDRV_PCM_FORMAT_S18_3BE:
+		return MSE_AUDIO_BIT_18;
+	case SNDRV_PCM_FORMAT_S16_LE:
+	case SNDRV_PCM_FORMAT_S16_BE:
+		return MSE_AUDIO_BIT_16;
+	default:
+		return MSE_AUDIO_BIT_INVALID;
+	}
+}
+
+static bool is_alsa_big_endian(int alsa_format)
+{
+	switch (alsa_format) {
+	case SNDRV_PCM_FORMAT_S16_BE:
+	case SNDRV_PCM_FORMAT_S24_BE:
+	case SNDRV_PCM_FORMAT_S32_BE:
+	case SNDRV_PCM_FORMAT_S24_3BE:
+	case SNDRV_PCM_FORMAT_S18_3BE:
+	case SNDRV_PCM_FORMAT_S20_3BE:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 {
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
+	struct alsa_device *chip;
+	struct snd_pcm_runtime *runtime;
+	struct alsa_stream *io;
 	struct mse_audio_config config;
 	int err;
 
@@ -521,6 +515,10 @@ static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 		return -EINVAL;
 	}
 
+	chip = snd_pcm_substream_chip(substream);
+	runtime = substream->runtime;
+	io = mse_adapter_alsa_pcm_to_io(chip, substream);
+
 	err = mse_get_audio_config(io->index, &config);
 	if (err < 0) {
 		pr_err("[%s] Failed mse_get_audio_config() err=%d\n",
@@ -529,10 +527,11 @@ static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 	}
 
 	config.sample_rate		= runtime->rate;
-	config.sample_format		= runtime->format;
 	config.channels			= runtime->channels;
 	config.period_size		= runtime->period_size;
 	config.bytes_per_sample		= samples_to_bytes(runtime, 1);
+	config.sample_bit_depth		= get_alsa_bit_depth(runtime->format);
+	config.is_big_endian		= is_alsa_big_endian(runtime->format);
 
 	err = mse_set_audio_config(io->index, &config);
 	if (err < 0) {
@@ -548,9 +547,18 @@ static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 static snd_pcm_uframes_t mse_adapter_alsa_pointer(
 					struct snd_pcm_substream *substream)
 {
-	struct alsa_device *chip = snd_pcm_substream_chip(substream);
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct alsa_stream *io = mse_adapter_alsa_pcm_to_io(chip, substream);
+	struct alsa_device *chip;
+	struct snd_pcm_runtime *runtime;
+	struct alsa_stream *io;
+
+	if (!substream) {
+		pr_err("[%s] Invalid argument. substream\n", __func__);
+		return -EINVAL;
+	}
+
+	chip = snd_pcm_substream_chip(substream);
+	runtime = substream->runtime;
+	io = mse_adapter_alsa_pcm_to_io(chip, substream);
 
 	pr_debug("[%s]\n", __func__);
 	return bytes_to_frames(runtime, io->byte_pos);
@@ -558,28 +566,28 @@ static snd_pcm_uframes_t mse_adapter_alsa_pointer(
 
 struct snd_pcm_ops g_mse_adapter_alsa_playback_ops = {
 	.open		= mse_adapter_alsa_playback_open,
-	.close		= mse_adapter_alsa_playback_close,
+	.close		= mse_adapter_alsa_close,
 	.ioctl		= mse_adapter_alsa_ioctl,
 	.hw_params	= mse_adapter_alsa_hw_params,
 	.hw_free	= mse_adapter_alsa_hw_free,
 	.prepare	= mse_adapter_alsa_prepare,
-	.trigger	= mse_adapter_alsa_playback_trigger,
+	.trigger	= mse_adapter_alsa_trigger,
 	.pointer	= mse_adapter_alsa_pointer,
 };
 
 struct snd_pcm_ops g_mse_adapter_alsa_capture_ops = {
 	.open		= mse_adapter_alsa_capture_open,
-	.close		= mse_adapter_alsa_capture_close,
+	.close		= mse_adapter_alsa_close,
 	.ioctl		= mse_adapter_alsa_ioctl,
 	.hw_params	= mse_adapter_alsa_hw_params,
 	.hw_free	= mse_adapter_alsa_hw_free,
 	.prepare	= mse_adapter_alsa_prepare,
-	.trigger	= mse_adapter_alsa_capture_trigger,
+	.trigger	= mse_adapter_alsa_trigger,
 	.pointer	= mse_adapter_alsa_pointer,
 };
 
 /* Global variable */
-static struct alsa_device *g_rchip[MSE_ADAPTER_ALSA_DEVICE_MAX];
+static struct alsa_device **g_rchip;
 
 static int mse_adapter_alsa_free(struct alsa_device *chip)
 {
@@ -594,6 +602,8 @@ static int mse_adapter_alsa_free(struct alsa_device *chip)
 	if (err < 0)
 		pr_err("[%s] Failed unregister adapter err=%d\n",
 		       __func__, err);
+
+	device_del(&chip->dev);
 
 	kfree(chip);
 
@@ -709,10 +719,8 @@ static int mse_adapter_alsa_probe(int devno)
 	sprintf(device_name, "hw:%d,0", card->number);
 
 	/* regist mse */
-	index = mse_register_adapter_media(MSE_TYPE_ADAPTER_AUDIO_PCM,
-					   MSE_DIRECTION_BOTH,
+	index = mse_register_adapter_media(MSE_TYPE_ADAPTER_AUDIO,
 					   "ALSA Adapter",
-					   chip,
 					   device_name);
 	if (index < 0) {
 		pr_err("[%s] Failed register adapter index=%d\n",
@@ -731,7 +739,23 @@ static int __init mse_adapter_alsa_init(void)
 
 	pr_debug("Start ALSA adapter\n");
 
-	for (i = 0; i < MSE_ADAPTER_ALSA_DEVICE_MAX; i++) {
+	if (alsa_devices > MSE_ADAPTER_ALSA_DEVICE_MAX) {
+		pr_err("[%s] Too many devices %d\n",
+		       __func__, alsa_devices);
+		return -EINVAL;
+	} else if (alsa_devices <= 0) {
+		pr_err("[%s] Invalid devices %d\n",
+		       __func__, alsa_devices);
+		return -EINVAL;
+	} else {
+		;
+	}
+
+	g_rchip = kcalloc(alsa_devices, sizeof(*g_rchip), GFP_KERNEL);
+	if (!g_rchip)
+		return -ENOMEM;
+
+	for (i = 0; i < alsa_devices; i++) {
 		err = mse_adapter_alsa_probe(i);
 		if (err < 0)
 			return err;
@@ -746,12 +770,14 @@ static void __exit mse_adapter_alsa_exit(void)
 
 	pr_debug("Stop ALSA adapter\n");
 
-	for (i = 0; i < MSE_ADAPTER_ALSA_DEVICE_MAX; i++) {
+	for (i = 0; i < alsa_devices; i++) {
 		err = snd_card_free(g_rchip[i]->card);
 		if (err < 0)
 			pr_err("[%s] Failed snd_card_free() err=%d\n",
 			       __func__, err);
 	}
+
+	kfree(g_rchip);
 }
 
 module_init(mse_adapter_alsa_init)

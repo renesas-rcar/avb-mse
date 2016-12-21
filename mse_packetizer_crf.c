@@ -70,6 +70,7 @@
 #include <linux/ptp_clock.h>
 
 #include "ravb_mse_kernel.h"
+#include "mse_core.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
 
@@ -85,7 +86,6 @@
 /* preamble + FCS + IGP */
 #define ETHERNET_SPECIAL        (8 + 4 + 12)
 
-#define PORT_TRANSMIT_RATE      (100000000) /* 100M [bit/sec] */
 #define CLASS_INTERVAL_FRAMES   (8000) /* class A */
 #define INTERVAL_FRAMES         (1)
 
@@ -244,7 +244,7 @@ static int mse_packetizer_crf_audio_set_audio_config(
 	param.priority              = crf->net_config.priority;
 	param.vid                   = crf->net_config.vlanid;
 	param.base_frequency        = crf->crf_audio_config.sample_rate;
-	param.timestamp_interval    = crf->crf_audio_config.bytes_per_frame;
+	param.timestamp_interval    = crf->crf_audio_config.samples_per_frame;
 
 	mse_packetizer_crf_audio_header_build(crf->packet_template, &param);
 
@@ -264,7 +264,7 @@ static int mse_packetizer_crf_audio_get_audio_info(
 }
 
 static int mse_packetizer_crf_audio_calc_cbs(int index,
-					     struct eavb_cbsparam *cbs)
+					     struct mse_cbsparam *cbs)
 {
 	struct crf_packetizer *crf;
 	u64 value;
@@ -276,8 +276,9 @@ static int mse_packetizer_crf_audio_calc_cbs(int index,
 	pr_debug("[%s] index=%d\n", __func__, index);
 	crf = &crf_packetizer_table[index];
 
-	bandwidth_fraction_denominator = (u64)PORT_TRANSMIT_RATE *
-					 (u64)CBS_ADJUSTMENT_DENOMINATOR;
+	bandwidth_fraction_denominator =
+				(u64)crf->net_config.port_transmit_rate *
+				(u64)CBS_ADJUSTMENT_DENOMINATOR;
 	if (!bandwidth_fraction_denominator) {
 		pr_err("[%s] cbs error(null)\n", __func__);
 		return -EPERM;
@@ -290,26 +291,26 @@ static int mse_packetizer_crf_audio_calc_cbs(int index,
 
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
 	/* divide denominator into 2 */
-	do_div(value, PORT_TRANSMIT_RATE);
+	do_div(value, crf->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
 	if (value > UINT_MAX) {
 		pr_err("[%s] cbs error(too big)\n", __func__);
 		return -EPERM;
 	}
-	cbs->bandwidthFraction = value;
+	cbs->bandwidth_fraction = value;
 
 	value = USHRT_MAX * bandwidth_fraction_numerator;
 	/* divide denominator into 2 */
-	do_div(value, PORT_TRANSMIT_RATE);
+	do_div(value, crf->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	cbs->sendSlope = value;
+	cbs->send_slope = value;
 
 	value = USHRT_MAX * (bandwidth_fraction_denominator
 					 - bandwidth_fraction_numerator);
 	/* divide denominator into 2 */
-	do_div(value, PORT_TRANSMIT_RATE);
+	do_div(value, crf->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	cbs->idleSlope = value;
+	cbs->idle_slope = value;
 
 	return 0;
 }
@@ -348,7 +349,7 @@ static int mse_packetizer_crf_audio_packetize(int index,
 	avtp_set_crf_data_length(packet, data_len);
 	*packet_size = (size_t)data_len + AVTP_CRF_PAYLOAD_OFFSET;
 
-	return 0;
+	return MSE_PACKETIZE_STATUS_COMPLETE;
 }
 
 static int mse_packetizer_crf_audio_depacketize(int index,
@@ -363,6 +364,9 @@ static int mse_packetizer_crf_audio_depacketize(int index,
 	int size, i;
 	unsigned long value;
 	struct crf_packetizer *crf;
+
+	if (index >= ARRAY_SIZE(crf_packetizer_table))
+		return -EPERM;
 
 	crf = &crf_packetizer_table[index];
 
@@ -381,15 +385,12 @@ static int mse_packetizer_crf_audio_depacketize(int index,
 
 	for (i = 0; i < size / sizeof(u64); i++)
 		*dest++ = be64_to_cpu(*crf_data++);
-	/* *buffer_processed = size;*/
+	*buffer_processed = size;
 
-	return size; /* continue */
+	return MSE_PACKETIZE_STATUS_COMPLETE;
 }
 
 struct mse_packetizer_ops mse_packetizer_crf_tstamp_audio_ops = {
-	.name = MSE_PACKETIZER_NAME_STR_CRF_TIMESTAMP,
-	.priv = NULL,
-	.type = MSE_TYPE_PACKETIZER_CTRL_CRF,
 	.open = mse_packetizer_crf_audio_open,
 	.release = mse_packetizer_crf_audio_release,
 	.init = mse_packetizer_crf_audio_packet_init,

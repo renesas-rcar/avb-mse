@@ -81,8 +81,13 @@
 #define AVTP_OFFSET (18)
 #endif
 
+#define AVTP_CIP_HEADER_SIZE             (8)
+#define AVTP_FRAME_SIZE_MIN              (60)
 #define AVTP_PAYLOAD_OFFSET              (24 + AVTP_OFFSET)
-#define AVTP_IEC61883_6_PAYLOAD_OFFSET   (8 + AVTP_PAYLOAD_OFFSET)
+#define AVTP_IEC61883_4_PAYLOAD_OFFSET \
+	(AVTP_CIP_HEADER_SIZE + AVTP_PAYLOAD_OFFSET)
+#define AVTP_IEC61883_6_PAYLOAD_OFFSET \
+	(AVTP_CIP_HEADER_SIZE + AVTP_PAYLOAD_OFFSET)
 #define AVTP_AAF_PAYLOAD_OFFSET          (AVTP_PAYLOAD_OFFSET)
 #define AVTP_CVF_H264_D13_PAYLOAD_OFFSET (AVTP_PAYLOAD_OFFSET)
 #define AVTP_CVF_H264_PAYLOAD_OFFSET     (4 + AVTP_PAYLOAD_OFFSET)
@@ -258,11 +263,11 @@ enum AVTP_CVF_RFC_FORMAT {
 
 /* P1722/D16 Table 26 CRF Types */
 enum AVTP_CRF_TYPE {
-	AVTP_CRF_TYPE_USER          = 0x1, /* User Specified               */
-	AVTP_CRF_TYPE_AUDIO_SAMPLE  = 0x2, /* Audio Sample Timestamp       */
-	AVTP_CRF_TYPE_VIDEO_FRAME   = 0x3, /* Video Frame Sync Timestamp   */
-	AVTP_CRF_TYPE_VIDEO_LINE    = 0x4, /* Video Line Sync Timestamp    */
-	AVTP_CRF_TYPE_MACHINE_CYCLE = 0x5, /* Machine Cycle Timestamp      */
+	AVTP_CRF_TYPE_USER          = 0x0, /* User Specified               */
+	AVTP_CRF_TYPE_AUDIO_SAMPLE  = 0x1, /* Audio Sample Timestamp       */
+	AVTP_CRF_TYPE_VIDEO_FRAME   = 0x2, /* Video Frame Sync Timestamp   */
+	AVTP_CRF_TYPE_VIDEO_LINE    = 0x3, /* Video Line Sync Timestamp    */
+	AVTP_CRF_TYPE_MACHINE_CYCLE = 0x4, /* Machine Cycle Timestamp      */
 };
 
 /* P1722/D16 Table 27 - pull field values */
@@ -401,7 +406,7 @@ static inline int avtp_fdf_to_sample_rate(int format_dependent_field)
 /* AAF */
 DEF_AVTP_ACCESSER_UINT8(aaf_format, 16)
 DEF_AVTP_ACCESSER_UINT8(aaf_channels_per_frame, 18)
-DEF_AVTP_ACCESSER_UINT8(bit_depth, 19)
+DEF_AVTP_ACCESSER_UINT8(aaf_bit_depth, 19)
 
 static inline u8 avtp_get_aaf_nsr(void *data)
 {
@@ -532,11 +537,11 @@ DEF_AVTP_ACCESSER_UINT16(crf_timestamp_interval, 18)
 /**
  * Template - IEEE1722
  */
-extern void avtp_copy_iec61883_6_template(void *data);
-extern void avtp_copy_aaf_pcm_template(void *data);
-extern void avtp_copy_cvf_h264_d13_template(void *data);
-extern void avtp_copy_cvf_h264_template(void *data);
-extern void avtp_copy_cvf_mjpeg_template(void *data);
-extern void avtp_copy_crf_template(void *data);
+void avtp_copy_iec61883_4_template(void *data);
+void avtp_copy_iec61883_6_template(void *data);
+void avtp_copy_aaf_pcm_template(void *data);
+void avtp_copy_cvf_h264_template(void *data);
+void avtp_copy_cvf_mjpeg_template(void *data);
+void avtp_copy_crf_template(void *data);
 
 #endif /* __AVTP_H__ */
