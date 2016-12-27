@@ -85,7 +85,7 @@ static struct mse_ioctl_table *ioctl_table;
 /* Functions */
 static int mse_ioctl_open(struct inode *inode, struct file *file)
 {
-	pr_debug("[%s] minor=%d\n", __func__, iminor(inode));
+	mse_debug("minor=%d\n", iminor(inode));
 
 	if (ioctl_table[iminor(inode)].open_f)
 		return -EBUSY;
@@ -97,7 +97,7 @@ static int mse_ioctl_open(struct inode *inode, struct file *file)
 
 static int mse_ioctl_release(struct inode *inode, struct file *file)
 {
-	pr_debug("[%s] minor=%d\n", __func__, iminor(inode));
+	mse_debug("minor=%d\n", iminor(inode));
 
 	ioctl_table[iminor(inode)].open_f = false;
 
@@ -110,7 +110,7 @@ static long mse_ioctl_get_info(struct file *file, unsigned long param)
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_info(iminor(file->f_inode), &data);
 	if (ret)
@@ -128,7 +128,7 @@ static long mse_ioctl_set_network_device(struct file *file,
 	struct mse_network_device data;
 	char __user *buf = (char __user *)param;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (copy_from_user(&data, buf, sizeof(data)))
 		return -EFAULT;
@@ -143,7 +143,7 @@ static long mse_ioctl_get_network_device(struct file *file,
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_network_device(iminor(file->f_inode), &data);
 	if (ret)
@@ -160,7 +160,7 @@ static long mse_ioctl_set_packetizer(struct file *file, unsigned long param)
 	struct mse_packetizer data;
 	char __user *buf = (char __user *)param;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (copy_from_user(&data, buf, sizeof(data)))
 		return -EFAULT;
@@ -174,7 +174,7 @@ static long mse_ioctl_get_packetizer(struct file *file, unsigned long param)
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_packetizer(iminor(file->f_inode), &data);
 	if (ret)
@@ -191,7 +191,7 @@ static long mse_ioctl_set_avtp_tx_param(struct file *file, unsigned long param)
 	struct mse_avtp_tx_param data;
 	char __user *buf = (char __user *)param;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (copy_from_user(&data, buf, sizeof(data)))
 		return -EFAULT;
@@ -205,7 +205,7 @@ static long mse_ioctl_get_avtp_tx_param(struct file *file, unsigned long param)
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_avtp_tx_param(iminor(file->f_inode), &data);
 	if (ret)
@@ -222,7 +222,7 @@ static long mse_ioctl_set_avtp_rx_param(struct file *file, unsigned long param)
 	struct mse_avtp_rx_param data;
 	char __user *buf = (char __user *)param;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (copy_from_user(&data, buf, sizeof(data)))
 		return -EFAULT;
@@ -236,7 +236,7 @@ static long mse_ioctl_get_avtp_rx_param(struct file *file, unsigned long param)
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_avtp_rx_param(iminor(file->f_inode), &data);
 	if (ret)
@@ -253,7 +253,7 @@ static long mse_ioctl_set_audio_config(struct file *file, unsigned long param)
 	struct mse_media_audio_config data;
 	char __user *buf = (char __user *)param;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (copy_from_user(&data, buf, sizeof(data)))
 		return -EFAULT;
@@ -267,7 +267,7 @@ static long mse_ioctl_get_audio_config(struct file *file, unsigned long param)
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_media_audio_config(iminor(file->f_inode), &data);
 	if (ret)
@@ -284,7 +284,7 @@ static long mse_ioctl_set_video_config(struct file *file, unsigned long param)
 	struct mse_media_video_config data;
 	char __user *buf = (char __user *)param;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (copy_from_user(&data, buf, sizeof(data)))
 		return -EFAULT;
@@ -298,7 +298,7 @@ static long mse_ioctl_get_video_config(struct file *file, unsigned long param)
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_media_video_config(iminor(file->f_inode), &data);
 	if (ret)
@@ -316,7 +316,7 @@ static long mse_ioctl_set_mpeg2ts_config(struct file *file,
 	struct mse_media_mpeg2ts_config data;
 	char __user *buf = (char __user *)param;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (copy_from_user(&data, buf, sizeof(data)))
 		return -EFAULT;
@@ -332,7 +332,7 @@ static long mse_ioctl_get_mpeg2ts_config(struct file *file,
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_media_mpeg2ts_config(iminor(file->f_inode),
 						  &data);
@@ -350,7 +350,7 @@ static long mse_ioctl_set_ptp_config(struct file *file, unsigned long param)
 	struct mse_ptp_config data;
 	char __user *buf = (char __user *)param;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (copy_from_user(&data, buf, sizeof(data)))
 		return -EFAULT;
@@ -364,7 +364,7 @@ static long mse_ioctl_get_ptp_config(struct file *file, unsigned long param)
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_ptp_config(iminor(file->f_inode), &data);
 	if (ret)
@@ -381,7 +381,7 @@ static long mse_ioctl_set_mch_config(struct file *file, unsigned long param)
 	struct mse_mch_config data;
 	char __user *buf = (char __user *)param;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (copy_from_user(&data, buf, sizeof(data)))
 		return -EFAULT;
@@ -395,7 +395,7 @@ static long mse_ioctl_get_mch_config(struct file *file, unsigned long param)
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_mch_config(iminor(file->f_inode), &data);
 	if (ret)
@@ -413,7 +413,7 @@ static long mse_ioctl_set_avtp_tx_param_crf(struct file *file,
 	struct mse_avtp_tx_param data;
 	char __user *buf = (char __user *)param;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (copy_from_user(&data, buf, sizeof(data)))
 		return -EFAULT;
@@ -428,7 +428,7 @@ static long mse_ioctl_get_avtp_tx_param_crf(struct file *file,
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_avtp_tx_param_crf(iminor(file->f_inode), &data);
 	if (ret)
@@ -446,7 +446,7 @@ static long mse_ioctl_set_avtp_rx_param_crf(struct file *file,
 	struct mse_avtp_rx_param data;
 	char __user *buf = (char __user *)param;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (copy_from_user(&data, buf, sizeof(data)))
 		return -EFAULT;
@@ -461,7 +461,7 @@ static long mse_ioctl_get_avtp_rx_param_crf(struct file *file,
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_avtp_rx_param_crf(iminor(file->f_inode), &data);
 	if (ret)
@@ -478,7 +478,7 @@ static long mse_ioctl_set_delay_time(struct file *file, unsigned long param)
 	struct mse_delay_time data;
 	char __user *buf = (char __user *)param;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (copy_from_user(&data, buf, sizeof(data)))
 		return -EFAULT;
@@ -492,7 +492,7 @@ static long mse_ioctl_get_delay_time(struct file *file, unsigned long param)
 	char __user *buf = (char __user *)param;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	ret = mse_config_get_delay_time(iminor(file->f_inode), &data);
 	if (ret)
@@ -510,11 +510,10 @@ static long mse_ioctl_unlocked_ioctl(struct file *file,
 {
 	long ret;
 
-	pr_debug("[%s] cmd=0x%08x\n", __func__, cmd);
+	mse_debug("cmd=0x%08x\n", cmd);
 
 	if (iminor(file->f_inode) > ioctl_max) {
-		pr_err("[%s] illegal minor=0x%08x\n",
-		       __func__, iminor(file->f_inode));
+		mse_err("illegal minor=0x%08x\n", iminor(file->f_inode));
 		return -EINVAL;
 	}
 
@@ -595,7 +594,7 @@ static long mse_ioctl_unlocked_ioctl(struct file *file,
 		ret = mse_ioctl_get_delay_time(file, param);
 		break;
 	default:
-		pr_err("[%s] illegal cmd=0x%08x\n", __func__, cmd);
+		mse_err("illegal cmd=0x%08x\n", cmd);
 		return -EINVAL;
 	}
 
@@ -607,7 +606,7 @@ static long mse_ioctl_compat_ioctl(struct file *file,
 				   unsigned int cmd,
 				   unsigned long param)
 {
-	pr_debug("[%s] cmd=0x%08x\n", __func__, cmd);
+	mse_debug("cmd=0x%08x\n", cmd);
 
 	return mse_ioctl_unlocked_ioctl(file, cmd, param);
 }
@@ -630,11 +629,11 @@ int mse_ioctl_register(int index)
 	int err;
 
 	if (ioctl_table[index].used_f) {
-		pr_err("[%s] failed /dev/mse%d\n", __func__, index);
+		mse_err("failed /dev/mse%d\n", index);
 		return -EINVAL;
 	}
 
-	pr_debug("[%s] resister /dev/mse%d\n", __func__, index);
+	mse_debug("resister /dev/mse%d\n", index);
 
 	/* initialize cdev */
 	cdev = &ioctl_table[index].cdev;
@@ -643,11 +642,11 @@ int mse_ioctl_register(int index)
 
 	err = cdev_add(cdev, devt, ioctl_max);
 	if (err) {
-		pr_err("[%s] failed cdev_add()\n", __func__);
+		mse_err("failed cdev_add()\n");
 		return err;
 	}
 
-	pr_debug("[%s] success!\n", __func__);
+	mse_debug("success!\n");
 	ioctl_table[index].index = index;
 	ioctl_table[index].used_f = true;
 
@@ -656,7 +655,7 @@ int mse_ioctl_register(int index)
 
 void mse_ioctl_unregister(int index)
 {
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	cdev_del(&ioctl_table[index].cdev);
 	ioctl_table[index].used_f = false;
@@ -666,7 +665,7 @@ int mse_ioctl_init(int major, int mse_instance_max)
 {
 	int err;
 
-	pr_debug("[%s] start\n", __func__);
+	mse_debug("START\n");
 
 	ioctl_table = kcalloc(mse_instance_max, sizeof(*ioctl_table),
 			      GFP_KERNEL);
@@ -682,7 +681,7 @@ int mse_ioctl_init(int major, int mse_instance_max)
 	}
 
 	if (err < 0) {
-		pr_err("[%s] failed _chrdev_region() ret=%d\n", __func__, err);
+		mse_err("failed _chrdev_region() ret=%d\n", err);
 		return err;
 	}
 
@@ -693,7 +692,7 @@ int mse_ioctl_init(int major, int mse_instance_max)
 
 void mse_ioctl_exit(int major, int mse_instance_max)
 {
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	unregister_chrdev_region(MKDEV(major, 0), mse_instance_max);
 	kfree(ioctl_table);
