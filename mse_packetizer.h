@@ -75,9 +75,9 @@ extern struct mse_packetizer_ops mse_packetizer_aaf_ops;
 /* Audio Packetizer for IEC61883-6 */
 extern struct mse_packetizer_ops mse_packetizer_audio_iec61883_6_ops;
 /* Video Packetizer for CVF H.264 D13 */
-extern struct mse_packetizer_ops mse_packetizer_video_cvf_h264_d13_ops;
+extern struct mse_packetizer_ops mse_packetizer_cvf_h264_d13_ops;
 /* Video Packetizer for CVF H.264 */
-extern struct mse_packetizer_ops mse_packetizer_video_cvf_h264_ops;
+extern struct mse_packetizer_ops mse_packetizer_cvf_h264_ops;
 /* Video Packetizer for CVF MJPEG */
 extern struct mse_packetizer_ops mse_packetizer_video_cvf_mjpeg_ops;
 /* Packetizer for CRF timestamp Audio */

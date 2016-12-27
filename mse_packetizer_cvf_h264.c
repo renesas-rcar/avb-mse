@@ -136,7 +136,7 @@ enum NALU_TYPE {
 	NALU_TYPE_UNSPECIFIED31 = 31,
 };
 
-struct avtp_param {
+struct avtp_cvf_h264_param {
 	char dest_addr[MSE_MAC_LEN_MAX];
 	char source_addr[MSE_MAC_LEN_MAX];
 	int payload_size;
@@ -166,12 +166,12 @@ struct cvf_h264_packetizer {
 	unsigned char packet_template[ETHFRAMELEN_MAX];
 
 	struct mse_network_config net_config;
-	struct mse_video_config cvf_config;
+	struct mse_video_config video_config;
 };
 
 struct cvf_h264_packetizer cvf_h264_packetizer_table[MSE_PACKETIZER_MAX];
 
-static int mse_packetizer_video_cvf_h264_open(void)
+static int mse_packetizer_cvf_h264_open(void)
 {
 	struct cvf_h264_packetizer *h264;
 	int index;
@@ -195,7 +195,7 @@ static int mse_packetizer_video_cvf_h264_open(void)
 	return index;
 }
 
-static int mse_packetizer_video_cvf_h264_d13_open(void)
+static int mse_packetizer_cvf_h264_d13_open(void)
 {
 	struct cvf_h264_packetizer *h264;
 	int index;
@@ -220,7 +220,7 @@ static int mse_packetizer_video_cvf_h264_d13_open(void)
 	return index;
 }
 
-static int mse_packetizer_video_cvf_h264_release(int index)
+static int mse_packetizer_cvf_h264_release(int index)
 {
 	struct cvf_h264_packetizer *h264;
 
@@ -234,7 +234,7 @@ static int mse_packetizer_video_cvf_h264_release(int index)
 	return 0;
 }
 
-static int mse_packetizer_video_cvf_h264_packet_init(int index)
+static int mse_packetizer_cvf_h264_packet_init(int index)
 {
 	struct cvf_h264_packetizer *h264;
 
@@ -250,7 +250,7 @@ static int mse_packetizer_video_cvf_h264_packet_init(int index)
 	return 0;
 }
 
-static int mse_packetizer_video_cvf_h264_set_network_config(
+static int mse_packetizer_cvf_h264_set_network_config(
 					int index,
 					struct mse_network_config *config)
 {
@@ -265,8 +265,9 @@ static int mse_packetizer_video_cvf_h264_set_network_config(
 	return 0;
 }
 
-static int mse_packetizer_video_cvf_h264_header_build(void *dst,
-						      struct avtp_param *param)
+static int mse_packetizer_cvf_h264_header_build(
+					void *dst,
+					struct avtp_cvf_h264_param *param)
 {
 	u8 cfi;
 	u8 streamid[AVTP_STREAMID_SIZE];
@@ -297,12 +298,12 @@ static int mse_packetizer_video_cvf_h264_header_build(void *dst,
 	return 0;
 }
 
-static int mse_packetizer_video_cvf_h264_set_video_config(
+static int mse_packetizer_cvf_h264_set_video_config(
 					int index,
 					struct mse_video_config *config)
 {
 	struct cvf_h264_packetizer *h264;
-	struct avtp_param param;
+	struct avtp_cvf_h264_param param;
 	int bytes_per_frame;
 	int data_offset;
 
@@ -311,7 +312,7 @@ static int mse_packetizer_video_cvf_h264_set_video_config(
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 	h264 = &cvf_h264_packetizer_table[index];
-	h264->cvf_config = *config;
+	h264->video_config = *config;
 
 	switch (config->format) {
 	case MSE_VIDEO_FORMAT_H264_BYTE_STREAM:
@@ -327,7 +328,7 @@ static int mse_packetizer_video_cvf_h264_set_video_config(
 	h264->f_single_nal = CONFIG_CVF_H264_SEND_SINGLE_NAL;
 
 	data_offset = h264->header_size + FU_HEADER_LEN;
-	bytes_per_frame = h264->cvf_config.bytes_per_frame;
+	bytes_per_frame = h264->video_config.bytes_per_frame;
 	if (bytes_per_frame == 0) {
 		h264->payload_max = ETHFRAMELEN_MAX - data_offset;
 	} else {
@@ -348,13 +349,13 @@ static int mse_packetizer_video_cvf_h264_set_video_config(
 	param.vid = h264->net_config.vlanid;
 	param.payload_size = 0;
 
-	mse_packetizer_video_cvf_h264_header_build(h264->packet_template,
-						   &param);
+	mse_packetizer_cvf_h264_header_build(h264->packet_template, &param);
+
 	return 0;
 }
 
-static int mse_packetizer_video_cvf_h264_calc_cbs(int index,
-						  struct mse_cbsparam *cbs)
+static int mse_packetizer_cvf_h264_calc_cbs(int index,
+					    struct mse_cbsparam *cbs)
 {
 	struct cvf_h264_packetizer *h264;
 	u64 value;
@@ -375,8 +376,8 @@ static int mse_packetizer_video_cvf_h264_calc_cbs(int index,
 		return -EPERM;
 	}
 
-	bandwidth_fraction_numerator = (u64)h264->cvf_config.bitrate *
-						(u64)ETHFRAMELEN_MAX_IPG;
+	bandwidth_fraction_numerator = (u64)h264->video_config.bitrate *
+				       (u64)ETHFRAMELEN_MAX_IPG;
 	do_div(bandwidth_fraction_numerator, TRANSMIT_RATE_BASE);
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
 	do_div(value, bandwidth_fraction_denominator);
@@ -409,13 +410,13 @@ static inline bool is_single_nal(u8 fu_indicator)
 	       nalu_type < NALU_TYPE_STAP_A;
 }
 
-static int mse_packetizer_video_cvf_h264_packetize(int index,
-						   void *packet,
-						   size_t *packet_size,
-						   void *buffer,
-						   size_t buffer_size,
-						   size_t *buffer_processed,
-						   unsigned int *timestamp)
+static int mse_packetizer_cvf_h264_packetize(int index,
+					     void *packet,
+					     size_t *packet_size,
+					     void *buffer,
+					     size_t buffer_size,
+					     size_t *buffer_processed,
+					     unsigned int *timestamp)
 {
 	struct cvf_h264_packetizer *h264;
 	int data_len;
@@ -582,13 +583,13 @@ static bool check_pic_end(struct cvf_h264_packetizer *h264,
 	return pic_end;
 }
 
-static int mse_packetizer_video_cvf_h264_depacketize(int index,
-						     void *buffer,
-						     size_t buffer_size,
-						     size_t *buffer_processed,
-						     unsigned int *timestamp,
-						     void *packet,
-						     size_t packet_size)
+static int mse_packetizer_cvf_h264_depacketize(int index,
+					       void *buffer,
+					       size_t buffer_size,
+					       size_t *buffer_processed,
+					       unsigned int *timestamp,
+					       void *packet,
+					       size_t packet_size)
 {
 	struct cvf_h264_packetizer *h264;
 	u32 data_offset;
@@ -726,26 +727,26 @@ static int mse_packetizer_video_cvf_h264_depacketize(int index,
 	return MSE_PACKETIZE_STATUS_COMPLETE;
 }
 
-struct mse_packetizer_ops mse_packetizer_video_cvf_h264_d13_ops = {
+struct mse_packetizer_ops mse_packetizer_cvf_h264_d13_ops = {
 	.id = MSE_PACKETIZER_CVF_H264_D13,
-	.open = mse_packetizer_video_cvf_h264_d13_open,
-	.release = mse_packetizer_video_cvf_h264_release,
-	.init = mse_packetizer_video_cvf_h264_packet_init,
-	.set_network_config = mse_packetizer_video_cvf_h264_set_network_config,
-	.set_video_config = mse_packetizer_video_cvf_h264_set_video_config,
-	.calc_cbs = mse_packetizer_video_cvf_h264_calc_cbs,
-	.packetize = mse_packetizer_video_cvf_h264_packetize,
-	.depacketize = mse_packetizer_video_cvf_h264_depacketize,
+	.open = mse_packetizer_cvf_h264_d13_open,
+	.release = mse_packetizer_cvf_h264_release,
+	.init = mse_packetizer_cvf_h264_packet_init,
+	.set_network_config = mse_packetizer_cvf_h264_set_network_config,
+	.set_video_config = mse_packetizer_cvf_h264_set_video_config,
+	.calc_cbs = mse_packetizer_cvf_h264_calc_cbs,
+	.packetize = mse_packetizer_cvf_h264_packetize,
+	.depacketize = mse_packetizer_cvf_h264_depacketize,
 };
 
-struct mse_packetizer_ops mse_packetizer_video_cvf_h264_ops = {
+struct mse_packetizer_ops mse_packetizer_cvf_h264_ops = {
 	.id = MSE_PACKETIZER_CVF_H264,
-	.open = mse_packetizer_video_cvf_h264_open,
-	.release = mse_packetizer_video_cvf_h264_release,
-	.init = mse_packetizer_video_cvf_h264_packet_init,
-	.set_network_config = mse_packetizer_video_cvf_h264_set_network_config,
-	.set_video_config = mse_packetizer_video_cvf_h264_set_video_config,
-	.calc_cbs = mse_packetizer_video_cvf_h264_calc_cbs,
-	.packetize = mse_packetizer_video_cvf_h264_packetize,
-	.depacketize = mse_packetizer_video_cvf_h264_depacketize,
+	.open = mse_packetizer_cvf_h264_open,
+	.release = mse_packetizer_cvf_h264_release,
+	.init = mse_packetizer_cvf_h264_packet_init,
+	.set_network_config = mse_packetizer_cvf_h264_set_network_config,
+	.set_video_config = mse_packetizer_cvf_h264_set_video_config,
+	.calc_cbs = mse_packetizer_cvf_h264_calc_cbs,
+	.packetize = mse_packetizer_cvf_h264_packetize,
+	.depacketize = mse_packetizer_cvf_h264_depacketize,
 };
