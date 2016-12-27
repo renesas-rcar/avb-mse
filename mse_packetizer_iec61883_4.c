@@ -91,7 +91,7 @@
 #define NSEC                    (1000000000L)
 #define DEFAULT_DIFF_TIMESTAMP  (NSEC / 8000)
 
-struct avtp_param {
+struct avtp_iec61883_4_param {
 	char dest_addr[MSE_MAC_LEN_MAX];
 	char source_addr[MSE_MAC_LEN_MAX];
 	int payload_size;
@@ -100,7 +100,7 @@ struct avtp_param {
 	int vid;
 };
 
-struct mpeg2ts_packetizer {
+struct iec61883_4_packetizer {
 	bool used_f;
 
 	int send_seq_num;
@@ -120,84 +120,85 @@ struct mpeg2ts_packetizer {
 	struct mse_mpeg2ts_config mpeg2ts_config;
 };
 
-struct mpeg2ts_packetizer mpeg2ts_packetizer_table[MSE_PACKETIZER_MAX];
+struct iec61883_4_packetizer iec61883_4_packetizer_table[MSE_PACKETIZER_MAX];
 
-static int mse_packetizer_video_iec_open(void)
+static int mse_packetizer_iec61883_4_open(void)
 {
-	struct mpeg2ts_packetizer *mpeg2ts;
+	struct iec61883_4_packetizer *iec61883_4;
 	int index;
 
-	for (index = 0; mpeg2ts_packetizer_table[index].used_f &&
-	     index < ARRAY_SIZE(mpeg2ts_packetizer_table); index++)
+	for (index = 0; iec61883_4_packetizer_table[index].used_f &&
+	     index < ARRAY_SIZE(iec61883_4_packetizer_table); index++)
 		;
 
-	if (index >= ARRAY_SIZE(mpeg2ts_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
-	mpeg2ts = &mpeg2ts_packetizer_table[index];
+	iec61883_4 = &iec61883_4_packetizer_table[index];
 
-	mpeg2ts->used_f = true;
-	mpeg2ts->send_seq_num = 0;
-	mpeg2ts->old_seq_num = SEQNUM_INIT;
-	mpeg2ts->seq_num_err = SEQNUM_INIT;
-	mpeg2ts->dbc = 0;
+	iec61883_4->used_f = true;
+	iec61883_4->send_seq_num = 0;
+	iec61883_4->old_seq_num = SEQNUM_INIT;
+	iec61883_4->seq_num_err = SEQNUM_INIT;
+	iec61883_4->dbc = 0;
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 	return index;
 }
 
-static int mse_packetizer_video_iec_release(int index)
+static int mse_packetizer_iec61883_4_release(int index)
 {
-	struct mpeg2ts_packetizer *mpeg2ts;
+	struct iec61883_4_packetizer *iec61883_4;
 
-	if (index >= ARRAY_SIZE(mpeg2ts_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
-	mpeg2ts = &mpeg2ts_packetizer_table[index];
+	iec61883_4 = &iec61883_4_packetizer_table[index];
 	pr_debug("[%s] index=%d\n", __func__, index);
 
-	memset(mpeg2ts, 0, sizeof(*mpeg2ts));
+	memset(iec61883_4, 0, sizeof(*iec61883_4));
 
 	return 0;
 }
 
-static int mse_packetizer_video_iec_packet_init(int index)
+static int mse_packetizer_iec61883_4_packet_init(int index)
 {
-	struct mpeg2ts_packetizer *mpeg2ts;
+	struct iec61883_4_packetizer *iec61883_4;
 
-	if (index >= ARRAY_SIZE(mpeg2ts_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
 	pr_debug("[%s] index=%d\n", __func__, index);
-	mpeg2ts = &mpeg2ts_packetizer_table[index];
+	iec61883_4 = &iec61883_4_packetizer_table[index];
 
-	mpeg2ts->send_seq_num = 0;
-	mpeg2ts->old_seq_num = SEQNUM_INIT;
-	mpeg2ts->seq_num_err = SEQNUM_INIT;
-	mpeg2ts->dbc = 0;
+	iec61883_4->send_seq_num = 0;
+	iec61883_4->old_seq_num = SEQNUM_INIT;
+	iec61883_4->seq_num_err = SEQNUM_INIT;
+	iec61883_4->dbc = 0;
 
 	return 0;
 }
 
-static int mse_packetizer_video_iec_set_network_config(
+static int mse_packetizer_iec61883_4_set_network_config(
 					int index,
 					struct mse_network_config *config)
 {
-	struct mpeg2ts_packetizer *mpeg2ts;
+	struct iec61883_4_packetizer *iec61883_4;
 
-	if (index >= ARRAY_SIZE(mpeg2ts_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
 	pr_debug("[%s] index=%d\n", __func__, index);
 
-	mpeg2ts = &mpeg2ts_packetizer_table[index];
-	mpeg2ts->net_config = *config;
+	iec61883_4 = &iec61883_4_packetizer_table[index];
+	iec61883_4->net_config = *config;
 
 	return 0;
 }
 
-static int mse_packetizer_video_iec_header_build(void *dst,
-						 struct avtp_param *param)
+static int mse_packetizer_iec61883_4_header_build(
+					void *dst,
+					struct avtp_iec61883_4_param *param)
 {
 	int hlen, len;
 	u8 cfi;
@@ -231,67 +232,71 @@ static int mse_packetizer_video_iec_header_build(void *dst,
 	return hlen + len;
 }
 
-static int mse_packetizer_video_iec_set_mpeg2ts_config(
+static int mse_packetizer_iec61883_4_set_mpeg2ts_config(
 					int index,
 					struct mse_mpeg2ts_config *config)
 {
-	struct mpeg2ts_packetizer *mpeg2ts;
-	struct avtp_param param;
+	struct iec61883_4_packetizer *iec61883_4;
+	struct avtp_iec61883_4_param param;
+	struct mse_network_config *net_config;
 
-	if (index >= ARRAY_SIZE(mpeg2ts_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
 	pr_debug("[%s] index=%d\n", __func__, index);
-	mpeg2ts = &mpeg2ts_packetizer_table[index];
-	mpeg2ts->mpeg2ts_config = *config;
+	iec61883_4 = &iec61883_4_packetizer_table[index];
+	iec61883_4->mpeg2ts_config = *config;
+	net_config = &iec61883_4->net_config;
 
-	memcpy(param.dest_addr, mpeg2ts->net_config.dest_addr, MSE_MAC_LEN_MAX);
-	memcpy(param.source_addr, mpeg2ts->net_config.source_addr,
+	memcpy(param.dest_addr, net_config->dest_addr, MSE_MAC_LEN_MAX);
+	memcpy(param.source_addr, net_config->source_addr,
 	       MSE_MAC_LEN_MAX);
-	param.uniqueid = mpeg2ts->net_config.uniqueid;
-	param.priority = mpeg2ts->net_config.priority;
-	param.vid = mpeg2ts->net_config.vlanid;
+	param.uniqueid = net_config->uniqueid;
+	param.priority = net_config->priority;
+	param.vid = net_config->vlanid;
 	param.payload_size = 0;
 
-	mse_packetizer_video_iec_header_build(mpeg2ts->packet_template,
-					      &param);
+	mse_packetizer_iec61883_4_header_build(iec61883_4->packet_template,
+					       &param);
 
 	return 0;
 }
 
-static int mse_packetizer_video_iec_calc_cbs(int index,
-					     struct mse_cbsparam *cbs)
+static int mse_packetizer_iec61883_4_calc_cbs(int index,
+					      struct mse_cbsparam *cbs)
 {
-	struct mpeg2ts_packetizer *mpeg2ts;
+	struct iec61883_4_packetizer *iec61883_4;
 	u64 value;
 	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
 	int payload_size, packet_size;
+	struct mse_network_config *net_config;
 
-	if (index >= ARRAY_SIZE(mpeg2ts_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
 	pr_err("[%s] index=%d\n", __func__, index);
-	mpeg2ts = &mpeg2ts_packetizer_table[index];
-	payload_size = mpeg2ts->mpeg2ts_config.tspackets_per_frame *
+	iec61883_4 = &iec61883_4_packetizer_table[index];
+	payload_size = iec61883_4->mpeg2ts_config.tspackets_per_frame *
 		MSE_TS_PACKET_SIZE;
 	packet_size =
 		ETH_IPG + AVTP_IEC61883_4_PAYLOAD_OFFSET +
-		mpeg2ts->mpeg2ts_config.tspackets_per_frame *
+		iec61883_4->mpeg2ts_config.tspackets_per_frame *
 		AVTP_SOURCE_PACKET_SIZE;
 	pr_err("[%s] payload_size=%d packet_size=%d\n",
 	       __func__, payload_size, packet_size);
 
+	net_config = &iec61883_4->net_config;
 	bandwidth_fraction_denominator =
-		(u64)mpeg2ts->net_config.port_transmit_rate * (u64)payload_size;
+		(u64)net_config->port_transmit_rate * (u64)payload_size;
 
 	if (!bandwidth_fraction_denominator) {
 		pr_err("[%s] Link speed %lu bps is not support\n",
-		       __func__, mpeg2ts->net_config.port_transmit_rate);
+		       __func__, net_config->port_transmit_rate);
 		return -EPERM;
 	}
 
 	bandwidth_fraction_numerator =
-		(u64)mpeg2ts->mpeg2ts_config.bitrate * (u64)packet_size;
+		(u64)iec61883_4->mpeg2ts_config.bitrate * (u64)packet_size;
 	bandwidth_fraction_denominator >>= 8;
 	bandwidth_fraction_numerator >>= 8;
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
@@ -316,15 +321,15 @@ static u64 m2ts_timestamp_to_nsec(u32 host_header)
 	return div64_u64(ts_nsec, M2TS_FREQ);
 }
 
-static int mse_packetizer_video_iec_packetize(int index,
-					      void *packet,
-					      size_t *packet_size,
-					      void *buffer,
-					      size_t buffer_size,
-					      size_t *buffer_processed,
-					      unsigned int *timestamp)
+static int mse_packetizer_iec61883_4_packetize(int index,
+					       void *packet,
+					       size_t *packet_size,
+					       void *buffer,
+					       size_t buffer_size,
+					       size_t *buffer_processed,
+					       unsigned int *timestamp)
 {
-	struct mpeg2ts_packetizer *mpeg2ts;
+	struct iec61883_4_packetizer *iec61883_4;
 	int data_len;
 	unsigned char *data;
 	unsigned char *payload;
@@ -337,16 +342,16 @@ static int mse_packetizer_video_iec_packetize(int index,
 	unsigned int num = 0, diff;
 	bool is_top_on_buffer;
 
-	if (index >= ARRAY_SIZE(mpeg2ts_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
-	mpeg2ts = &mpeg2ts_packetizer_table[index];
+	iec61883_4 = &iec61883_4_packetizer_table[index];
 	pr_debug("[%s] index=%d seqnum=%d process=%zu/%zu t=%d\n",
-		 __func__, index, mpeg2ts->send_seq_num, *buffer_processed,
+		 __func__, index, iec61883_4->send_seq_num, *buffer_processed,
 		 buffer_size, *timestamp);
 
 	/* get mpeg2ts type */
-	switch (mpeg2ts->mpeg2ts_config.mpeg2ts_type) {
+	switch (iec61883_4->mpeg2ts_config.mpeg2ts_type) {
 	case MSE_MPEG2TS_TYPE_TS:
 		is_ts = 1;
 		src_packet_size = MSE_TS_PACKET_SIZE;
@@ -357,27 +362,27 @@ static int mse_packetizer_video_iec_packetize(int index,
 		break;
 	default:
 		pr_err("[%s] error mpeg2ts type=%d\n",
-		       __func__, mpeg2ts->mpeg2ts_config.mpeg2ts_type);
+		       __func__, iec61883_4->mpeg2ts_config.mpeg2ts_type);
 		return -EINVAL;
 	}
 
 	is_top_on_buffer = (*buffer_processed == 0) ? true : false;
 
 	if (is_top_on_buffer) {
-		mpeg2ts->curr_timestamp = *timestamp;
-		if (mpeg2ts->diff_timestamp == 0) {
-			mpeg2ts->diff_timestamp = DEFAULT_DIFF_TIMESTAMP;
+		iec61883_4->curr_timestamp = *timestamp;
+		if (iec61883_4->diff_timestamp == 0) {
+			iec61883_4->diff_timestamp = DEFAULT_DIFF_TIMESTAMP;
 		} else {
 			num = buffer_size / src_packet_size;
-			diff = mpeg2ts->curr_timestamp -
-				mpeg2ts->prev_timestamp;
-			mpeg2ts->diff_timestamp = diff / num;
+			diff = iec61883_4->curr_timestamp -
+				iec61883_4->prev_timestamp;
+			iec61883_4->diff_timestamp = diff / num;
 		}
 		pr_debug("[%s] timestamp curr %u prev %u diff %u num %u\n",
 			 __func__,
-			 mpeg2ts->curr_timestamp,
-			 mpeg2ts->prev_timestamp,
-			 mpeg2ts->diff_timestamp,
+			 iec61883_4->curr_timestamp,
+			 iec61883_4->prev_timestamp,
+			 iec61883_4->diff_timestamp,
 			 num);
 	}
 
@@ -391,36 +396,36 @@ static int mse_packetizer_video_iec_packetize(int index,
 		return -EINVAL;
 	}
 	payloads = data_len / src_packet_size;
-	if (payloads > mpeg2ts->mpeg2ts_config.tspackets_per_frame)
-		payloads = mpeg2ts->mpeg2ts_config.tspackets_per_frame;
+	if (payloads > iec61883_4->mpeg2ts_config.tspackets_per_frame)
+		payloads = iec61883_4->mpeg2ts_config.tspackets_per_frame;
 
 	/* header */
 	memcpy(packet,
-	       mpeg2ts->packet_template,
+	       iec61883_4->packet_template,
 	       AVTP_IEC61883_4_PAYLOAD_OFFSET);
 
 	/* variable header */
-	avtp_set_sequence_num(packet, mpeg2ts->send_seq_num++);
+	avtp_set_sequence_num(packet, iec61883_4->send_seq_num++);
 	avtp_set_stream_data_length(
 		packet,
 		payloads * AVTP_SOURCE_PACKET_SIZE + AVTP_CIP_HEADER_SIZE);
-	avtp_set_iec61883_dbc(packet, mpeg2ts->dbc);
-	mpeg2ts->dbc += payloads;
+	avtp_set_iec61883_dbc(packet, iec61883_4->dbc);
+	iec61883_4->dbc += payloads;
 
 	payload = packet + AVTP_IEC61883_4_PAYLOAD_OFFSET;
 	for (i = 0; i < payloads; i++) {
 		if (is_ts) {                    /* TS */
-			avtp_timestamp = mpeg2ts->curr_timestamp;
-			mpeg2ts->curr_timestamp += mpeg2ts->diff_timestamp;
+			avtp_timestamp = iec61883_4->curr_timestamp;
+			iec61883_4->curr_timestamp += iec61883_4->diff_timestamp;
 		} else {                        /* M2TS */
-			avtp_timestamp = mpeg2ts->curr_timestamp;
+			avtp_timestamp = iec61883_4->curr_timestamp;
 
 			timestamp_ns = m2ts_timestamp_to_nsec(ntohl(*(unsigned long *)data));
 			if (is_top_on_buffer) {
-				mpeg2ts->m2ts_start = (u32)timestamp_ns;
+				iec61883_4->m2ts_start = (u32)timestamp_ns;
 			} else {
 				/* timestamp adjust by m2ts timestamp */
-				avtp_timestamp += ((u32)timestamp_ns - mpeg2ts->m2ts_start);
+				avtp_timestamp += ((u32)timestamp_ns - iec61883_4->m2ts_start);
 			}
 
 			/* offset adjust by m2ts host_header size */
@@ -432,7 +437,7 @@ static int mse_packetizer_video_iec_packetize(int index,
 
 		/* copy to source_header_timestamp */
 		*(__be32 *)payload = cpu_to_be32(avtp_timestamp);
-		/* copy to MPEG2TS packet */
+		/* copy to iec61883_4 packet */
 		memcpy(payload + sizeof(__be32), data, MSE_TS_PACKET_SIZE);
 
 		/* increment payload and data offset */
@@ -449,7 +454,7 @@ static int mse_packetizer_video_iec_packetize(int index,
 		 src_packet_size * payloads);
 
 	if (*buffer_processed >= buffer_size) {
-		mpeg2ts->prev_timestamp = *timestamp;
+		iec61883_4->prev_timestamp = *timestamp;
 
 		return MSE_PACKETIZE_STATUS_COMPLETE;
 	}
@@ -457,24 +462,24 @@ static int mse_packetizer_video_iec_packetize(int index,
 	return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
-static int mse_packetizer_video_iec_depacketize(int index,
-						void *buffer,
-						size_t buffer_size,
-						size_t *buffer_processed,
-						unsigned int *timestamp,
-						void *packet,
-						size_t packet_size)
+static int mse_packetizer_iec61883_4_depacketize(int index,
+						 void *buffer,
+						 size_t buffer_size,
+						 size_t *buffer_processed,
+						 unsigned int *timestamp,
+						 void *packet,
+						 size_t packet_size)
 {
-	struct mpeg2ts_packetizer *mpeg2ts;
+	struct iec61883_4_packetizer *iec61883_4;
 	int seq_num;
 	int payload_size;
 	int offset;
 	unsigned char *payload;
 
-	if (index >= ARRAY_SIZE(mpeg2ts_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
-	mpeg2ts = &mpeg2ts_packetizer_table[index];
+	iec61883_4 = &iec61883_4_packetizer_table[index];
 	pr_debug("[%s] index=%d\n", __func__, index);
 
 	if (avtp_get_subtype(packet) != AVTP_SUBTYPE_61883_IIDC) {
@@ -485,25 +490,25 @@ static int mse_packetizer_video_iec_depacketize(int index,
 
 	/* seq_num check */
 	seq_num = avtp_get_sequence_num(packet);
-	if (mpeg2ts->old_seq_num != seq_num &&
-	    mpeg2ts->old_seq_num != SEQNUM_INIT) {
-		if (mpeg2ts->seq_num_err == SEQNUM_INIT) {
+	if (iec61883_4->old_seq_num != seq_num &&
+	    iec61883_4->old_seq_num != SEQNUM_INIT) {
+		if (iec61883_4->seq_num_err == SEQNUM_INIT) {
 			pr_err("sequence number discontinuity %d->%d=%d\n",
-			       mpeg2ts->old_seq_num, seq_num, (seq_num + 1 +
-			       AVTP_SEQUENCE_NUM_MAX - mpeg2ts->old_seq_num) %
+			       iec61883_4->old_seq_num, seq_num, (seq_num + 1 +
+			       AVTP_SEQUENCE_NUM_MAX - iec61883_4->old_seq_num) %
 			       (AVTP_SEQUENCE_NUM_MAX + 1));
-			mpeg2ts->seq_num_err = 1;
+			iec61883_4->seq_num_err = 1;
 		} else {
-			mpeg2ts->seq_num_err++;
+			iec61883_4->seq_num_err++;
 		}
 	} else {
-		if (mpeg2ts->seq_num_err != SEQNUM_INIT) {
+		if (iec61883_4->seq_num_err != SEQNUM_INIT) {
 			pr_err("sequence number recovery %d count=%d\n",
-			       seq_num, mpeg2ts->seq_num_err);
-			mpeg2ts->seq_num_err = SEQNUM_INIT;
+			       seq_num, iec61883_4->seq_num_err);
+			iec61883_4->seq_num_err = SEQNUM_INIT;
 		}
 	}
-	mpeg2ts->old_seq_num = (seq_num + 1 + (AVTP_SEQUENCE_NUM_MAX + 1))
+	iec61883_4->old_seq_num = (seq_num + 1 + (AVTP_SEQUENCE_NUM_MAX + 1))
 						% (AVTP_SEQUENCE_NUM_MAX + 1);
 
 	payload_size =
@@ -536,14 +541,14 @@ static int mse_packetizer_video_iec_depacketize(int index,
 	return MSE_PACKETIZE_STATUS_MAY_COMPLETE;
 }
 
-struct mse_packetizer_ops mse_packetizer_video_iec61883_4_ops = {
+struct mse_packetizer_ops mse_packetizer_iec61883_4_ops = {
 	.id = MSE_PACKETIZER_IEC61883_4,
-	.open = mse_packetizer_video_iec_open,
-	.release = mse_packetizer_video_iec_release,
-	.init = mse_packetizer_video_iec_packet_init,
-	.set_network_config = mse_packetizer_video_iec_set_network_config,
-	.set_mpeg2ts_config = mse_packetizer_video_iec_set_mpeg2ts_config,
-	.calc_cbs = mse_packetizer_video_iec_calc_cbs,
-	.packetize = mse_packetizer_video_iec_packetize,
-	.depacketize = mse_packetizer_video_iec_depacketize,
+	.open = mse_packetizer_iec61883_4_open,
+	.release = mse_packetizer_iec61883_4_release,
+	.init = mse_packetizer_iec61883_4_packet_init,
+	.set_network_config = mse_packetizer_iec61883_4_set_network_config,
+	.set_mpeg2ts_config = mse_packetizer_iec61883_4_set_mpeg2ts_config,
+	.calc_cbs = mse_packetizer_iec61883_4_calc_cbs,
+	.packetize = mse_packetizer_iec61883_4_packetize,
+	.depacketize = mse_packetizer_iec61883_4_depacketize,
 };
