@@ -142,7 +142,7 @@ static int mse_packetizer_iec61883_4_open(void)
 	iec61883_4->seq_num_err = SEQNUM_INIT;
 	iec61883_4->dbc = 0;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	return index;
 }
 
@@ -154,7 +154,7 @@ static int mse_packetizer_iec61883_4_release(int index)
 		return -EPERM;
 
 	iec61883_4 = &iec61883_4_packetizer_table[index];
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 
 	memset(iec61883_4, 0, sizeof(*iec61883_4));
 
@@ -168,7 +168,7 @@ static int mse_packetizer_iec61883_4_packet_init(int index)
 	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	iec61883_4 = &iec61883_4_packetizer_table[index];
 
 	iec61883_4->send_seq_num = 0;
@@ -188,7 +188,7 @@ static int mse_packetizer_iec61883_4_set_network_config(
 	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 
 	iec61883_4 = &iec61883_4_packetizer_table[index];
 	iec61883_4->net_config = *config;
@@ -243,7 +243,7 @@ static int mse_packetizer_iec61883_4_set_mpeg2ts_config(
 	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	iec61883_4 = &iec61883_4_packetizer_table[index];
 	iec61883_4->mpeg2ts_config = *config;
 	net_config = &iec61883_4->net_config;
@@ -274,7 +274,7 @@ static int mse_packetizer_iec61883_4_calc_cbs(int index,
 	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
-	pr_err("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	iec61883_4 = &iec61883_4_packetizer_table[index];
 	payload_size = iec61883_4->mpeg2ts_config.tspackets_per_frame *
 		MSE_TS_PACKET_SIZE;
@@ -282,16 +282,16 @@ static int mse_packetizer_iec61883_4_calc_cbs(int index,
 		ETH_IPG + AVTP_IEC61883_4_PAYLOAD_OFFSET +
 		iec61883_4->mpeg2ts_config.tspackets_per_frame *
 		AVTP_SOURCE_PACKET_SIZE;
-	pr_err("[%s] payload_size=%d packet_size=%d\n",
-	       __func__, payload_size, packet_size);
+	mse_debug("payload_size=%d packet_size=%d\n",
+		  payload_size, packet_size);
 
 	net_config = &iec61883_4->net_config;
 	bandwidth_fraction_denominator =
 		(u64)net_config->port_transmit_rate * (u64)payload_size;
 
 	if (!bandwidth_fraction_denominator) {
-		pr_err("[%s] Link speed %lu bps is not support\n",
-		       __func__, net_config->port_transmit_rate);
+		mse_err("Link speed %lu bps is not support\n",
+			net_config->port_transmit_rate);
 		return -EPERM;
 	}
 
@@ -302,7 +302,7 @@ static int mse_packetizer_iec61883_4_calc_cbs(int index,
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
 	value = div64_u64(value, bandwidth_fraction_denominator);
 	if (value > UINT_MAX) {
-		pr_err("[%s] cbs error value=0x%016llx\n", __func__, value);
+		mse_err("cbs error value=0x%016llx\n", value);
 		return -EPERM;
 	}
 
@@ -346,9 +346,9 @@ static int mse_packetizer_iec61883_4_packetize(int index,
 		return -EPERM;
 
 	iec61883_4 = &iec61883_4_packetizer_table[index];
-	pr_debug("[%s] index=%d seqnum=%d process=%zu/%zu t=%d\n",
-		 __func__, index, iec61883_4->send_seq_num, *buffer_processed,
-		 buffer_size, *timestamp);
+	mse_debug("index=%d seqnum=%d process=%zu/%zu t=%d\n",
+		  index, iec61883_4->send_seq_num, *buffer_processed,
+		  buffer_size, *timestamp);
 
 	/* get mpeg2ts type */
 	switch (iec61883_4->mpeg2ts_config.mpeg2ts_type) {
@@ -361,8 +361,8 @@ static int mse_packetizer_iec61883_4_packetize(int index,
 		src_packet_size = MSE_M2TS_PACKET_SIZE;
 		break;
 	default:
-		pr_err("[%s] error mpeg2ts type=%d\n",
-		       __func__, iec61883_4->mpeg2ts_config.mpeg2ts_type);
+		mse_err("error mpeg2ts type=%d\n",
+			iec61883_4->mpeg2ts_config.mpeg2ts_type);
 		return -EINVAL;
 	}
 
@@ -378,12 +378,11 @@ static int mse_packetizer_iec61883_4_packetize(int index,
 				iec61883_4->prev_timestamp;
 			iec61883_4->diff_timestamp = diff / num;
 		}
-		pr_debug("[%s] timestamp curr %u prev %u diff %u num %u\n",
-			 __func__,
-			 iec61883_4->curr_timestamp,
-			 iec61883_4->prev_timestamp,
-			 iec61883_4->diff_timestamp,
-			 num);
+		mse_debug("timestamp curr %u prev %u diff %u num %u\n",
+			  iec61883_4->curr_timestamp,
+			  iec61883_4->prev_timestamp,
+			  iec61883_4->diff_timestamp,
+			  num);
 	}
 
 	/* data */
@@ -392,7 +391,7 @@ static int mse_packetizer_iec61883_4_packetize(int index,
 	data_len = buffer_size - *buffer_processed;
 	/* check data length */
 	if (data_len % src_packet_size != 0) {
-		pr_err("[%s] invalid data length %d\n", __func__, data_len);
+		mse_err("invalid data length %d\n", data_len);
 		return -EINVAL;
 	}
 	payloads = data_len / src_packet_size;
@@ -449,9 +448,8 @@ static int mse_packetizer_iec61883_4_packetize(int index,
 		max(AVTP_SOURCE_PACKET_SIZE * payloads, AVTP_PAYLOAD_MIN);
 	*buffer_processed += src_packet_size * payloads;
 
-	pr_debug("[%s] bp=%zu/%zu, data_len=%d\n",
-		 __func__, *buffer_processed, buffer_size,
-		 src_packet_size * payloads);
+	mse_debug("bp=%zu/%zu, data_len=%d\n",
+		  *buffer_processed, buffer_size, src_packet_size * payloads);
 
 	if (*buffer_processed >= buffer_size) {
 		iec61883_4->prev_timestamp = *timestamp;
@@ -480,11 +478,10 @@ static int mse_packetizer_iec61883_4_depacketize(int index,
 		return -EPERM;
 
 	iec61883_4 = &iec61883_4_packetizer_table[index];
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 
 	if (avtp_get_subtype(packet) != AVTP_SUBTYPE_61883_IIDC) {
-		pr_err("[%s] error subtype=%d\n",
-		       __func__, avtp_get_subtype(packet));
+		mse_err("error subtype=%d\n", avtp_get_subtype(packet));
 		return -EINVAL;
 	}
 
@@ -493,18 +490,19 @@ static int mse_packetizer_iec61883_4_depacketize(int index,
 	if (iec61883_4->old_seq_num != seq_num &&
 	    iec61883_4->old_seq_num != SEQNUM_INIT) {
 		if (iec61883_4->seq_num_err == SEQNUM_INIT) {
-			pr_err("sequence number discontinuity %d->%d=%d\n",
-			       iec61883_4->old_seq_num, seq_num, (seq_num + 1 +
-			       AVTP_SEQUENCE_NUM_MAX - iec61883_4->old_seq_num) %
-			       (AVTP_SEQUENCE_NUM_MAX + 1));
+			mse_err("sequence number discontinuity %d->%d=%d\n",
+				iec61883_4->old_seq_num, seq_num,
+				(seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
+				 iec61883_4->old_seq_num) %
+				(AVTP_SEQUENCE_NUM_MAX + 1));
 			iec61883_4->seq_num_err = 1;
 		} else {
 			iec61883_4->seq_num_err++;
 		}
 	} else {
 		if (iec61883_4->seq_num_err != SEQNUM_INIT) {
-			pr_err("sequence number recovery %d count=%d\n",
-			       seq_num, iec61883_4->seq_num_err);
+			mse_err("sequence number recovery %d count=%d\n",
+				seq_num, iec61883_4->seq_num_err);
 			iec61883_4->seq_num_err = SEQNUM_INIT;
 		}
 	}
@@ -515,23 +513,22 @@ static int mse_packetizer_iec61883_4_depacketize(int index,
 		avtp_get_stream_data_length(packet) - AVTP_CIP_HEADER_SIZE;
 	payload = (unsigned char *)packet + AVTP_IEC61883_4_PAYLOAD_OFFSET;
 
-	pr_debug("[%s] start size=%d\n", __func__, payload_size);
+	mse_debug("start size=%d\n", payload_size);
 
 	/* check size */
 	if (*buffer_processed + payload_size >= buffer_size) {
-		pr_err("[%s] buffer overrun\n", __func__);
+		mse_err("buffer overrun\n");
 		return -EPERM;
 	}
 
 	for (offset = sizeof(__be32);
 	     offset < payload_size;
 	     offset += AVTP_SOURCE_PACKET_SIZE) {
-		pr_debug("[%s] packet %02x %02x %02x %02x\n",
-			 __func__,
-			 *(payload + offset),
-			 *(payload + offset + 1),
-			 *(payload + offset + 2),
-			 *(payload + offset + 3));
+		mse_debug("packet %02x %02x %02x %02x\n",
+			  *(payload + offset),
+			  *(payload + offset + 1),
+			  *(payload + offset + 2),
+			  *(payload + offset + 3));
 		memcpy((unsigned char *)buffer + *buffer_processed,
 		       payload + offset, MSE_TS_PACKET_SIZE);
 		*buffer_processed += MSE_TS_PACKET_SIZE;
