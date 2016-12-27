@@ -71,7 +71,7 @@ static struct {
 	int index;
 	struct mse_packetizer_ops *ops;
 } mse_packetizer_ops_table[] = {
-	{ -1, &mse_packetizer_audio_aaf_ops },
+	{ -1, &mse_packetizer_aaf_ops },
 	{ -1, &mse_packetizer_audio_iec61883_6_ops },
 	{ -1, &mse_packetizer_video_cvf_h264_ops },
 	{ -1, &mse_packetizer_video_cvf_h264_d13_ops },

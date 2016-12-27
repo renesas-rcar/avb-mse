@@ -71,7 +71,7 @@
 #define MSE_PACKETIZER_NAME_STR_IEC61883_4      "iec61883-4"
 
 /* Audio Packetizer for AAF */
-extern struct mse_packetizer_ops mse_packetizer_audio_aaf_ops;
+extern struct mse_packetizer_ops mse_packetizer_aaf_ops;
 /* Audio Packetizer for IEC61883-6 */
 extern struct mse_packetizer_ops mse_packetizer_audio_iec61883_6_ops;
 /* Video Packetizer for CVF H.264 D13 */
