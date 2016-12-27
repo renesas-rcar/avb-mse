@@ -202,12 +202,9 @@ int mse_packet_ctrl_make_packet(int index,
 
 		if (ret >= 0 && ret != MSE_PACKETIZE_STATUS_NOT_ENOUGH) {
 			pcount++;
-			if (packet_size >= AVTP_FRAME_SIZE_MIN)
-				dma->packet_table[dma->write_p].len =
-					packet_size;
-			else
-				dma->packet_table[dma->write_p].len =
-					AVTP_FRAME_SIZE_MIN;
+			if (packet_size < AVTP_FRAME_SIZE_MIN)
+				packet_size = AVTP_FRAME_SIZE_MIN;
+			dma->packet_table[dma->write_p].len = packet_size;
 
 			dma->write_p = new_write_p;
 		} else {
@@ -249,11 +246,9 @@ int mse_packet_ctrl_make_packet_crf(int index,
 		NULL);
 
 	if (ret >= 0) {
-		if (packet_size >= AVTP_FRAME_SIZE_MIN)
-			dma->packet_table[dma->write_p].len = packet_size;
-		else
-			dma->packet_table[dma->write_p].len =
-				AVTP_FRAME_SIZE_MIN;
+		if (packet_size < AVTP_FRAME_SIZE_MIN)
+			packet_size = AVTP_FRAME_SIZE_MIN;
+		dma->packet_table[dma->write_p].len = packet_size;
 
 		dma->write_p = new_write_p;
 	}
