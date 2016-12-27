@@ -87,7 +87,7 @@ int mse_packetizer_init(void)
 	for (i = 0; mse_packetizer_ops_table[i].ops != NULL; i++) {
 		index = mse_register_packetizer(mse_packetizer_ops_table[i].ops);
 		if (index < 0) {
-			pr_err("[%s] cannot register\n", __func__);
+			mse_err("cannot register\n");
 			return -EPERM;
 		}
 		mse_packetizer_ops_table[i].index = index;
