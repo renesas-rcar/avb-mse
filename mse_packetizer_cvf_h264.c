@@ -191,7 +191,7 @@ static int mse_packetizer_cvf_h264_open(void)
 	h264->header_size = AVTP_CVF_H264_PAYLOAD_OFFSET;
 	h264->additional_header_size =
 		AVTP_CVF_H264_PAYLOAD_OFFSET - AVTP_PAYLOAD_OFFSET;
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	return index;
 }
 
@@ -216,7 +216,7 @@ static int mse_packetizer_cvf_h264_d13_open(void)
 	h264->additional_header_size =
 		AVTP_CVF_H264_D13_PAYLOAD_OFFSET - AVTP_PAYLOAD_OFFSET;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	return index;
 }
 
@@ -228,7 +228,7 @@ static int mse_packetizer_cvf_h264_release(int index)
 		return -EPERM;
 
 	h264 = &cvf_h264_packetizer_table[index];
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 
 	memset(h264, 0, sizeof(*h264));
 	return 0;
@@ -241,7 +241,7 @@ static int mse_packetizer_cvf_h264_packet_init(int index)
 	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	h264 = &cvf_h264_packetizer_table[index];
 
 	h264->send_seq_num = 0;
@@ -259,7 +259,7 @@ static int mse_packetizer_cvf_h264_set_network_config(
 	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	h264 = &cvf_h264_packetizer_table[index];
 	h264->net_config = *config;
 	return 0;
@@ -310,7 +310,7 @@ static int mse_packetizer_cvf_h264_set_video_config(
 	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	h264 = &cvf_h264_packetizer_table[index];
 	h264->video_config = *config;
 
@@ -322,7 +322,7 @@ static int mse_packetizer_cvf_h264_set_video_config(
 		h264->f_start_code = false;
 		break;
 	default:
-		pr_err("[%s] unknown format=%08x\n", __func__, config->format);
+		mse_err("unknown format=%08x\n", config->format);
 		return -EPERM;
 	}
 	h264->f_single_nal = CONFIG_CVF_H264_SEND_SINGLE_NAL;
@@ -333,9 +333,9 @@ static int mse_packetizer_cvf_h264_set_video_config(
 		h264->payload_max = ETHFRAMELEN_MAX - data_offset;
 	} else {
 		if (data_offset + bytes_per_frame > ETHFRAMELEN_MAX) {
-			pr_err("[%s] bytes_per_frame too big %d\n", __func__,
-			       bytes_per_frame);
-				return -EINVAL;
+			mse_err("bytes_per_frame too big %d\n",
+				bytes_per_frame);
+			return -EINVAL;
 		}
 		h264->payload_max = bytes_per_frame - FU_HEADER_LEN -
 			h264->additional_header_size;
@@ -364,15 +364,15 @@ static int mse_packetizer_cvf_h264_calc_cbs(int index,
 	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	h264 = &cvf_h264_packetizer_table[index];
 
 	bandwidth_fraction_denominator =
 		(u64)h264->net_config.port_transmit_rate / TRANSMIT_RATE_BASE;
 
 	if (!bandwidth_fraction_denominator) {
-		pr_err("[%s] Link speed %lu bps is not support\n",
-		       __func__, h264->net_config.port_transmit_rate);
+		mse_err("Link speed %lu bps is not support\n",
+			h264->net_config.port_transmit_rate);
 		return -EPERM;
 	}
 
@@ -383,7 +383,7 @@ static int mse_packetizer_cvf_h264_calc_cbs(int index,
 	do_div(value, bandwidth_fraction_denominator);
 	do_div(value, h264->payload_max);
 	if (value > UINT_MAX) {
-		pr_err("[%s] cbs error value=0x%016llx\n", __func__, value);
+		mse_err("cbs error value=0x%016llx\n", value);
 		return -EPERM;
 	}
 	cbs->bandwidth_fraction = (u32)value;
@@ -431,9 +431,9 @@ static int mse_packetizer_cvf_h264_packetize(int index,
 		return -EPERM;
 
 	h264 = &cvf_h264_packetizer_table[index];
-	pr_debug("[%s] index=%d seqnum=%d process=%zu/%zu t=%d\n",
-		 __func__, index, h264->send_seq_num, *buffer_processed,
-		 buffer_size, *timestamp);
+	mse_debug("index=%d seqnum=%d process=%zu/%zu t=%d\n",
+		  index, h264->send_seq_num, *buffer_processed,
+		  buffer_size, *timestamp);
 
 	/* search NAL */
 	cur_nal = buf + *buffer_processed;
@@ -455,16 +455,15 @@ static int mse_packetizer_cvf_h264_packetize(int index,
 			cur_nal += sizeof(u32);
 			h264->next_nal = cur_nal + nal_size;
 		}
-		pr_debug("[%s] seqnum=%d process=%zu/%zu t=%d nal=%d\n",
-			 __func__, h264->send_seq_num, *buffer_processed,
-			 buffer_size, *timestamp,
-			 nal_size);
+		mse_debug("seqnum=%d process=%zu/%zu t=%d nal=%d\n",
+			  h264->send_seq_num, *buffer_processed,
+			  buffer_size, *timestamp, nal_size);
 
 		switch (*cur_nal & NALU_TYPE_MASK) {
 		case NALU_TYPE_UNSPECIFIED0:
 		case NALU_TYPE_UNSPECIFIED30:
 		case NALU_TYPE_UNSPECIFIED31:
-			pr_err("NAL format error\n");
+			mse_err("NAL format error\n");
 			/* invalid nal type, continue */
 			return MSE_PACKETIZE_STATUS_CONTINUE;
 		/* VCL */
@@ -608,10 +607,9 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 		return -EPERM;
 
 	h264 = &cvf_h264_packetizer_table[index];
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	if (avtp_get_subtype(packet) != AVTP_SUBTYPE_CVF) {
-		pr_err("[%s] error subtype=%d\n",
-		       __func__, avtp_get_subtype(packet));
+		mse_err("error subtype=%d\n", avtp_get_subtype(packet));
 		return -EINVAL;
 	}
 
@@ -619,19 +617,19 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 	seq_num = avtp_get_sequence_num(packet);
 	if (h264->old_seq_num != seq_num && h264->old_seq_num != SEQNUM_INIT) {
 		if (h264->seq_num_err == SEQNUM_INIT) {
-			pr_err("sequence number discontinuity %d->%d=%d\n",
-			       h264->old_seq_num, seq_num,
-			       (seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
-				h264->old_seq_num) %
-			       (AVTP_SEQUENCE_NUM_MAX + 1));
+			mse_err("sequence number discontinuity %d->%d=%d\n",
+				h264->old_seq_num, seq_num,
+				(seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
+				 h264->old_seq_num) %
+				(AVTP_SEQUENCE_NUM_MAX + 1));
 			h264->seq_num_err = 1;
 		} else {
 			h264->seq_num_err++;
 		}
 	} else {
 		if (h264->seq_num_err != SEQNUM_INIT) {
-			pr_err("sequence number recovery %d count=%d\n",
-			       seq_num, h264->seq_num_err);
+			mse_err("sequence number recovery %d count=%d\n",
+				seq_num, h264->seq_num_err);
 			h264->seq_num_err = SEQNUM_INIT;
 		}
 	}
@@ -650,8 +648,7 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 		fu_header = payload[FU_ADDR_HEADER];
 		nalu_type = fu_header & NALU_TYPE_MASK;
 		if (fu_header & FU_H_S_BIT) { /* start */
-			pr_debug("[%s] start size=%d\n",
-				 __func__, payload_size);
+			mse_debug("start size=%d\n", payload_size);
 
 			h264->nal_header_offset = data_len;
 
@@ -663,8 +660,8 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 		}
 		if (fu_size > 0) {
 			if (data_len + fu_size >= buffer_size) {
-				pr_err("[%s] buffer overrun %zu/%zu\n",
-				       __func__, data_len, buffer_size);
+				mse_err("buffer overrun %zu/%zu\n",
+					data_len, buffer_size);
 
 				set_nal_header(h264, buf, data_len);
 				(*buffer_processed) = data_len;
@@ -685,7 +682,7 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 				pic_end = check_pic_end(h264, buf, nalu_type);
 		}
 	} else if (is_single_nal(fu_indicator)) {
-		pr_debug("[%s] single nal %02x\n", __func__, fu_indicator);
+		mse_debug("single nal %02x\n", fu_indicator);
 
 		data_offset = sizeof(fu_indicator);
 		fu_size = payload_size - data_offset;
@@ -703,8 +700,8 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 		pic_end = check_pic_end(h264, buf, nalu_type);
 		set_nal_header(h264, buf, fu_size);
 	} else {
-		pr_err("[%s] unkonwon nal unit = %02x\n",
-		       __func__, fu_indicator & NALU_TYPE_MASK);
+		mse_err("unkonwon nal unit = %02x\n",
+			fu_indicator & NALU_TYPE_MASK);
 		return -EPERM;
 	}
 
@@ -722,7 +719,7 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 	h264->vcl_start = NULL;
 	h264->is_vcl = false;
 
-	pr_debug("[%s] size = %zu\n", __func__, *buffer_processed);
+	mse_debug("size = %zu\n", *buffer_processed);
 
 	return MSE_PACKETIZE_STATUS_COMPLETE;
 }
