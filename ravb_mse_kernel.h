@@ -67,6 +67,14 @@
 #include "ravb_mse.h"
 
 /**
+ * @brief Message function for MSE
+ */
+#define mse_err(fmt, ...)   pr_err("%s: "fmt, __func__, ## __VA_ARGS__)
+#define mse_warn(fmt, ...)  pr_warn("%s: "fmt, __func__, ## __VA_ARGS__)
+#define mse_info(fmt, ...)  pr_info("%s: "fmt, __func__, ## __VA_ARGS__)
+#define mse_debug(fmt, ...) pr_debug("%s: "fmt, __func__, ## __VA_ARGS__)
+
+/**
  * @brief Unresistered device index
  */
 #define MSE_INDEX_UNDEFINED	(-1)
