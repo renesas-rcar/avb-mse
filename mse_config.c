@@ -81,12 +81,12 @@ int mse_config_get_info(int index, struct mse_info *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->info;
@@ -101,17 +101,17 @@ int mse_config_set_network_device(int index, struct mse_network_device *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (mse_dev_is_busy(index)) {
-		pr_err("[%s] mse%d is running.\n", __func__, index);
+		mse_err("mse%d is running.\n", index);
 		return -EBUSY;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	config->network_device = *data;
@@ -126,12 +126,12 @@ int mse_config_get_network_device(int index, struct mse_network_device *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->network_device;
@@ -146,17 +146,17 @@ int mse_config_set_packetizer(int index, struct mse_packetizer *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (mse_dev_is_busy(index)) {
-		pr_err("[%s] mse%d is running.\n", __func__, index);
+		mse_err("mse%d is running.\n", index);
 		return -EBUSY;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	switch (config->info.type) {
 	case MSE_STREAM_TYPE_AUDIO:
@@ -178,8 +178,7 @@ int mse_config_set_packetizer(int index, struct mse_packetizer *data)
 		break;
 
 	default:
-		pr_err("[%s] invalid value. packetizer=%d\n",
-		       __func__, data->packetizer);
+		mse_err("invalid value. packetizer=%d\n", data->packetizer);
 		return -EINVAL;
 	}
 
@@ -190,8 +189,8 @@ int mse_config_set_packetizer(int index, struct mse_packetizer *data)
 	return 0;
 
 wrong_combination:
-	pr_err("[%s] invalid combination. type=%d, packetizer=%d\n",
-	       __func__, config->info.type, data->packetizer);
+	mse_err("invalid combination. type=%d, packetizer=%d\n",
+		config->info.type, data->packetizer);
 	return -EINVAL;
 }
 
@@ -201,12 +200,12 @@ int mse_config_get_packetizer(int index, struct mse_packetizer *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->packetizer;
@@ -221,17 +220,17 @@ int mse_config_set_avtp_tx_param(int index, struct mse_avtp_tx_param *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (mse_dev_is_busy(index)) {
-		pr_err("[%s] mse%d is running.\n", __func__, index);
+		mse_err("mse%d is running.\n", index);
 		return -EBUSY;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (data->vlan > MSE_CONFIG_VLAN_MAX)
 		goto wrong_value;
@@ -249,8 +248,8 @@ int mse_config_set_avtp_tx_param(int index, struct mse_avtp_tx_param *data)
 	return 0;
 
 wrong_value:
-	pr_err("[%s] invalid value. vlan=%d, priority=%d, uniqueid=%d\n",
-	       __func__, data->vlan, data->priority, data->uniqueid);
+	mse_err("invalid value. vlan=%d, priority=%d, uniqueid=%d\n",
+		data->vlan, data->priority, data->uniqueid);
 
 	return -EINVAL;
 }
@@ -261,12 +260,12 @@ int mse_config_get_avtp_tx_param(int index, struct mse_avtp_tx_param *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->avtp_tx_param;
@@ -281,15 +280,15 @@ int mse_config_set_avtp_rx_param(int index, struct mse_avtp_rx_param *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (mse_dev_is_busy(index)) {
-		pr_err("[%s] mse%d is running.\n", __func__, index);
+		mse_err("mse%d is running.\n", index);
 		return -EBUSY;
 	}
 
@@ -306,12 +305,12 @@ int mse_config_get_avtp_rx_param(int index, struct mse_avtp_rx_param *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->avtp_rx_param;
@@ -327,22 +326,22 @@ int mse_config_set_media_audio_config(int index,
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (config->info.type != MSE_STREAM_TYPE_AUDIO) {
-		pr_err("[%s] mse%d does not permit.\n", __func__, index);
+		mse_err("mse%d does not permit.\n", index);
 		return -EPERM;
 	}
 
 	if (mse_dev_is_busy(index)) {
-		pr_err("[%s] mse%d is running.\n", __func__, index);
+		mse_err("mse%d is running.\n", index);
 		return -EBUSY;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (data->samples_per_frame > MSE_CONFIG_SAMPLE_PER_FRAME_MAX)
 		goto wrong_value;
@@ -351,8 +350,8 @@ int mse_config_set_media_audio_config(int index,
 		goto wrong_value;
 
 	if ((data->crf_type == MSE_CRF_TYPE_TX) && config->mch_config.enable) {
-		pr_err("[%s] invalid combination. mch=%d, crf_type=%d\n",
-		       __func__, config->mch_config.enable, data->crf_type);
+		mse_err("invalid combination. mch=%d, crf_type=%d\n",
+			config->mch_config.enable, data->crf_type);
 		return -EINVAL;
 	}
 
@@ -363,8 +362,8 @@ int mse_config_set_media_audio_config(int index,
 	return 0;
 
 wrong_value:
-	pr_err("[%s] invalid value. samples_per_frame=%d, crf_type=%d\n",
-	       __func__, data->samples_per_frame, data->crf_type);
+	mse_err("invalid value. samples_per_frame=%d, crf_type=%d\n",
+		data->samples_per_frame, data->crf_type);
 	return -EINVAL;
 }
 
@@ -375,17 +374,17 @@ int mse_config_get_media_audio_config(int index,
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (config->info.type != MSE_STREAM_TYPE_AUDIO) {
-		pr_err("[%s] mse%d does not permit.\n", __func__, index);
+		mse_err("mse%d does not permit.\n", index);
 		return -EPERM;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->media_audio_config;
@@ -401,22 +400,22 @@ int mse_config_set_media_video_config(int index,
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (config->info.type != MSE_STREAM_TYPE_VIDEO) {
-		pr_err("[%s] mse%d does not permit.\n", __func__, index);
+		mse_err("mse%d does not permit.\n", index);
 		return -EPERM;
 	}
 
 	if (mse_dev_is_busy(index)) {
-		pr_err("[%s] mse%d is running.\n", __func__, index);
+		mse_err("mse%d is running.\n", index);
 		return -EBUSY;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (data->bytes_per_frame > MSE_CONFIG_BYTES_PER_FRAME_MAX)
 		goto wrong_value;
@@ -437,9 +436,9 @@ int mse_config_set_media_video_config(int index,
 	return 0;
 
 wrong_value:
-	pr_err("[%s] invalid value. bytes_per_frame=%d fps=%d/%d bitrate=%d\n",
-	       __func__, data->bytes_per_frame, data->fps_numerator,
-	       data->fps_denominator, data->bitrate);
+	mse_err("invalid value. bytes_per_frame=%d fps=%d/%d bitrate=%d\n",
+		data->bytes_per_frame, data->fps_numerator,
+		data->fps_denominator, data->bitrate);
 
 	return -EINVAL;
 }
@@ -451,17 +450,17 @@ int mse_config_get_media_video_config(int index,
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (config->info.type != MSE_STREAM_TYPE_VIDEO) {
-		pr_err("[%s] mse%d does not permit.\n", __func__, index);
+		mse_err("mse%d does not permit.\n", index);
 		return -EPERM;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->media_video_config;
@@ -477,22 +476,22 @@ int mse_config_set_media_mpeg2ts_config(int index,
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (config->info.type != MSE_STREAM_TYPE_MPEG2TS) {
-		pr_err("[%s] mse%d does not permit.\n", __func__, index);
+		mse_err("mse%d does not permit.\n", index);
 		return -EPERM;
 	}
 
 	if (mse_dev_is_busy(index)) {
-		pr_err("[%s] mse%d is running.\n", __func__, index);
+		mse_err("mse%d is running.\n", index);
 		return -EBUSY;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if ((data->tspackets_per_frame < MSE_CONFIG_TSPACKET_PER_FRAME_MIN) ||
 	    (data->tspackets_per_frame > MSE_CONFIG_TSPACKET_PER_FRAME_MAX))
@@ -511,8 +510,8 @@ int mse_config_set_media_mpeg2ts_config(int index,
 	return 0;
 
 wrong_value:
-	pr_err("[%s] invalid value. bitrate=%d pcr_pid=%d\n",
-	       __func__, data->bitrate, data->pcr_pid);
+	mse_err("invalid value. bitrate=%d pcr_pid=%d\n",
+		data->bitrate, data->pcr_pid);
 	return -EINVAL;
 }
 
@@ -523,17 +522,17 @@ int mse_config_get_media_mpeg2ts_config(int index,
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (config->info.type != MSE_STREAM_TYPE_MPEG2TS) {
-		pr_err("[%s] mse%d does not permit.\n", __func__, index);
+		mse_err("mse%d does not permit.\n", index);
 		return -EPERM;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->media_mpeg2ts_config;
@@ -548,17 +547,17 @@ int mse_config_set_ptp_config(int index, struct mse_ptp_config *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (mse_dev_is_busy(index)) {
-		pr_err("[%s] mse%d is running.\n", __func__, index);
+		mse_err("mse%d is running.\n", index);
 		return -EBUSY;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if ((data->type < 0) || (data->type >= MSE_PTP_TYPE_MAX))
 		goto wrong_value;
@@ -577,9 +576,9 @@ int mse_config_set_ptp_config(int index, struct mse_ptp_config *data)
 	return 0;
 
 wrong_value:
-	pr_err("[%s] invalid value. type=%d deviceid=%d capture_ch=%d capture_freq=%d recovery_capture_freq=%d\n",
-	       __func__, data->type, data->deviceid, data->capture_ch,
-	       data->capture_freq, data->recovery_capture_freq);
+	mse_err("invalid value. type=%d deviceid=%d capture_ch=%d capture_freq=%d recovery_capture_freq=%d\n",
+		data->type, data->deviceid, data->capture_ch,
+		data->capture_freq, data->recovery_capture_freq);
 	return -EINVAL;
 }
 
@@ -589,12 +588,12 @@ int mse_config_get_ptp_config(int index, struct mse_ptp_config *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->ptp_config;
@@ -609,27 +608,27 @@ int mse_config_set_mch_config(int index, struct mse_mch_config *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (config->info.type != MSE_STREAM_TYPE_AUDIO) {
-		pr_err("[%s] mse%d does not permit.\n", __func__, index);
+		mse_err("mse%d does not permit.\n", index);
 		return -EPERM;
 	}
 
 	if (mse_dev_is_busy(index)) {
-		pr_err("[%s] mse%d is running.\n", __func__, index);
+		mse_err("mse%d is running.\n", index);
 		return -EBUSY;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (data->enable &&
 	    (config->media_audio_config.crf_type == MSE_CRF_TYPE_TX)) {
-		pr_err("[%s] invalid combination. enable=%d PTP type=%d\n",
-		       __func__, data->enable, config->ptp_config.type);
+		mse_err("invalid combination. enable=%d PTP type=%d\n",
+			data->enable, config->ptp_config.type);
 		return -EINVAL;
 	}
 
@@ -646,17 +645,17 @@ int mse_config_get_mch_config(int index, struct mse_mch_config *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (config->info.type != MSE_STREAM_TYPE_AUDIO) {
-		pr_err("[%s] mse%d does not permit.\n", __func__, index);
+		mse_err("mse%d does not permit.\n", index);
 		return -EPERM;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->mch_config;
@@ -671,22 +670,22 @@ int mse_config_set_avtp_tx_param_crf(int index, struct mse_avtp_tx_param *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (config->info.type != MSE_STREAM_TYPE_AUDIO) {
-		pr_err("[%s] mse%d does not permit.\n", __func__, index);
+		mse_err("mse%d does not permit.\n", index);
 		return -EPERM;
 	}
 
 	if (mse_dev_is_busy(index)) {
-		pr_err("[%s] mse%d is running.\n", __func__, index);
+		mse_err("mse%d is running.\n", index);
 		return -EBUSY;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (data->vlan > MSE_CONFIG_VLAN_MAX)
 		goto wrong_value;
@@ -704,8 +703,8 @@ int mse_config_set_avtp_tx_param_crf(int index, struct mse_avtp_tx_param *data)
 	return 0;
 
 wrong_value:
-	pr_err("[%s] invalid value. vlan=%d, priority=%d, uniqueid=%d\n",
-	       __func__, data->vlan, data->priority, data->uniqueid);
+	mse_err("invalid value. vlan=%d, priority=%d, uniqueid=%d\n",
+		data->vlan, data->priority, data->uniqueid);
 
 	return -EINVAL;
 }
@@ -716,17 +715,17 @@ int mse_config_get_avtp_tx_param_crf(int index, struct mse_avtp_tx_param *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (config->info.type != MSE_STREAM_TYPE_AUDIO) {
-		pr_err("[%s] mse%d does not permit.\n", __func__, index);
+		mse_err("mse%d does not permit.\n", index);
 		return -EPERM;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->avtp_tx_param_crf;
@@ -741,22 +740,22 @@ int mse_config_set_avtp_rx_param_crf(int index, struct mse_avtp_rx_param *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (config->info.type != MSE_STREAM_TYPE_AUDIO) {
-		pr_err("[%s] mse%d does not permit.\n", __func__, index);
+		mse_err("mse%d does not permit.\n", index);
 		return -EPERM;
 	}
 
 	if (mse_dev_is_busy(index)) {
-		pr_err("[%s] mse%d is running.\n", __func__, index);
+		mse_err("mse%d is running.\n", index);
 		return -EBUSY;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	config->avtp_rx_param_crf = *data;
@@ -771,17 +770,17 @@ int mse_config_get_avtp_rx_param_crf(int index, struct mse_avtp_rx_param *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (config->info.type != MSE_STREAM_TYPE_AUDIO) {
-		pr_err("[%s] mse%d does not permit.\n", __func__, index);
+		mse_err("mse%d does not permit.\n", index);
 		return -EPERM;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->avtp_rx_param_crf;
@@ -796,17 +795,17 @@ int mse_config_set_delay_time(int index, struct mse_delay_time *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
 	if (mse_dev_is_busy(index)) {
-		pr_err("[%s] mse%d is running.\n", __func__, index);
+		mse_err("mse%d is running.\n", index);
 		return -EBUSY;
 	}
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	config->delay_time = *data;
@@ -821,12 +820,12 @@ int mse_config_get_delay_time(int index, struct mse_delay_time *data)
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_MEDIA_MAX)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, index);
+		mse_err("invalid argument. index=%d\n", index);
 		return -EINVAL;
 	}
 	config = mse_get_dev_config(index);
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	*data = config->delay_time;

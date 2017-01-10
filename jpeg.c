@@ -64,6 +64,7 @@
 #include <linux/slab.h>
 #include <linux/kernel.h>
 
+#include "ravb_mse_kernel.h"
 #include "jpeg.h"
 
 static const u32 jpeg_luma_quantizer[QTABLE_SIZE] = {
@@ -177,8 +178,7 @@ u8 jpeg_get_marker(const u8 *buf, size_t len, size_t *offset)
 
 	marker = buf[(*offset)++];
 
-	pr_debug("[%s] found marker=0x%02X offset=%zu\n",
-		 __func__, marker, *offset - 1);
+	mse_debug("found marker=0x%02X offset=%zu\n", marker, *offset - 1);
 
 	return marker;
 }
@@ -202,14 +202,13 @@ int jpeg_read_sof(const u8 *buf,
 	u8 sample_bit, comp_num;
 
 	if (offset_work + JPEG_SOF_LENGTH > len) {
-		pr_warn("[%s] invalid header length.\n", __func__);
+		mse_warn("invalid header length.\n");
 		return -EPERM;
 	}
 
 	header_len = JPEG_GET_HEADER_SIZE(buf, offset_work);
 	if (header_len < JPEG_SOF_LENGTH) {
-		pr_warn("[%s] invalid length. hlen=%zu\n",
-			__func__, header_len);
+		mse_warn("invalid length. hlen=%zu\n", header_len);
 		return -EPERM;
 	}
 
@@ -218,8 +217,7 @@ int jpeg_read_sof(const u8 *buf,
 
 	sample_bit = buf[offset_work++];
 	if (sample_bit != JPEG_SOF_SAMPLE_PREC) {
-		pr_warn("[%s] invalid value. sample_bit=0x%x\n",
-			__func__, sample_bit);
+		mse_warn("invalid value. sample_bit=0x%x\n", sample_bit);
 		return -EPERM;
 	}
 
@@ -231,8 +229,8 @@ int jpeg_read_sof(const u8 *buf,
 	if (height_work == 0 || width_work == 0 ||
 	    height_work > JPEG_SOF_PIXEL_MAX ||
 	    width_work > JPEG_SOF_PIXEL_MAX) {
-		pr_warn("[%s] invalid display size. %ux%u\n",
-			__func__, width_work, height_work);
+		mse_warn("invalid display size. %ux%u\n",
+			 width_work, height_work);
 		return -EPERM;
 	}
 
@@ -243,8 +241,7 @@ int jpeg_read_sof(const u8 *buf,
 
 	comp_num = buf[offset_work++];
 	if (comp_num != JPEG_COMP_NUM) {
-		pr_warn("[%s] invalid value. comp_num=%u\n",
-			__func__, comp_num);
+		mse_warn("invalid value. comp_num=%u\n", comp_num);
 		return -EPERM;
 	}
 
@@ -253,8 +250,8 @@ int jpeg_read_sof(const u8 *buf,
 		comp_work.id = buf[offset_work++];
 		comp_work.samp = buf[offset_work++];
 		comp_work.qt = buf[offset_work++];
-		pr_debug("[%s] comp %d samp=%02x, qt=%d\n",
-			 __func__, comp_work.id, comp_work.samp, comp_work.qt);
+		mse_debug("comp %d samp=%02x, qt=%d\n",
+			  comp_work.id, comp_work.samp, comp_work.qt);
 		for (j = i; j > 0; j--) {
 			if (comp[j - 1].id < comp_work.id)
 				break;
@@ -270,16 +267,15 @@ int jpeg_read_sof(const u8 *buf,
 	} else if (comp[JPEG_SOF_COMP_ID_Y].samp == JPEG_SOF_COMP_SAMPLE_2X2) {
 		*type = MJPEG_TYPE_420;
 	} else {
-		pr_warn("[%s] comp[0].samp=%u\n",
-			__func__, comp[JPEG_SOF_COMP_ID_Y].samp);
+		mse_warn("comp[0].samp=%u\n", comp[JPEG_SOF_COMP_ID_Y].samp);
 		return -EPERM;
 	}
 
 	if (comp[JPEG_SOF_COMP_ID_U].samp != JPEG_SOF_COMP_SAMPLE_1X1 ||
 	    comp[JPEG_SOF_COMP_ID_V].samp != JPEG_SOF_COMP_SAMPLE_1X1) {
-		pr_warn("[%s] comp[1].samp=%u comp[2].samp=%u\n",
-			__func__, comp[JPEG_SOF_COMP_ID_U].samp,
-			comp[JPEG_SOF_COMP_ID_V].samp);
+		mse_warn("comp[1].samp=%u comp[2].samp=%u\n",
+			 comp[JPEG_SOF_COMP_ID_U].samp,
+			 comp[JPEG_SOF_COMP_ID_V].samp);
 		return -EPERM;
 	}
 
@@ -293,7 +289,7 @@ int jpeg_read_sof(const u8 *buf,
 		    (memcmp(qtable[u].data,
 			    qtable[v].data,
 			    qtable[u].size) != 0)) {
-			pr_warn("[%s] Invalid qtable.\n", __func__);
+			mse_warn("Invalid qtable.\n");
 			return -EPERM;
 		}
 	}
@@ -310,20 +306,19 @@ int jpeg_read_dqt(const u8 *buf,
 	u8 qid, precision;
 
 	if (*offset + JPEG_MARKER_SIZE_LENGTH > len) {
-		pr_warn("[%s] invalid header length.\n", __func__);
+		mse_warn("invalid header length.\n");
 		return -EPERM;
 	}
 
 	header_len = JPEG_GET_HEADER_SIZE(buf, *offset);
 	if (header_len < JPEG_MARKER_SIZE_LENGTH) {
-		pr_warn("%s] invalid length. hlen=%zu\n",
-			__func__, header_len);
+		mse_warn("invalid length. hlen=%zu\n", header_len);
 		return -EPERM;
 	}
 
 	if (*offset + header_len > len) {
-		pr_warn("[%s] header short. hlen=%zu size=%zu+%zu\n",
-			__func__, header_len, len, *offset);
+		mse_warn("header short. hlen=%zu size=%zu+%zu\n",
+			 header_len, len, *offset);
 		return -EPERM;
 	}
 
@@ -333,7 +328,7 @@ int jpeg_read_dqt(const u8 *buf,
 	while (header_len > 0) {
 		qid = JPEG_GET_DQT_QID(buf[*offset]);
 		if (qid > JPEG_QUANT_NUM) {
-			pr_warn("[%s] invalid id. qid=%d\n", __func__, qid);
+			mse_warn("invalid id. qid=%d\n", qid);
 			return -EPERM;
 		}
 
@@ -347,13 +342,13 @@ int jpeg_read_dqt(const u8 *buf,
 		(*offset)++;
 
 		if (header_len < quant_len) {
-			pr_warn("[%s] invalid length. hlen=%zu qlen=%zu\n",
-				__func__, header_len, quant_len);
+			mse_warn("invalid length. hlen=%zu qlen=%zu\n",
+				 header_len, quant_len);
 			return -EPERM;
 		}
 
-		pr_debug("[%s] DQT Tq=%d Pq=%d Size=%zu",
-			 __func__, qid, precision, quant_len);
+		mse_debug("DQT Tq=%d Pq=%d Size=%zu",
+			  qid, precision, quant_len);
 
 		qtable[qid].size = quant_len;
 		memcpy(qtable[qid].data, &buf[*offset], quant_len);
@@ -373,15 +368,14 @@ int jpeg_read_dri(const u8 *buf,
 	size_t offset_work = *offset;
 
 	if (*offset + JPEG_DRI_LENGTH > len) {
-		pr_warn("[%s] not enough data for DRI", __func__);
+		mse_warn("not enough data for DRI");
 		*offset += len;
 		return -EPERM;
 	}
 
 	header_len = JPEG_GET_HEADER_SIZE(buf, *offset);
 	if (header_len < JPEG_DRI_LENGTH) {
-		pr_warn("[%s] invalid length. hlen=%zu\n",
-			__func__, header_len);
+		mse_warn("invalid length. hlen=%zu\n", header_len);
 		*offset += header_len;
 		return -EPERM;
 	}
@@ -596,7 +590,7 @@ u32 jpeg_make_header(enum MJPEG_TYPE type,
 	*p++ = 63;			/* last DCT coeff */
 	*p++ = 0;			/* sucessive approx. */
 
-	pr_debug("[%s] header size=%u\n", __func__, (u32)(p - start));
+	mse_debug("header size=%u\n", (u32)(p - start));
 
 	return p - start;
 };

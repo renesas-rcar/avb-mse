@@ -89,7 +89,7 @@
 
 #define MSE_PACKETIZER_MAX      (10)
 
-struct avtp_param {
+struct avtp_aaf_param {
 	char dest_addr[MSE_MAC_LEN_MAX];
 	char source_addr[MSE_MAC_LEN_MAX];
 	int uniqueid;
@@ -124,7 +124,7 @@ struct aaf_packetizer {
 	unsigned char packet_piece[ETHFRAMELEN_MAX];
 
 	struct mse_network_config net_config;
-	struct mse_audio_config aaf_config;
+	struct mse_audio_config audio_config;
 };
 
 struct aaf_packetizer aaf_packetizer_table[MSE_PACKETIZER_MAX];
@@ -175,24 +175,25 @@ static int check_receive_packet(int index, int channels,
 				int sample_rate, int bit_depth)
 {
 	struct aaf_packetizer *aaf = &aaf_packetizer_table[index];
+	struct mse_audio_config *audio_config = &aaf->audio_config;
 
-	if (channels != aaf->aaf_config.channels) {
-		pr_err("[%s] packet's ch=%d != cfg ch=%d\n",
-		       __func__, channels, aaf->aaf_config.channels);
+	if (channels != audio_config->channels) {
+		mse_err("packet's ch=%d != cfg ch=%d\n",
+			channels, audio_config->channels);
 		return -EINVAL;
 	}
 
-	if (sample_rate != aaf->aaf_config.sample_rate) {
-		pr_err("[%s] packet's sample_rate=%d != cfg sample_rate=%d\n",
-		       __func__, sample_rate, aaf->aaf_config.sample_rate);
+	if (sample_rate != audio_config->sample_rate) {
+		mse_err("packet's sample_rate=%d != cfg sample_rate=%d\n",
+			sample_rate, audio_config->sample_rate);
 		return -EINVAL;
 	}
 
 	if (!aaf->f_warned &&
-	    bit_depth != mse_get_bit_depth(aaf->aaf_config.sample_bit_depth)) {
-		pr_warn("[%s] packet's bit_depth=%d != cfg bit_depth=%d\n",
-			__func__, bit_depth,
-			mse_get_bit_depth(aaf->aaf_config.sample_bit_depth));
+	    bit_depth != mse_get_bit_depth(audio_config->sample_bit_depth)) {
+		mse_warn("packet's bit_depth=%d != cfg bit_depth=%d\n",
+			 bit_depth,
+			 mse_get_bit_depth(audio_config->sample_bit_depth));
 		aaf->f_warned = true;
 	}
 
@@ -207,49 +208,48 @@ static int check_packet_format(int index)
 		return -EPERM;
 	aaf = &aaf_packetizer_table[index];
 
-	if (get_aaf_format(aaf->aaf_config.sample_bit_depth) < 0) {
-		pr_err("[%s] invalid sample format bit_depth %d\n",
-		       __func__,
-		       mse_get_bit_depth(aaf->aaf_config.sample_bit_depth));
+	if (get_aaf_format(aaf->audio_config.sample_bit_depth) < 0) {
+		mse_err("invalid sample format bit_depth %d\n",
+			mse_get_bit_depth(aaf->audio_config.sample_bit_depth));
 
 		return -EINVAL;
 	}
 
-	switch (aaf->aaf_config.sample_bit_depth) {
+	switch (aaf->audio_config.sample_bit_depth) {
 	case MSE_AUDIO_BIT_16:
-		if (aaf->aaf_config.bytes_per_sample != 2)
+		if (aaf->audio_config.bytes_per_sample != 2)
 			goto format_err;
 		break;
 	case MSE_AUDIO_BIT_18:
 	case MSE_AUDIO_BIT_20:
-		if (aaf->aaf_config.bytes_per_sample != 3)
+		if (aaf->audio_config.bytes_per_sample != 3)
 			goto format_err;
 		break;
 	case MSE_AUDIO_BIT_24:
-		if (aaf->aaf_config.bytes_per_sample != 3 &&
-		    aaf->aaf_config.bytes_per_sample != 4)
+		if (aaf->audio_config.bytes_per_sample != 3 &&
+		    aaf->audio_config.bytes_per_sample != 4)
 			goto format_err;
 		break;
 	case MSE_AUDIO_BIT_32:
-		if (aaf->aaf_config.bytes_per_sample != 4)
+		if (aaf->audio_config.bytes_per_sample != 4)
 			goto format_err;
 		break;
 	default:
 		goto format_err;
 	}
 
-	if (avtp_sample_rate_to_nsr(aaf->aaf_config.sample_rate) ==
+	if (avtp_sample_rate_to_nsr(aaf->audio_config.sample_rate) ==
 	    AVTP_AAF_NSR_USER) {
-		pr_err("[%s] invalid sample rata %d\n",
-		       __func__, aaf->aaf_config.sample_rate);
+		mse_err("invalid sample rata %d\n",
+			aaf->audio_config.sample_rate);
 
 		return -EINVAL;
 	}
 
-	if (aaf->aaf_config.channels < 1 ||
-	    aaf->aaf_config.channels > 24) {
-		pr_err("[%s] invalid channel number %d\n",
-		       __func__, aaf->aaf_config.channels);
+	if (aaf->audio_config.channels < 1 ||
+	    aaf->audio_config.channels > 24) {
+		mse_err("invalid channel number %d\n",
+			aaf->audio_config.channels);
 
 		return -EINVAL;
 	}
@@ -257,15 +257,14 @@ static int check_packet_format(int index)
 	return 0;
 
 format_err:
-	pr_err("[%s] invalid format bit_depth %d bytes_per_sample=%d\n",
-	       __func__,
-	       mse_get_bit_depth(aaf->aaf_config.sample_bit_depth),
-	       aaf->aaf_config.bytes_per_sample);
+	mse_err("invalid format bit_depth %d bytes_per_sample=%d\n",
+		mse_get_bit_depth(aaf->audio_config.sample_bit_depth),
+		aaf->audio_config.bytes_per_sample);
 
 	return -EINVAL;
 }
 
-static int mse_packetizer_audio_aaf_open(void)
+static int mse_packetizer_aaf_open(void)
 {
 	struct aaf_packetizer *aaf;
 	int index;
@@ -286,12 +285,12 @@ static int mse_packetizer_audio_aaf_open(void)
 	aaf->seq_num_err = SEQNUM_INIT;
 	aaf->piece_data_len = 0;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 
 	return index;
 }
 
-static int mse_packetizer_audio_aaf_release(int index)
+static int mse_packetizer_aaf_release(int index)
 {
 	struct aaf_packetizer *aaf;
 
@@ -299,21 +298,21 @@ static int mse_packetizer_audio_aaf_release(int index)
 		return -EPERM;
 
 	aaf = &aaf_packetizer_table[index];
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 
 	memset(aaf, 0, sizeof(*aaf));
 
 	return 0;
 }
 
-static int mse_packetizer_audio_aaf_packet_init(int index)
+static int mse_packetizer_aaf_packet_init(int index)
 {
 	struct aaf_packetizer *aaf;
 
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	aaf = &aaf_packetizer_table[index];
 
 	aaf->piece_f = false;
@@ -325,7 +324,7 @@ static int mse_packetizer_audio_aaf_packet_init(int index)
 	return 0;
 }
 
-static int mse_packetizer_audio_aaf_set_network_config(
+static int mse_packetizer_aaf_set_network_config(
 					int index,
 					struct mse_network_config *config)
 {
@@ -334,15 +333,15 @@ static int mse_packetizer_audio_aaf_set_network_config(
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	aaf = &aaf_packetizer_table[index];
 	aaf->net_config = *config;
 
 	return 0;
 }
 
-static int mse_packetizer_audio_aaf_header_build(void *dst,
-						 struct avtp_param *param)
+static int mse_packetizer_aaf_header_build(void *dst,
+					   struct avtp_aaf_param *param)
 {
 	int hlen, len;
 	u8 cfi;
@@ -378,54 +377,53 @@ static int mse_packetizer_audio_aaf_header_build(void *dst,
 	return hlen + len;
 }
 
-static int mse_packetizer_audio_aaf_set_audio_config(
-					int index,
-					struct mse_audio_config *config)
+static int mse_packetizer_aaf_set_audio_config(int index,
+					       struct mse_audio_config *config)
 {
 	struct aaf_packetizer *aaf;
-	struct avtp_param param;
+	struct avtp_aaf_param param;
 	int payload_size;
 	int ret;
 
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d rate=%d channels=%d samples_per_frame=%d\n",
-		 __func__, index, config->sample_rate, config->channels,
-		 config->samples_per_frame);
+	mse_debug("index=%d rate=%d channels=%d samples_per_frame=%d\n",
+		  index, config->sample_rate, config->channels,
+		  config->samples_per_frame);
 	aaf = &aaf_packetizer_table[index];
-	aaf->aaf_config = *config;
+	aaf->audio_config = *config;
 
 	ret = check_packet_format(index);
 	if (ret < 0)
 		return ret;
 
-	aaf->avtp_format = get_aaf_format(aaf->aaf_config.sample_bit_depth);
+	aaf->avtp_format = get_aaf_format(aaf->audio_config.sample_bit_depth);
 	aaf->avtp_bytes_per_ch = get_aaf_format_size(aaf->avtp_format);
-	aaf->shift = get_bit_shift(aaf->aaf_config.sample_bit_depth);
+	aaf->shift = get_bit_shift(aaf->audio_config.sample_bit_depth);
 
 	/* when samples_per_frame is not set */
-	if (!aaf->aaf_config.samples_per_frame) {
+	if (!aaf->audio_config.samples_per_frame) {
 		aaf->class_interval_frames = CLASS_INTERVAL_FRAMES;
-		aaf->sample_per_packet = aaf->aaf_config.sample_rate /
+		aaf->sample_per_packet = aaf->audio_config.sample_rate /
 				(aaf->class_interval_frames * INTERVAL_FRAMES);
 		aaf->frame_interval_time = NSEC / aaf->class_interval_frames;
 	} else {
-		aaf->sample_per_packet = aaf->aaf_config.samples_per_frame;
+		aaf->sample_per_packet = aaf->audio_config.samples_per_frame;
 		if (aaf->sample_per_packet < 2)
 			aaf->sample_per_packet = 2;
 		else if (aaf->sample_per_packet > 128)
 			aaf->sample_per_packet = 128;
-		aaf->class_interval_frames = aaf->aaf_config.sample_rate /
+		aaf->class_interval_frames = aaf->audio_config.sample_rate /
 					aaf->sample_per_packet;
 		aaf->frame_interval_time = NSEC / aaf->class_interval_frames;
 	}
 
-	payload_size = aaf->sample_per_packet * aaf->aaf_config.channels *
+	payload_size = aaf->sample_per_packet * aaf->audio_config.channels *
 						aaf->avtp_bytes_per_ch;
 	aaf->avtp_packet_size = AVTP_AAF_PAYLOAD_OFFSET + payload_size;
-	if (aaf->avtp_packet_size < AVTP_FRAME_SIZE_MIN)
-		aaf->avtp_packet_size = AVTP_FRAME_SIZE_MIN;
+	if (aaf->avtp_packet_size < ETHFRAMELEN_MIN)
+		aaf->avtp_packet_size = ETHFRAMELEN_MIN;
 
 	memcpy(param.dest_addr, aaf->net_config.dest_addr, MSE_MAC_LEN_MAX);
 	memcpy(param.source_addr, aaf->net_config.source_addr,
@@ -434,17 +432,16 @@ static int mse_packetizer_audio_aaf_set_audio_config(
 	param.priority = aaf->net_config.priority;
 	param.vid = aaf->net_config.vlanid;
 	param.samples_per_frame = aaf->sample_per_packet;
-	param.channels = aaf->aaf_config.channels;
-	param.sample_rate = aaf->aaf_config.sample_rate;
+	param.channels = aaf->audio_config.channels;
+	param.sample_rate = aaf->audio_config.sample_rate;
 
-	mse_packetizer_audio_aaf_header_build(aaf->packet_template, &param);
+	mse_packetizer_aaf_header_build(aaf->packet_template, &param);
 
 	return 0;
 }
 
-static int mse_packetizer_audio_aaf_get_audio_info(
-	int index,
-	struct mse_audio_info *info)
+static int mse_packetizer_aaf_get_audio_info(int index,
+					     struct mse_audio_info *info)
 {
 	struct aaf_packetizer *aaf;
 
@@ -456,8 +453,8 @@ static int mse_packetizer_audio_aaf_get_audio_info(
 	return 0;
 }
 
-static int mse_packetizer_audio_aaf_calc_cbs(int index,
-					     struct mse_cbsparam *cbs)
+static int mse_packetizer_aaf_calc_cbs(int index,
+				       struct mse_cbsparam *cbs)
 {
 	struct aaf_packetizer *aaf;
 	u64 value;
@@ -466,14 +463,14 @@ static int mse_packetizer_audio_aaf_calc_cbs(int index,
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	aaf = &aaf_packetizer_table[index];
 
 	bandwidth_fraction_denominator =
 				(u64)aaf->net_config.port_transmit_rate *
 				(u64)CBS_ADJUSTMENT_DENOMINATOR;
 	if (!bandwidth_fraction_denominator) {
-		pr_err("[%s] cbs error(null)\n", __func__);
+		mse_err("cbs error(null)\n");
 		return -EPERM;
 	}
 
@@ -487,7 +484,7 @@ static int mse_packetizer_audio_aaf_calc_cbs(int index,
 	do_div(value, aaf->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
 	if (value > UINT_MAX) {
-		pr_err("[%s] cbs error(too big)\n", __func__);
+		mse_err("cbs error(too big)\n");
 		return -EPERM;
 	}
 	cbs->bandwidth_fraction = value;
@@ -543,7 +540,7 @@ static int copy_bit_to_paload(unsigned char *dest, int dest_type,
 		dest[3] = (value & 0x000000FF);
 		break;
 	default:
-		pr_err("[%s] format error %d\n", __func__, dest_type);
+		mse_err("format error %d\n", dest_type);
 		return -1;
 	}
 
@@ -566,14 +563,14 @@ static int copy_payload(unsigned char *payload,
 		copy_bit_to_paload(payload,
 				   aaf->avtp_format,
 				   buffer,
-				   aaf->aaf_config.bytes_per_sample,
+				   aaf->audio_config.bytes_per_sample,
 				   aaf->shift,
-				   aaf->aaf_config.is_big_endian);
+				   aaf->audio_config.is_big_endian);
 
 		payload += aaf->avtp_bytes_per_ch;
-		buffer += aaf->aaf_config.bytes_per_sample;
+		buffer += aaf->audio_config.bytes_per_sample;
 		*payload_stored += aaf->avtp_bytes_per_ch;
-		*buffer_stored += aaf->aaf_config.bytes_per_sample;
+		*buffer_stored += aaf->audio_config.bytes_per_sample;
 	}
 
 	return 0;
@@ -596,7 +593,7 @@ static int copy_bit_to_buffer(unsigned char *dest, int dest_byte,
 		value = src[0] << 24 | src[1] << 16 | src[2] << 8 | src[3];
 		break;
 	default:
-		pr_err("[%s] format error %d\n", __func__, src_byte);
+		mse_err("format error %d\n", src_byte);
 		return -1;
 	}
 
@@ -627,36 +624,36 @@ static int copy_buffer(unsigned char *buffer,
 	int shift;
 
 	*buffer_stored = 0;
-	if (aaf->aaf_config.bytes_per_sample == 4 &&
-	    aaf->aaf_config.sample_bit_depth == MSE_AUDIO_BIT_24)  {
+	if (aaf->audio_config.bytes_per_sample == 4 &&
+	    aaf->audio_config.sample_bit_depth == MSE_AUDIO_BIT_24)  {
 		shift = (aaf_byte_per_ch - 3) * 8 + aaf->shift;
 	} else {
-		shift = (aaf_byte_per_ch - aaf->aaf_config.bytes_per_sample)
+		shift = (aaf_byte_per_ch - aaf->audio_config.bytes_per_sample)
 			* 8 + aaf->shift;
 	}
 
 	for (i = 0; i < count; i++) {
 		copy_bit_to_buffer(buffer,
-				   aaf->aaf_config.bytes_per_sample,
+				   aaf->audio_config.bytes_per_sample,
 				   payload,
 				   aaf_byte_per_ch,
 				   shift,
-				   aaf->aaf_config.is_big_endian);
-		buffer += aaf->aaf_config.bytes_per_sample;
-		*buffer_stored += aaf->aaf_config.bytes_per_sample;
+				   aaf->audio_config.is_big_endian);
+		buffer += aaf->audio_config.bytes_per_sample;
+		*buffer_stored += aaf->audio_config.bytes_per_sample;
 		payload += aaf_byte_per_ch;
 	}
 
 	return 0;
 }
 
-static int mse_packetizer_audio_aaf_packetize(int index,
-					      void *packet,
-					      size_t *packet_size,
-					      void *buffer,
-					      size_t buffer_size,
-					      size_t *buffer_processed,
-					      unsigned int *timestamp)
+static int mse_packetizer_aaf_packetize(int index,
+					void *packet,
+					size_t *packet_size,
+					void *buffer,
+					size_t buffer_size,
+					size_t *buffer_processed,
+					unsigned int *timestamp)
 {
 	struct aaf_packetizer *aaf;
 	int data_len, data_size;
@@ -669,10 +666,10 @@ static int mse_packetizer_audio_aaf_packetize(int index,
 		return -EPERM;
 
 	aaf = &aaf_packetizer_table[index];
-	config = &aaf->aaf_config;
-	pr_debug("[%s] index=%d seqnum=%d process=%zu/%zu t=%d\n",
-		 __func__, index, aaf->send_seq_num, *buffer_processed,
-		 buffer_size, *timestamp);
+	config = &aaf->audio_config;
+	mse_debug("index=%d seqnum=%d process=%zu/%zu t=%d\n",
+		  index, aaf->send_seq_num, *buffer_processed,
+		  buffer_size, *timestamp);
 
 	/* header */
 	if (aaf->piece_f) {
@@ -731,13 +728,13 @@ static int mse_packetizer_audio_aaf_packetize(int index,
 		return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
-static int mse_packetizer_audio_aaf_depacketize(int index,
-						void *buffer,
-						size_t buffer_size,
-						size_t *buffer_processed,
-						unsigned int *timestamp,
-						void *packet,
-						size_t packet_size)
+static int mse_packetizer_aaf_depacketize(int index,
+					  void *buffer,
+					  size_t buffer_size,
+					  size_t *buffer_processed,
+					  unsigned int *timestamp,
+					  void *packet,
+					  size_t packet_size)
 {
 	struct aaf_packetizer *aaf;
 	int seq_num;
@@ -755,12 +752,11 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	aaf = &aaf_packetizer_table[index];
 
 	if (avtp_get_subtype(packet) != AVTP_SUBTYPE_AAF) {
-		pr_err("[%s] error subtype=%d\n",
-		       __func__, avtp_get_subtype(packet));
+		mse_err("error subtype=%d\n", avtp_get_subtype(packet));
 		return -EINVAL;
 	}
 
@@ -782,7 +778,7 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 	count = payload_size / aaf_byte_per_ch;
 
 	/* buffer over check */
-	if (*buffer_processed + count * aaf->aaf_config.bytes_per_sample >
+	if (*buffer_processed + count * aaf->audio_config.bytes_per_sample >
 	    buffer_size)
 		buf = tmp_buffer;
 	else
@@ -792,19 +788,19 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 	seq_num = avtp_get_sequence_num(packet);
 	if (aaf->old_seq_num != seq_num && aaf->old_seq_num != SEQNUM_INIT) {
 		if (aaf->seq_num_err == SEQNUM_INIT) {
-			pr_err("sequence number discontinuity %d->%d=%d\n",
-			       aaf->old_seq_num, seq_num,
-			       (seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
-			       aaf->old_seq_num) %
-			       (AVTP_SEQUENCE_NUM_MAX + 1));
+			mse_err("sequence number discontinuity %d->%d=%d\n",
+				aaf->old_seq_num, seq_num,
+				(seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
+				 aaf->old_seq_num) %
+				(AVTP_SEQUENCE_NUM_MAX + 1));
 			aaf->seq_num_err = 1;
 		} else {
 			aaf->seq_num_err++;
 		}
 	} else {
 		if (aaf->seq_num_err != SEQNUM_INIT) {
-			pr_err("sequence number recovery %d count=%d\n",
-			       seq_num, aaf->seq_num_err);
+			mse_err("sequence number recovery %d count=%d\n",
+				seq_num, aaf->seq_num_err);
 			aaf->seq_num_err = SEQNUM_INIT;
 		}
 	}
@@ -821,7 +817,7 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 		    aaf_byte_per_ch, aaf,
 		    count);
 
-	if (*buffer_processed + count * aaf->aaf_config.bytes_per_sample >
+	if (*buffer_processed + count * aaf->audio_config.bytes_per_sample >
 	    buffer_size) {
 		aaf->piece_f = true;
 		piece_size = buffer_size - *buffer_processed;
@@ -829,10 +825,10 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 		memcpy(buffer + *buffer_processed, buf, piece_size);
 		memcpy(aaf->packet_piece, buf + piece_size,
 		       aaf->piece_data_len);
-		pr_debug("[%s] piece %d - %02x %02x %02x %02x\n",
-			 __func__, aaf->piece_data_len,
-			 aaf->packet_piece[0], aaf->packet_piece[1],
-			 aaf->packet_piece[2], aaf->packet_piece[3]);
+		mse_debug("piece %d - %02x %02x %02x %02x\n",
+			  aaf->piece_data_len,
+			  aaf->packet_piece[0], aaf->packet_piece[1],
+			  aaf->packet_piece[2], aaf->packet_piece[3]);
 	}
 
 	if (*buffer_processed + stored > buffer_size)
@@ -857,15 +853,15 @@ static int mse_packetizer_audio_aaf_depacketize(int index,
 	return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
-struct mse_packetizer_ops mse_packetizer_audio_aaf_ops = {
+struct mse_packetizer_ops mse_packetizer_aaf_ops = {
 	.id = MSE_PACKETIZER_AAF_PCM,
-	.open = mse_packetizer_audio_aaf_open,
-	.release = mse_packetizer_audio_aaf_release,
-	.init = mse_packetizer_audio_aaf_packet_init,
-	.set_network_config = mse_packetizer_audio_aaf_set_network_config,
-	.set_audio_config = mse_packetizer_audio_aaf_set_audio_config,
-	.get_audio_info = mse_packetizer_audio_aaf_get_audio_info,
-	.calc_cbs = mse_packetizer_audio_aaf_calc_cbs,
-	.packetize = mse_packetizer_audio_aaf_packetize,
-	.depacketize = mse_packetizer_audio_aaf_depacketize,
+	.open = mse_packetizer_aaf_open,
+	.release = mse_packetizer_aaf_release,
+	.init = mse_packetizer_aaf_packet_init,
+	.set_network_config = mse_packetizer_aaf_set_network_config,
+	.set_audio_config = mse_packetizer_aaf_set_audio_config,
+	.get_audio_info = mse_packetizer_aaf_get_audio_info,
+	.calc_cbs = mse_packetizer_aaf_calc_cbs,
+	.packetize = mse_packetizer_aaf_packetize,
+	.depacketize = mse_packetizer_aaf_depacketize,
 };

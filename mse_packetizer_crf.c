@@ -273,14 +273,14 @@ static int mse_packetizer_crf_audio_calc_cbs(int index,
 	if (index >= ARRAY_SIZE(crf_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 	crf = &crf_packetizer_table[index];
 
 	bandwidth_fraction_denominator =
 				(u64)crf->net_config.port_transmit_rate *
 				(u64)CBS_ADJUSTMENT_DENOMINATOR;
 	if (!bandwidth_fraction_denominator) {
-		pr_err("[%s] cbs error(null)\n", __func__);
+		mse_err("cbs error(null)\n");
 		return -EPERM;
 	}
 
@@ -294,7 +294,7 @@ static int mse_packetizer_crf_audio_calc_cbs(int index,
 	do_div(value, crf->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
 	if (value > UINT_MAX) {
-		pr_err("[%s] cbs error(too big)\n", __func__);
+		mse_err("cbs error(too big)\n");
 		return -EPERM;
 	}
 	cbs->bandwidth_fraction = value;
@@ -373,7 +373,7 @@ static int mse_packetizer_crf_audio_depacketize(int index,
 	size = avtp_get_crf_data_length(packet);
 
 	if (size > buffer_size) {
-		pr_err("[%s] error\n", __func__);
+		mse_err("error\n");
 		return -ENOMEM;
 	}
 

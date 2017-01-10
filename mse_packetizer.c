@@ -71,12 +71,12 @@ static struct {
 	int index;
 	struct mse_packetizer_ops *ops;
 } mse_packetizer_ops_table[] = {
-	{ -1, &mse_packetizer_audio_aaf_ops },
-	{ -1, &mse_packetizer_audio_iec61883_6_ops },
-	{ -1, &mse_packetizer_video_cvf_h264_ops },
-	{ -1, &mse_packetizer_video_cvf_h264_d13_ops },
-	{ -1, &mse_packetizer_video_cvf_mjpeg_ops },
-	{ -1, &mse_packetizer_video_iec61883_4_ops },
+	{ -1, &mse_packetizer_aaf_ops },
+	{ -1, &mse_packetizer_iec61883_6_ops },
+	{ -1, &mse_packetizer_cvf_h264_ops },
+	{ -1, &mse_packetizer_cvf_h264_d13_ops },
+	{ -1, &mse_packetizer_cvf_mjpeg_ops },
+	{ -1, &mse_packetizer_iec61883_4_ops },
 	{ -1, NULL },
 };
 
@@ -87,7 +87,7 @@ int mse_packetizer_init(void)
 	for (i = 0; mse_packetizer_ops_table[i].ops != NULL; i++) {
 		index = mse_register_packetizer(mse_packetizer_ops_table[i].ops);
 		if (index < 0) {
-			pr_err("[%s] cannot register\n", __func__);
+			mse_err("cannot register\n");
 			return -EPERM;
 		}
 		mse_packetizer_ops_table[i].index = index;

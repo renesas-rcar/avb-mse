@@ -89,7 +89,7 @@
 
 #define MSE_PACKETIZER_MAX      (10)
 
-struct avtp_param {
+struct avtp_iec61883_6_param {
 	char dest_addr[MSE_MAC_LEN_MAX];
 	char source_addr[MSE_MAC_LEN_MAX];
 	int uniqueid;
@@ -100,7 +100,7 @@ struct avtp_param {
 	int sample_rate;
 };
 
-struct iec_packetizer {
+struct iec61883_6_packetizer {
 	bool used_f;
 	bool piece_f;
 
@@ -122,26 +122,30 @@ struct iec_packetizer {
 	unsigned char packet_piece[ETHFRAMELEN_MAX];
 
 	struct mse_network_config net_config;
-	struct mse_audio_config iec_config;
+	struct mse_audio_config audio_config;
 };
 
-struct iec_packetizer iec_packetizer_table[MSE_PACKETIZER_MAX];
+struct iec61883_6_packetizer iec61883_6_packetizer_table[MSE_PACKETIZER_MAX];
 
 static int check_receive_packet(int index, int channels, void *packet)
 {
 	int sample_rate;
-	struct iec_packetizer *iec = &iec_packetizer_table[index];
+	struct iec61883_6_packetizer *iec61883_6;
+	struct mse_audio_config *audio_config;
 
-	if (channels != iec->iec_config.channels) {
-		pr_err("[%s] packet's ch=%d != cfg ch=%d\n",
-		       __func__, channels, iec->iec_config.channels);
+	iec61883_6 = &iec61883_6_packetizer_table[index];
+	audio_config = &iec61883_6->audio_config;
+
+	if (channels != audio_config->channels) {
+		mse_err("packet's ch=%d != cfg ch=%d\n",
+			channels, audio_config->channels);
 		return -EINVAL;
 	}
 
 	sample_rate = avtp_fdf_to_sample_rate(avtp_get_iec61883_fdf(packet));
-	if (sample_rate != iec->iec_config.sample_rate) {
-		pr_err("[%s] packet's sample_rate=%d != cfg sample_rate=%d\n",
-		       __func__, sample_rate, iec->iec_config.sample_rate);
+	if (sample_rate != audio_config->sample_rate) {
+		mse_err("packet's sample_rate=%d != cfg sample_rate=%d\n",
+			sample_rate, audio_config->sample_rate);
 		return -EINVAL;
 	}
 
@@ -150,44 +154,44 @@ static int check_receive_packet(int index, int channels, void *packet)
 
 static int check_packet_format(int index)
 {
-	struct iec_packetizer *iec;
+	struct iec61883_6_packetizer *iec61883_6;
 
-	if (index >= ARRAY_SIZE(iec_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
 		return -EPERM;
-	iec = &iec_packetizer_table[index];
+	iec61883_6 = &iec61883_6_packetizer_table[index];
 
-	switch (iec->iec_config.sample_bit_depth) {
+	switch (iec61883_6->audio_config.sample_bit_depth) {
 	case MSE_AUDIO_BIT_16:
-		if (iec->iec_config.bytes_per_sample != 2)
+		if (iec61883_6->audio_config.bytes_per_sample != 2)
 			goto format_err;
 		break;
 	case MSE_AUDIO_BIT_18:
 	case MSE_AUDIO_BIT_20:
-		if (iec->iec_config.bytes_per_sample != 3)
+		if (iec61883_6->audio_config.bytes_per_sample != 3)
 			goto format_err;
 		break;
 	case MSE_AUDIO_BIT_24:
-		if (iec->iec_config.bytes_per_sample != 3 &&
-		    iec->iec_config.bytes_per_sample != 4)
+		if (iec61883_6->audio_config.bytes_per_sample != 3 &&
+		    iec61883_6->audio_config.bytes_per_sample != 4)
 			goto format_err;
 		break;
 	default:
 		goto format_err;
 	}
 
-	if (avtp_sample_rate_to_fdf(iec->iec_config.sample_rate) ==
+	if (avtp_sample_rate_to_fdf(iec61883_6->audio_config.sample_rate) ==
 	    (AVTP_IEC61883_6_FDF_EVT_AM824 |
 	     AVTP_IEC61883_6_FDF_SFC_RESERVED)) {
-		pr_err("[%s] invalid sample rata %d\n",
-		       __func__, iec->iec_config.sample_rate);
+		mse_err("invalid sample rata %d\n",
+			iec61883_6->audio_config.sample_rate);
 
 		return -EINVAL;
 	}
 
-	if (iec->iec_config.channels < 1 ||
-	    iec->iec_config.channels > 24) {
-		pr_err("[%s] invalid channel number %d\n",
-		       __func__, iec->iec_config.channels);
+	if (iec61883_6->audio_config.channels < 1 ||
+	    iec61883_6->audio_config.channels > 24) {
+		mse_err("invalid channel number %d\n",
+			iec61883_6->audio_config.channels);
 
 		return -EINVAL;
 	}
@@ -195,94 +199,94 @@ static int check_packet_format(int index)
 	return 0;
 
 format_err:
-	pr_err("[%s] invalid format bit_depth %d bytes_per_sample=%d\n",
-	       __func__,
-	       mse_get_bit_depth(iec->iec_config.sample_bit_depth),
-	       iec->iec_config.bytes_per_sample);
+	mse_err("invalid format bit_depth %d bytes_per_sample=%d\n",
+		mse_get_bit_depth(iec61883_6->audio_config.sample_bit_depth),
+		iec61883_6->audio_config.bytes_per_sample);
 
 	return -EINVAL;
 }
 
-static int mse_packetizer_audio_iec_open(void)
+static int mse_packetizer_iec61883_6_open(void)
 {
-	struct iec_packetizer *iec;
+	struct iec61883_6_packetizer *iec61883_6;
 	int index;
 
-	for (index = 0; iec_packetizer_table[index].used_f &&
-	     index < ARRAY_SIZE(iec_packetizer_table); index++)
+	for (index = 0; iec61883_6_packetizer_table[index].used_f &&
+	     index < ARRAY_SIZE(iec61883_6_packetizer_table); index++)
 		;
 
-	if (index >= ARRAY_SIZE(iec_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
 		return -EPERM;
 
-	iec = &iec_packetizer_table[index];
+	iec61883_6 = &iec61883_6_packetizer_table[index];
 
-	iec->used_f = true;
-	iec->piece_f = false;
-	iec->send_seq_num = 0;
-	iec->old_seq_num = SEQNUM_INIT;
-	iec->seq_num_err = SEQNUM_INIT;
-	iec->local_total_samples = 0;
-	iec->piece_data_len = 0;
+	iec61883_6->used_f = true;
+	iec61883_6->piece_f = false;
+	iec61883_6->send_seq_num = 0;
+	iec61883_6->old_seq_num = SEQNUM_INIT;
+	iec61883_6->seq_num_err = SEQNUM_INIT;
+	iec61883_6->local_total_samples = 0;
+	iec61883_6->piece_data_len = 0;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
+	mse_debug("index=%d\n", index);
 
 	return index;
 }
 
-static int mse_packetizer_audio_iec_release(int index)
+static int mse_packetizer_iec61883_6_release(int index)
 {
-	struct iec_packetizer *iec;
+	struct iec61883_6_packetizer *iec61883_6;
 
-	if (index >= ARRAY_SIZE(iec_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
 		return -EPERM;
 
-	iec = &iec_packetizer_table[index];
-	pr_debug("[%s] index=%d\n", __func__, index);
+	iec61883_6 = &iec61883_6_packetizer_table[index];
+	mse_debug("index=%d\n", index);
 
-	memset(iec, 0, sizeof(*iec));
+	memset(iec61883_6, 0, sizeof(*iec61883_6));
 
 	return 0;
 }
 
-static int mse_packetizer_audio_iec_packet_init(int index)
+static int mse_packetizer_iec61883_6_packet_init(int index)
 {
-	struct iec_packetizer *iec;
+	struct iec61883_6_packetizer *iec61883_6;
 
-	if (index >= ARRAY_SIZE(iec_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
-	iec = &iec_packetizer_table[index];
+	mse_debug("index=%d\n", index);
+	iec61883_6 = &iec61883_6_packetizer_table[index];
 
-	iec->piece_f = false;
-	iec->send_seq_num = 0;
-	iec->old_seq_num = SEQNUM_INIT;
-	iec->seq_num_err = SEQNUM_INIT;
-	iec->local_total_samples = 0;
-	iec->piece_data_len = 0;
+	iec61883_6->piece_f = false;
+	iec61883_6->send_seq_num = 0;
+	iec61883_6->old_seq_num = SEQNUM_INIT;
+	iec61883_6->seq_num_err = SEQNUM_INIT;
+	iec61883_6->local_total_samples = 0;
+	iec61883_6->piece_data_len = 0;
 
 	return 0;
 }
 
-static int mse_packetizer_audio_iec_set_network_config(
+static int mse_packetizer_iec61883_6_set_network_config(
 					int index,
 					struct mse_network_config *config)
 {
-	struct iec_packetizer *iec;
+	struct iec61883_6_packetizer *iec61883_6;
 
-	if (index >= ARRAY_SIZE(iec_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
-	iec = &iec_packetizer_table[index];
-	iec->net_config = *config;
+	mse_debug("index=%d\n", index);
+	iec61883_6 = &iec61883_6_packetizer_table[index];
+	iec61883_6->net_config = *config;
 
 	return 0;
 }
 
-static int mse_packetizer_audio_iec_header_build(void *dst,
-						 struct avtp_param *param)
+static int mse_packetizer_iec61883_6_header_build(
+					void *dst,
+					struct avtp_iec61883_6_param *param)
 {
 	int hlen, len;
 	u8 cfi;
@@ -319,126 +323,133 @@ static int mse_packetizer_audio_iec_header_build(void *dst,
 	return hlen + len;
 }
 
-static int mse_packetizer_audio_iec_set_audio_config(
+static int mse_packetizer_iec61883_6_set_audio_config(
 					int index,
 					struct mse_audio_config *config)
 {
-	struct iec_packetizer *iec;
-	struct avtp_param param;
+	struct iec61883_6_packetizer *iec61883_6;
+	struct avtp_iec61883_6_param param;
+	struct mse_audio_config *audio_config;
+	struct mse_network_config *net_config;
 	int payload_size;
 	int ret;
 
-	if (index >= ARRAY_SIZE(iec_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d rate=%d channels=%d samples_per_frame=%d\n",
-		 __func__, index, config->sample_rate, config->channels,
-		 config->samples_per_frame);
-	iec = &iec_packetizer_table[index];
-	iec->iec_config = *config;
+	mse_debug("index=%d rate=%d channels=%d samples_per_frame=%d\n",
+		  index, config->sample_rate, config->channels,
+		  config->samples_per_frame);
+	iec61883_6 = &iec61883_6_packetizer_table[index];
+	iec61883_6->audio_config = *config;
 
 	ret = check_packet_format(index);
 	if (ret < 0)
 		return ret;
 
+	audio_config = &iec61883_6->audio_config;
 	/* when samples_per_frame is not set */
-	if (!iec->iec_config.samples_per_frame) {
-		iec->class_interval_frames = CLASS_INTERVAL_FRAMES;
-		iec->sample_per_packet = iec->iec_config.sample_rate /
-				(iec->class_interval_frames * INTERVAL_FRAMES);
-		iec->frame_interval_time = NSEC / CLASS_INTERVAL_FRAMES;
+	if (!audio_config->samples_per_frame) {
+		iec61883_6->class_interval_frames = CLASS_INTERVAL_FRAMES;
+		iec61883_6->sample_per_packet = audio_config->sample_rate /
+			(iec61883_6->class_interval_frames * INTERVAL_FRAMES);
+		iec61883_6->frame_interval_time = NSEC / CLASS_INTERVAL_FRAMES;
 	} else {
-		iec->sample_per_packet = iec->iec_config.samples_per_frame;
-		if (iec->sample_per_packet < 2)
-			iec->sample_per_packet = 2;
-		else if (iec->sample_per_packet > 128)
-			iec->sample_per_packet = 128;
-		iec->class_interval_frames = iec->iec_config.sample_rate /
-					iec->sample_per_packet;
-		iec->frame_interval_time = NSEC / iec->class_interval_frames;
+		iec61883_6->sample_per_packet = audio_config->samples_per_frame;
+		if (iec61883_6->sample_per_packet < 2)
+			iec61883_6->sample_per_packet = 2;
+		else if (iec61883_6->sample_per_packet > 128)
+			iec61883_6->sample_per_packet = 128;
+
+		iec61883_6->class_interval_frames = audio_config->sample_rate /
+					iec61883_6->sample_per_packet;
+		iec61883_6->frame_interval_time =
+				NSEC / iec61883_6->class_interval_frames;
 	}
 
-	payload_size = iec->sample_per_packet * iec->iec_config.channels *
-						AM824_DATA_SIZE;
-	iec->avtp_packet_size = AVTP_IEC61883_6_PAYLOAD_OFFSET + payload_size;
-	if (iec->avtp_packet_size < AVTP_FRAME_SIZE_MIN)
-		iec->avtp_packet_size = AVTP_FRAME_SIZE_MIN;
+	payload_size = iec61883_6->sample_per_packet * audio_config->channels *
+		       AM824_DATA_SIZE;
+	iec61883_6->avtp_packet_size = AVTP_IEC61883_6_PAYLOAD_OFFSET +
+				       payload_size;
+	if (iec61883_6->avtp_packet_size < ETHFRAMELEN_MIN)
+		iec61883_6->avtp_packet_size = ETHFRAMELEN_MIN;
 
-	memcpy(param.dest_addr, iec->net_config.dest_addr, MSE_MAC_LEN_MAX);
-	memcpy(param.source_addr, iec->net_config.source_addr,
-	       MSE_MAC_LEN_MAX);
-	param.uniqueid = iec->net_config.uniqueid;
-	param.priority = iec->net_config.priority;
-	param.vid = iec->net_config.vlanid;
-	param.samples_per_frame = iec->sample_per_packet;
-	param.channels = iec->iec_config.channels;
-	param.sample_rate = iec->iec_config.sample_rate;
+	net_config = &iec61883_6->net_config;
+	memcpy(param.dest_addr, net_config->dest_addr, MSE_MAC_LEN_MAX);
+	memcpy(param.source_addr, net_config->source_addr, MSE_MAC_LEN_MAX);
+	param.uniqueid = net_config->uniqueid;
+	param.priority = net_config->priority;
+	param.vid = net_config->vlanid;
+	param.samples_per_frame = iec61883_6->sample_per_packet;
+	param.channels = audio_config->channels;
+	param.sample_rate = audio_config->sample_rate;
 
-	mse_packetizer_audio_iec_header_build(iec->packet_template, &param);
-
-	return 0;
-}
-
-static int mse_packetizer_audio_iec_get_audio_info(
-	int index,
-	struct mse_audio_info *info)
-{
-	struct iec_packetizer *iec;
-
-	iec = &iec_packetizer_table[index];
-	info->avtp_packet_size = iec->avtp_packet_size;
-	info->sample_per_packet = iec->sample_per_packet;
-	info->frame_interval_time = iec->frame_interval_time;
+	mse_packetizer_iec61883_6_header_build(iec61883_6->packet_template,
+					       &param);
 
 	return 0;
 }
 
-static int mse_packetizer_audio_iec_calc_cbs(int index,
-					     struct mse_cbsparam *cbs)
+static int mse_packetizer_iec61883_6_get_audio_info(
+					int index,
+					struct mse_audio_info *info)
 {
-	struct iec_packetizer *iec;
+	struct iec61883_6_packetizer *iec61883_6;
+
+	iec61883_6 = &iec61883_6_packetizer_table[index];
+	info->avtp_packet_size = iec61883_6->avtp_packet_size;
+	info->sample_per_packet = iec61883_6->sample_per_packet;
+	info->frame_interval_time = iec61883_6->frame_interval_time;
+
+	return 0;
+}
+
+static int mse_packetizer_iec61883_6_calc_cbs(int index,
+					      struct mse_cbsparam *cbs)
+{
+	struct iec61883_6_packetizer *iec61883_6;
 	u64 value;
 	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
 
-	if (index >= ARRAY_SIZE(iec_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
-	iec = &iec_packetizer_table[index];
+	mse_debug("index=%d\n", index);
+	iec61883_6 = &iec61883_6_packetizer_table[index];
 
 	bandwidth_fraction_denominator =
-				(u64)iec->net_config.port_transmit_rate *
+				(u64)iec61883_6->net_config.port_transmit_rate *
 				(u64)CBS_ADJUSTMENT_DENOMINATOR;
 	if (!bandwidth_fraction_denominator) {
-		pr_err("[%s] cbs error(null)\n", __func__);
+		mse_err("cbs error(null)\n");
 		return -EPERM;
 	}
 
 	bandwidth_fraction_numerator =
-		(ETHERNET_SPECIAL + iec->avtp_packet_size) * BYTE_TO_BIT *
-		iec->class_interval_frames * INTERVAL_FRAMES *
-		CBS_ADJUSTMENT_NUMERATOR;
+		(ETHERNET_SPECIAL + iec61883_6->avtp_packet_size) *
+		BYTE_TO_BIT * iec61883_6->class_interval_frames *
+		INTERVAL_FRAMES * CBS_ADJUSTMENT_NUMERATOR;
 
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
 	/* divide denominator into 2 */
-	do_div(value, iec->net_config.port_transmit_rate);
+	do_div(value, iec61883_6->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
 	if (value > UINT_MAX) {
-		pr_err("[%s] cbs error(too big)\n", __func__);
+		mse_err("cbs error(too big)\n");
 		return -EPERM;
 	}
 	cbs->bandwidth_fraction = value;
 
 	value = USHRT_MAX * bandwidth_fraction_numerator;
 	/* divide denominator into 2 */
-	do_div(value, iec->net_config.port_transmit_rate);
+	do_div(value, iec61883_6->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
 	cbs->send_slope = value;
 
 	value = USHRT_MAX * (bandwidth_fraction_denominator -
 					 bandwidth_fraction_numerator);
 	/* divide denominator into 2 */
-	do_div(value, iec->net_config.port_transmit_rate);
+	do_div(value, iec61883_6->net_config.port_transmit_rate);
 	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
 	cbs->idle_slope = value;
 
@@ -459,13 +470,13 @@ static int mse_packetizer_audio_iec_calc_cbs(int index,
 #define SET_AM824_MBLA_16BIT_BE(_data) \
 	(0x00000042 | (((_data) << 8) & 0xFFFF00))
 
-static int mse_packetizer_audio_iec_set_payload(int index,
-						int data_num,
-						u32 *sample,
-						void *buffer,
-						size_t buffer_processed)
+static int mse_packetizer_iec61883_6_set_payload(int index,
+						 int data_num,
+						 u32 *sample,
+						 void *buffer,
+						 size_t buffer_processed)
 {
-	struct iec_packetizer *iec;
+	struct iec61883_6_packetizer *iec61883_6;
 	int i, j = 0, count;
 	u32 tmp;
 	union {
@@ -474,19 +485,19 @@ static int mse_packetizer_audio_iec_set_payload(int index,
 		u32 *d32;
 	} data;
 
-	iec = &iec_packetizer_table[index];
+	iec61883_6 = &iec61883_6_packetizer_table[index];
 	data.d16 = (u16 *)(buffer + buffer_processed);
-	count = data_num / iec->iec_config.bytes_per_sample;
+	count = data_num / iec61883_6->audio_config.bytes_per_sample;
 
-	if (iec->iec_config.is_big_endian) {
-		if (iec->iec_config.bytes_per_sample == 4) {
+	if (iec61883_6->audio_config.is_big_endian) {
+		if (iec61883_6->audio_config.bytes_per_sample == 4) {
 			for (i = 0; i < count; i++) {
 				*(sample + i) = SET_AM824_MBLA_24BIT_BE(
 					*(data.d32 + i));
 			}
 			return 0;
 		}
-		switch (iec->iec_config.sample_bit_depth) {
+		switch (iec61883_6->audio_config.sample_bit_depth) {
 		case MSE_AUDIO_BIT_16:
 			for (i = 0; i < count; i++) {
 				*(sample + i) = SET_AM824_MBLA_16BIT_BE(
@@ -521,14 +532,14 @@ static int mse_packetizer_audio_iec_set_payload(int index,
 			return -EPERM;
 		}
 	} else {
-		if (iec->iec_config.bytes_per_sample == 4) {
+		if (iec61883_6->audio_config.bytes_per_sample == 4) {
 			for (i = 0; i < count; i++) {
 				*(sample + i) =
 					SET_AM824_MBLA_24BIT(*(data.d32 + i));
 			}
 			return 0;
 		}
-		switch (iec->iec_config.sample_bit_depth) {
+		switch (iec61883_6->audio_config.sample_bit_depth) {
 		case MSE_AUDIO_BIT_16:
 			for (i = 0; i < count; i++) {
 				*(sample + i) =
@@ -566,79 +577,83 @@ static int mse_packetizer_audio_iec_set_payload(int index,
 	return -EPERM;
 }
 
-static int mse_packetizer_audio_iec_packetize(int index,
-					      void *packet,
-					      size_t *packet_size,
-					      void *buffer,
-					      size_t buffer_size,
-					      size_t *buffer_processed,
-					      unsigned int *timestamp)
+static int mse_packetizer_iec61883_6_packetize(int index,
+					       void *packet,
+					       size_t *packet_size,
+					       void *buffer,
+					       size_t buffer_size,
+					       size_t *buffer_processed,
+					       unsigned int *timestamp)
 {
-	struct iec_packetizer *iec;
+	struct iec61883_6_packetizer *iec61883_6;
+	struct mse_audio_config *audio_config;
 	int ret, payload_len, data_size;
 	u32 *sample;
 	int piece_size = 0, piece_len = 0;
 
-	if (index >= ARRAY_SIZE(iec_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
 		return -EPERM;
 
-	iec = &iec_packetizer_table[index];
-	pr_debug("[%s] index=%d seqnum=%d process=%zu/%zu t=%d\n",
-		 __func__, index, iec->send_seq_num, *buffer_processed,
-		 buffer_size, *timestamp);
+	iec61883_6 = &iec61883_6_packetizer_table[index];
+	mse_debug("index=%d seqnum=%d process=%zu/%zu t=%d\n",
+		  index, iec61883_6->send_seq_num, *buffer_processed,
+		  buffer_size, *timestamp);
 
+	audio_config = &iec61883_6->audio_config;
 	/* header */
-	if (iec->piece_f) {
-		piece_len = iec->piece_data_len;
+	if (iec61883_6->piece_f) {
+		piece_len = iec61883_6->piece_data_len;
 		piece_size = piece_len / AM824_DATA_SIZE *
-			iec->iec_config.bytes_per_sample;
-		iec->piece_f = false;
-		iec->piece_data_len = 0;
-		memcpy(packet, iec->packet_piece, iec->avtp_packet_size);
+			     audio_config->bytes_per_sample;
+		iec61883_6->piece_f = false;
+		iec61883_6->piece_data_len = 0;
+		memcpy(packet, iec61883_6->packet_piece,
+		       iec61883_6->avtp_packet_size);
 	} else {
-		memcpy(packet, iec->packet_template, iec->avtp_packet_size);
+		memcpy(packet, iec61883_6->packet_template,
+		       iec61883_6->avtp_packet_size);
 	}
 
 	/* payload */
 	sample = (u32 *)(packet + AVTP_IEC61883_6_PAYLOAD_OFFSET + piece_len);
 
 	/* size check */
-	data_size = iec->sample_per_packet * iec->iec_config.channels *
-		iec->iec_config.bytes_per_sample;
-	payload_len = iec->sample_per_packet * iec->iec_config.channels *
-							AM824_DATA_SIZE;
+	data_size = iec61883_6->sample_per_packet * audio_config->channels *
+		    audio_config->bytes_per_sample;
+	payload_len = iec61883_6->sample_per_packet * audio_config->channels *
+		      AM824_DATA_SIZE;
 
 	if (data_size - piece_size > buffer_size - *buffer_processed) {
-		iec->piece_f = true;
+		iec61883_6->piece_f = true;
 		data_size = buffer_size - *buffer_processed;
-		payload_len = data_size / iec->iec_config.bytes_per_sample *
-							AM824_DATA_SIZE;
+		payload_len = data_size / audio_config->bytes_per_sample *
+			      AM824_DATA_SIZE;
 		*packet_size = AVTP_IEC61883_6_PAYLOAD_OFFSET +
 			       payload_len + piece_len;
 	} else {
-		*packet_size = iec->avtp_packet_size;
+		*packet_size = iec61883_6->avtp_packet_size;
 	}
 
-	ret = mse_packetizer_audio_iec_set_payload(index,
-						   data_size - piece_size,
-						   sample,
-						   buffer,
-						   *buffer_processed);
+	ret = mse_packetizer_iec61883_6_set_payload(index,
+						    data_size - piece_size,
+						    sample,
+						    buffer,
+						    *buffer_processed);
 
 	*buffer_processed += data_size - piece_size;
 
 	/* keep piece of data */
-	if (iec->piece_f) {
-		iec->piece_data_len = payload_len + piece_len;
-		memcpy(iec->packet_piece, packet, *packet_size);
+	if (iec61883_6->piece_f) {
+		iec61883_6->piece_data_len = payload_len + piece_len;
+		memcpy(iec61883_6->packet_piece, packet, *packet_size);
 		return MSE_PACKETIZE_STATUS_NOT_ENOUGH;
 	}
 
 	/* variable header */
-	avtp_set_sequence_num(packet, iec->send_seq_num++);
+	avtp_set_sequence_num(packet, iec61883_6->send_seq_num++);
 	avtp_set_timestamp(packet, (u32)*timestamp);
-	avtp_set_iec61883_dbc(packet, iec->local_total_samples);
-	iec->local_total_samples += iec->sample_per_packet;
+	avtp_set_iec61883_dbc(packet, iec61883_6->local_total_samples);
+	iec61883_6->local_total_samples += iec61883_6->sample_per_packet;
 
 	/* buffer over check */
 	if (*buffer_processed >= buffer_size)
@@ -670,34 +685,36 @@ static int get_am824_mbla_value(u32 *data, int *bit_depth)
 	}
 }
 
-static int mse_packetizer_audio_iec_data_convert(int index,
-						 int data_num,
-						 char *buf,
-						 void *packet)
+static int mse_packetizer_iec61883_6_data_convert(int index,
+						  int data_num,
+						  char *buf,
+						  void *packet)
 {
 	u32 *payload;
-	struct iec_packetizer *iec;
+	struct iec61883_6_packetizer *iec61883_6;
+	struct mse_audio_config *audio_config;
 	int i;
 	int buf_bit_depth;
 
-	iec = &iec_packetizer_table[index];
+	iec61883_6 = &iec61883_6_packetizer_table[index];
+	audio_config = &iec61883_6->audio_config;
 	payload = packet + AVTP_IEC61883_6_PAYLOAD_OFFSET;
-	buf_bit_depth = mse_get_bit_depth(iec->iec_config.sample_bit_depth);
+	buf_bit_depth = mse_get_bit_depth(audio_config->sample_bit_depth);
 
-	for (i = 0; i < (data_num / iec->iec_config.bytes_per_sample); i++) {
+	for (i = 0; i < (data_num / audio_config->bytes_per_sample); i++) {
 		int bit_depth, shift;
 		int value = get_am824_mbla_value(payload++, &bit_depth);
 
 		if (value < 0) {
-			pr_err("[%s] am824 format error\n", __func__);
+			mse_err("am824 format error\n");
 			return -EINVAL;
 		}
 
 		if (bit_depth != buf_bit_depth &&
-		    !iec->f_warned) {
-			pr_warn("[%s] packet's bit_depth=%d != cfg bit_depth=%d\n",
-				__func__, bit_depth, buf_bit_depth);
-			iec->f_warned = true;
+		    !iec61883_6->f_warned) {
+			mse_warn("packet's bit_depth=%d != cfg bit_depth=%d\n",
+				 bit_depth, buf_bit_depth);
+			iec61883_6->f_warned = true;
 		}
 
 		shift = bit_depth - buf_bit_depth;
@@ -706,30 +723,30 @@ static int mse_packetizer_audio_iec_data_convert(int index,
 		else
 			value <<= -shift;
 
-		if (iec->iec_config.is_big_endian) {
+		if (audio_config->is_big_endian) {
 			value = htonl(value);
 			memcpy(buf, ((unsigned char *)&value) +
-			       4 - iec->iec_config.bytes_per_sample,
-			       iec->iec_config.bytes_per_sample);
+			       4 - audio_config->bytes_per_sample,
+			       audio_config->bytes_per_sample);
 		} else {
-			memcpy(buf, &value, iec->iec_config.bytes_per_sample);
+			memcpy(buf, &value, audio_config->bytes_per_sample);
 		}
 
-		buf += iec->iec_config.bytes_per_sample;
+		buf += audio_config->bytes_per_sample;
 	}
 
 	return 0;
 }
 
-static int mse_packetizer_audio_iec_depacketize(int index,
-						void *buffer,
-						size_t buffer_size,
-						size_t *buffer_processed,
-						unsigned int *timestamp,
-						void *packet,
-						size_t packet_size)
+static int mse_packetizer_iec61883_6_depacketize(int index,
+						 void *buffer,
+						 size_t buffer_size,
+						 size_t *buffer_processed,
+						 unsigned int *timestamp,
+						 void *packet,
+						 size_t packet_size)
 {
-	struct iec_packetizer *iec;
+	struct iec61883_6_packetizer *iec61883_6;
 	int seq_num;
 	int payload_size, piece_size = 0;
 	int channels;
@@ -738,23 +755,23 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 	unsigned long value;
 	int ret;
 
-	if (index >= ARRAY_SIZE(iec_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
 		return -EPERM;
 
-	pr_debug("[%s] index=%d\n", __func__, index);
-	iec = &iec_packetizer_table[index];
+	mse_debug("index=%d\n", index);
+	iec61883_6 = &iec61883_6_packetizer_table[index];
 
 	if (avtp_get_subtype(packet) != AVTP_SUBTYPE_61883_IIDC) {
-		pr_err("[%s] error subtype=%d\n",
-		       __func__, avtp_get_subtype(packet));
+		mse_err("error subtype=%d\n", avtp_get_subtype(packet));
 		return -EINVAL;
 	}
 
-	if (iec->piece_f) {
-		iec->piece_f = false;
-		memcpy(buffer, iec->packet_piece, iec->piece_data_len);
-		*buffer_processed += iec->piece_data_len;
-		iec->piece_data_len = 0;
+	if (iec61883_6->piece_f) {
+		iec61883_6->piece_f = false;
+		memcpy(buffer, iec61883_6->packet_piece,
+		       iec61883_6->piece_data_len);
+		*buffer_processed += iec61883_6->piece_data_len;
+		iec61883_6->piece_data_len = 0;
 	}
 
 	payload_size = avtp_get_stream_data_length(packet)
@@ -762,7 +779,7 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 	channels = avtp_get_iec61883_dbs(packet);
 
 	data_size = payload_size / AM824_DATA_SIZE *
-		iec->iec_config.bytes_per_sample;
+		iec61883_6->audio_config.bytes_per_sample;
 	/* buffer over check */
 	if (*buffer_processed + data_size > buffer_size)
 		buf = tmp_buffer;
@@ -771,25 +788,26 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 
 	/* seq_num check */
 	seq_num = avtp_get_sequence_num(packet);
-	if (iec->old_seq_num != seq_num && iec->old_seq_num != SEQNUM_INIT) {
-		if (iec->seq_num_err == SEQNUM_INIT) {
-			pr_err("sequence number discontinuity %d->%d=%d\n",
-			       iec->old_seq_num, seq_num,
-			       (seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
-			       iec->old_seq_num) %
-			       (AVTP_SEQUENCE_NUM_MAX + 1));
-			iec->seq_num_err = 1;
+	if (iec61883_6->old_seq_num != seq_num &&
+	    iec61883_6->old_seq_num != SEQNUM_INIT) {
+		if (iec61883_6->seq_num_err == SEQNUM_INIT) {
+			mse_err("sequence number discontinuity %d->%d=%d\n",
+				iec61883_6->old_seq_num, seq_num,
+				(seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
+				 iec61883_6->old_seq_num) %
+				(AVTP_SEQUENCE_NUM_MAX + 1));
+			iec61883_6->seq_num_err = 1;
 		} else {
-			iec->seq_num_err++;
+			iec61883_6->seq_num_err++;
 		}
 	} else {
-		if (iec->seq_num_err != SEQNUM_INIT) {
-			pr_err("sequence number recovery %d count=%d\n",
-			       seq_num, iec->seq_num_err);
-			iec->seq_num_err = SEQNUM_INIT;
+		if (iec61883_6->seq_num_err != SEQNUM_INIT) {
+			mse_err("sequence number recovery %d count=%d\n",
+				seq_num, iec61883_6->seq_num_err);
+			iec61883_6->seq_num_err = SEQNUM_INIT;
 		}
 	}
-	iec->old_seq_num = (seq_num + 1 + (AVTP_SEQUENCE_NUM_MAX + 1)) %
+	iec61883_6->old_seq_num = (seq_num + 1 + (AVTP_SEQUENCE_NUM_MAX + 1)) %
 						(AVTP_SEQUENCE_NUM_MAX + 1);
 
 	ret = check_receive_packet(index, avtp_get_iec61883_dbs(packet),
@@ -797,18 +815,18 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 	if (ret < 0)
 		return ret;
 
-	mse_packetizer_audio_iec_data_convert(index,
-					      data_size - piece_size,
-					      buf,
-					      packet);
+	mse_packetizer_iec61883_6_data_convert(index,
+					       data_size - piece_size,
+					       buf,
+					       packet);
 
 	if (*buffer_processed + data_size > buffer_size) {
-		iec->piece_f = true;
+		iec61883_6->piece_f = true;
 		piece_size = buffer_size - *buffer_processed;
-		iec->piece_data_len = data_size - piece_size;
+		iec61883_6->piece_data_len = data_size - piece_size;
 		memcpy(buffer + *buffer_processed, buf, piece_size);
-		memcpy(iec->packet_piece, buf + piece_size,
-		       iec->piece_data_len);
+		memcpy(iec61883_6->packet_piece, buf + piece_size,
+		       iec61883_6->piece_data_len);
 
 		*buffer_processed += (buffer_size - *buffer_processed);
 	} else {
@@ -817,11 +835,12 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 
 	*timestamp = avtp_get_timestamp(packet);
 
-	iec->sample_per_packet = payload_size / (AM824_DATA_SIZE * channels);
-	value = NSEC * iec->sample_per_packet;
+	iec61883_6->sample_per_packet =
+				payload_size / (AM824_DATA_SIZE * channels);
+	value = NSEC * iec61883_6->sample_per_packet;
 	do_div(value,
 	       avtp_fdf_to_sample_rate(avtp_get_iec61883_fdf(packet)));
-	iec->frame_interval_time = value;
+	iec61883_6->frame_interval_time = value;
 
 	/* buffer over check */
 	if (*buffer_processed >= buffer_size)
@@ -830,15 +849,15 @@ static int mse_packetizer_audio_iec_depacketize(int index,
 	return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
-struct mse_packetizer_ops mse_packetizer_audio_iec61883_6_ops = {
+struct mse_packetizer_ops mse_packetizer_iec61883_6_ops = {
 	.id = MSE_PACKETIZER_IEC61883_6,
-	.open = mse_packetizer_audio_iec_open,
-	.release = mse_packetizer_audio_iec_release,
-	.init = mse_packetizer_audio_iec_packet_init,
-	.set_network_config = mse_packetizer_audio_iec_set_network_config,
-	.set_audio_config = mse_packetizer_audio_iec_set_audio_config,
-	.get_audio_info = mse_packetizer_audio_iec_get_audio_info,
-	.calc_cbs = mse_packetizer_audio_iec_calc_cbs,
-	.packetize = mse_packetizer_audio_iec_packetize,
-	.depacketize = mse_packetizer_audio_iec_depacketize,
+	.open = mse_packetizer_iec61883_6_open,
+	.release = mse_packetizer_iec61883_6_release,
+	.init = mse_packetizer_iec61883_6_packet_init,
+	.set_network_config = mse_packetizer_iec61883_6_set_network_config,
+	.set_audio_config = mse_packetizer_iec61883_6_set_audio_config,
+	.get_audio_info = mse_packetizer_iec61883_6_get_audio_info,
+	.calc_cbs = mse_packetizer_iec61883_6_calc_cbs,
+	.packetize = mse_packetizer_iec61883_6_packetize,
+	.depacketize = mse_packetizer_iec61883_6_depacketize,
 };

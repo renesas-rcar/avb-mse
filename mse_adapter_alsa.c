@@ -178,10 +178,10 @@ static int mse_adapter_alsa_callback(void *priv, int size)
 	struct alsa_stream *io = priv;
 	int err;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (!io) {
-		pr_err("[%s] private data is NULL\n", __func__);
+		mse_err("private data is NULL\n");
 		return -EPERM;
 	}
 	runtime = io->substream->runtime;
@@ -189,7 +189,7 @@ static int mse_adapter_alsa_callback(void *priv, int size)
 	if (size < 0) {
 		unsigned long flags;
 
-		pr_err("[%s] error from mse core %d\n", __func__, size);
+		mse_err("error from mse core %d\n", size);
 
 		snd_pcm_stream_lock_irqsave(io->substream, flags);
 		if (snd_pcm_running(io->substream))  {
@@ -212,7 +212,7 @@ static int mse_adapter_alsa_callback(void *priv, int size)
 	snd_pcm_period_elapsed(io->substream);
 
 	if (!io->streaming) {
-		pr_err("[%s] stop streaming\n", __func__);
+		mse_err("stop streaming\n");
 		return 0;
 	}
 
@@ -222,8 +222,7 @@ static int mse_adapter_alsa_callback(void *priv, int size)
 				     io,
 				     mse_adapter_alsa_callback);
 	if (err < 0) {
-		pr_err("[%s] Failed mse_start_transmission() err=%d\n",
-		       __func__, err);
+		mse_err("Failed mse_start_transmission() err=%d\n", err);
 		return -EPERM;
 	}
 
@@ -248,11 +247,11 @@ static int mse_adapter_alsa_playback_open(struct snd_pcm_substream *substream)
 	int index;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	/* parameter check */
 	if (!substream) {
-		pr_err("[%s] Invalid argument. substream\n", __func__);
+		mse_err("Invalid argument. substream\n");
 		return -EINVAL;
 	}
 
@@ -270,15 +269,14 @@ static int mse_adapter_alsa_playback_open(struct snd_pcm_substream *substream)
 	ret = snd_pcm_hw_constraint_integer(runtime,
 					    SNDRV_PCM_HW_PARAM_PERIODS);
 	if (ret < 0) {
-		pr_err("[%s] snd_pcm_hw_constraint_integer() %d\n",
-		       __func__, ret);
+		mse_err("snd_pcm_hw_constraint_integer() %d\n", ret);
 		return ret;
 	}
 
 	/* MSE Core open */
 	index = mse_open(chip->adapter_index, true);
 	if (index < 0) {
-		pr_err("[%s] Failed mse_open() index=%d\n", __func__, index);
+		mse_err("Failed mse_open() index=%d\n", index);
 		return -EPERM;
 	}
 	io->index = index;
@@ -294,11 +292,11 @@ static int mse_adapter_alsa_capture_open(struct snd_pcm_substream *substream)
 	int index;
 	int ret;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	/* parameter check */
 	if (!substream) {
-		pr_err("[%s] Invalid argument. substream\n", __func__);
+		mse_err("Invalid argument. substream\n");
 		return -EINVAL;
 	}
 
@@ -316,15 +314,14 @@ static int mse_adapter_alsa_capture_open(struct snd_pcm_substream *substream)
 	ret = snd_pcm_hw_constraint_integer(runtime,
 					    SNDRV_PCM_HW_PARAM_PERIODS);
 	if (ret < 0) {
-		pr_err("[%s] snd_pcm_hw_constraint_integer() %d\n",
-		       __func__, ret);
+		mse_err("snd_pcm_hw_constraint_integer() %d\n", ret);
 		return ret;
 	}
 
 	/* MSE Core open */
 	index = mse_open(chip->adapter_index, false);
 	if (index < 0) {
-		pr_err("[%s] Failed mse_open() index=%d\n", __func__, index);
+		mse_err("Failed mse_open() index=%d\n", index);
 		return -EPERM;
 	}
 	io->index = index;
@@ -338,11 +335,11 @@ static int mse_adapter_alsa_close(struct snd_pcm_substream *substream)
 	struct alsa_stream *io;
 	int err;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	/* parameter check */
 	if (!substream) {
-		pr_err("[%s] Invalid argument. substream\n", __func__);
+		mse_err("Invalid argument. substream\n");
 		return -EINVAL;
 	}
 
@@ -352,7 +349,7 @@ static int mse_adapter_alsa_close(struct snd_pcm_substream *substream)
 	/* MSE Core close */
 	err = mse_close(io->index);
 	if (err < 0) {
-		pr_err("[%s] Failed mse_close() err=%d\n", __func__, err);
+		mse_err("Failed mse_close() err=%d\n", err);
 		return -EPERM;
 	}
 
@@ -369,11 +366,11 @@ static int mse_adapter_alsa_trigger(
 	int rtn = 0;
 	int err;
 
-	pr_debug("[%s] cmd=%d\n", __func__, cmd);
+	mse_debug("cmd=%d\n", cmd);
 
 	/* parameter check */
 	if (!substream) {
-		pr_err("[%s] Invalid argument. substream\n", __func__);
+		mse_err("Invalid argument. substream\n");
 		return -EINVAL;
 	}
 
@@ -392,14 +389,13 @@ static int mse_adapter_alsa_trigger(
 		io->next_period_byte	= io->byte_per_period;
 
 		/* config check */
-		pr_debug("[%s] ch=%u period_size=%lu fmt_size=%zu\n",
-			 __func__, runtime->channels, runtime->period_size,
-			 samples_to_bytes(runtime, 1));
+		mse_debug("ch=%u period_size=%lu fmt_size=%zu\n",
+			  runtime->channels, runtime->period_size,
+			  samples_to_bytes(runtime, 1));
 
 		err = mse_start_streaming(io->index);
 		if (err < 0) {
-			pr_err("[%s] Failed mse_start_streaming() err=%d\n",
-			       __func__, err);
+			mse_err("Failed mse_start_streaming() err=%d\n", err);
 			rtn = -EPERM;
 			break;
 		}
@@ -410,8 +406,8 @@ static int mse_adapter_alsa_trigger(
 					     io,
 					     mse_adapter_alsa_callback);
 		if (err < 0) {
-			pr_err("[%s] Failed mse_start_transmission() err=%d\n",
-			       __func__, err);
+			mse_err("Failed mse_start_transmission() err=%d\n",
+				err);
 			rtn = -EPERM;
 			break;
 		}
@@ -420,8 +416,7 @@ static int mse_adapter_alsa_trigger(
 	case SNDRV_PCM_TRIGGER_STOP:
 		err = mse_stop_streaming(io->index);
 		if (err < 0) {
-			pr_err("[%s] Failed mse_stop_streaming() err=%d\n",
-			       __func__, err);
+			mse_err("Failed mse_stop_streaming() err=%d\n", err);
 			rtn = -EPERM;
 			break;
 		}
@@ -429,7 +424,7 @@ static int mse_adapter_alsa_trigger(
 		break;
 
 	default:
-		pr_err("[%s] Invalid argument. cmd=%d\n", __func__, cmd);
+		mse_err("Invalid argument. cmd=%d\n", cmd);
 		rtn = -EINVAL;
 		break;
 	}
@@ -441,21 +436,21 @@ static int mse_adapter_alsa_ioctl(struct snd_pcm_substream *substream,
 				  unsigned int cmd,
 				  void *arg)
 {
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 	return snd_pcm_lib_ioctl(substream, cmd, arg);
 }
 
 static int mse_adapter_alsa_hw_params(struct snd_pcm_substream *substream,
 				      struct snd_pcm_hw_params *hw_params)
 {
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 	return snd_pcm_lib_malloc_pages(substream,
 					params_buffer_bytes(hw_params));
 }
 
 static int mse_adapter_alsa_hw_free(struct snd_pcm_substream *substream)
 {
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 	return snd_pcm_lib_free_pages(substream);
 }
 
@@ -507,11 +502,11 @@ static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 	struct mse_audio_config config;
 	int err;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	/* parameter check */
 	if (!substream) {
-		pr_err("[%s] Invalid argument. substream\n", __func__);
+		mse_err("Invalid argument. substream\n");
 		return -EINVAL;
 	}
 
@@ -521,8 +516,7 @@ static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 
 	err = mse_get_audio_config(io->index, &config);
 	if (err < 0) {
-		pr_err("[%s] Failed mse_get_audio_config() err=%d\n",
-		       __func__, err);
+		mse_err("Failed mse_get_audio_config() err=%d\n", err);
 		return -EPERM;
 	}
 
@@ -535,8 +529,7 @@ static int mse_adapter_alsa_prepare(struct snd_pcm_substream *substream)
 
 	err = mse_set_audio_config(io->index, &config);
 	if (err < 0) {
-		pr_err("[%s] Failed mse_set_audio_config() err=%d\n",
-		       __func__, err);
+		mse_err("Failed mse_set_audio_config() err=%d\n", err);
 		return -EPERM;
 	}
 	io->audio_config = config;
@@ -552,7 +545,7 @@ static snd_pcm_uframes_t mse_adapter_alsa_pointer(
 	struct alsa_stream *io;
 
 	if (!substream) {
-		pr_err("[%s] Invalid argument. substream\n", __func__);
+		mse_err("Invalid argument. substream\n");
 		return -EINVAL;
 	}
 
@@ -560,7 +553,7 @@ static snd_pcm_uframes_t mse_adapter_alsa_pointer(
 	runtime = substream->runtime;
 	io = mse_adapter_alsa_pcm_to_io(chip, substream);
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("bytes_to_frames()\n");
 	return bytes_to_frames(runtime, io->byte_pos);
 }
 
@@ -593,15 +586,14 @@ static int mse_adapter_alsa_free(struct alsa_device *chip)
 {
 	int err;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	if (!chip)
 		return 0;
 
 	err = mse_unregister_adapter_media(chip->adapter_index);
 	if (err < 0)
-		pr_err("[%s] Failed unregister adapter err=%d\n",
-		       __func__, err);
+		mse_err("Failed unregister adapter err=%d\n", err);
 
 	device_del(&chip->dev);
 
@@ -612,7 +604,7 @@ static int mse_adapter_alsa_free(struct alsa_device *chip)
 
 static int mse_adapter_alsa_dev_free(struct snd_device *device)
 {
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	return mse_adapter_alsa_free(device->device_data);
 }
@@ -634,7 +626,7 @@ static int mse_adapter_alsa_probe(int devno)
 	int index;
 	char device_name[MSE_NAME_LEN_MAX];
 
-	pr_debug("[%s] devno=%d\n", __func__, devno);
+	mse_debug("devno=%d\n", devno);
 
 	/* allocate a chip-specific data with zero filled */
 	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
@@ -647,7 +639,7 @@ static int mse_adapter_alsa_probe(int devno)
 	dev_set_name(&chip->dev, "mse_alsa%d", devno);
 	err = device_add(&chip->dev);
 	if (err) {
-		pr_err("[%s] Failed device_add() err=%d\n", __func__, err);
+		mse_err("Failed device_add() err=%d\n", err);
 		return -EPERM;
 	}
 
@@ -659,7 +651,7 @@ static int mse_adapter_alsa_probe(int devno)
 		0,
 		&card);
 	if (err < 0) {
-		pr_err("[%s] Failed snd_card_new() err=%d\n", __func__, err);
+		mse_err("Failed snd_card_new() err=%d\n", err);
 		return -EPERM;
 	}
 
@@ -668,7 +660,7 @@ static int mse_adapter_alsa_probe(int devno)
 
 	err = snd_device_new(card, SNDRV_DEV_PCM, chip, &ops);
 	if (err < 0) {
-		pr_err("[%s] Failed snd_device_new() err=%d\n", __func__, err);
+		mse_err("Failed snd_device_new() err=%d\n", err);
 		kfree(chip);
 		return -EPERM;
 	}
@@ -681,7 +673,7 @@ static int mse_adapter_alsa_probe(int devno)
 	/* other setup */
 	err = snd_pcm_new(chip->card, "ALSA Adapter", 0, 1, 1, &pcm);
 	if (err < 0) {
-		pr_err("[%s] Failed snd_pcm_new() err=%d\n", __func__, err);
+		mse_err("Failed snd_pcm_new() err=%d\n", err);
 		return -EPERM;
 	}
 	pcm->private_data = chip;
@@ -704,15 +696,14 @@ static int mse_adapter_alsa_probe(int devno)
 					MSE_ADAPTER_ALSA_PAGE_SIZE,
 					MSE_ADAPTER_ALSA_PAGE_SIZE);
 	if (err < 0) {
-		pr_err("[%s] Failed pre-allocation err=%d\n", __func__, err);
+		mse_err("Failed pre-allocation err=%d\n", err);
 		return -EPERM;
 	}
 
 	/* regist card */
 	err = snd_card_register(card);
 	if (err < 0) {
-		pr_err("[%s] Failed snd_card_register() err=%d\n",
-		       __func__, err);
+		mse_err("Failed snd_card_register() err=%d\n", err);
 		return -EPERM;
 	}
 
@@ -723,8 +714,7 @@ static int mse_adapter_alsa_probe(int devno)
 					   "ALSA Adapter",
 					   device_name);
 	if (index < 0) {
-		pr_err("[%s] Failed register adapter index=%d\n",
-		       __func__, index);
+		mse_err("Failed register adapter index=%d\n", index);
 		return -EPERM;
 	}
 	chip->adapter_index = index;
@@ -737,15 +727,13 @@ static int __init mse_adapter_alsa_init(void)
 {
 	int i, err;
 
-	pr_debug("Start ALSA adapter\n");
+	mse_debug("Start ALSA adapter\n");
 
 	if (alsa_devices > MSE_ADAPTER_ALSA_DEVICE_MAX) {
-		pr_err("[%s] Too many devices %d\n",
-		       __func__, alsa_devices);
+		mse_err("Too many devices %d\n", alsa_devices);
 		return -EINVAL;
 	} else if (alsa_devices <= 0) {
-		pr_err("[%s] Invalid devices %d\n",
-		       __func__, alsa_devices);
+		mse_err("Invalid devices %d\n", alsa_devices);
 		return -EINVAL;
 	} else {
 		;
@@ -768,13 +756,12 @@ static void __exit mse_adapter_alsa_exit(void)
 {
 	int i, err;
 
-	pr_debug("Stop ALSA adapter\n");
+	mse_debug("Stop ALSA adapter\n");
 
 	for (i = 0; i < alsa_devices; i++) {
 		err = snd_card_free(g_rchip[i]->card);
 		if (err < 0)
-			pr_err("[%s] Failed snd_card_free() err=%d\n",
-			       __func__, err);
+			mse_err("Failed snd_card_free() err=%d\n", err);
 	}
 
 	kfree(g_rchip);

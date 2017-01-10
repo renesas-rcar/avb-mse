@@ -99,8 +99,7 @@ static int enqueue(struct ptp_queue *que, struct ptp_clock_time *clock_time)
 {
 	int is_tail_equal_head = 0;
 
-	pr_debug("[%s] START head=%d, tail=%d\n",
-		__func__, que->head, que->tail);
+	mse_debug("START head=%d, tail=%d\n", que->head, que->tail);
 
 	if (q_next(que->tail) == que->head)
 		is_tail_equal_head = 1;
@@ -159,14 +158,13 @@ static enum hrtimer_restart ptp_timestamp_callbak(struct hrtimer *arg)
 
 	clock_time = kzalloc(sizeof(*clock_time), GFP_ATOMIC);
 	if (!clock_time) {
-		pr_warn("[%s] failed allocate clock_time\n", __func__);
 		spin_unlock(&dev->qlock);
 		return HRTIMER_RESTART;
 	}
 
 	ret = get_clock_time(clock_time);
 	if (ret) {
-		pr_warn("[%s] failed get_clock_time\n", __func__);
+		mse_warn("failed get_clock_time\n");
 		spin_unlock(&dev->qlock);
 		return HRTIMER_RESTART;
 	}
@@ -184,7 +182,7 @@ static int init_ptp_device(struct ptp_device *dev)
 {
 	ktime_t ktime;
 
-	pr_debug("[%s] START\n", __func__);
+	mse_debug("START\n");
 
 	dev->que.head = 0;
 	dev->que.tail = 0;
@@ -200,7 +198,7 @@ static int init_ptp_device(struct ptp_device *dev)
 	ktime = ktime_set(0, dev->timer_delay);
 	hrtimer_start(&dev->timer, ktime, HRTIMER_MODE_REL);
 
-	pr_debug("[%s] END\n", __func__);
+	mse_debug("END\n");
 
 	return 0;
 }
@@ -216,15 +214,12 @@ int mse_ptp_open_dummy(int *dev_id)
 			continue;
 
 		dev = kzalloc(sizeof(*dev), GFP_KERNEL);
-		if (!dev) {
-			pr_err("[%s] could not create ptp_device\n", __func__);
+		if (!dev)
 			return -ENOMEM;
-		}
 
-		/* change to pr_debug */
+		/* change to mse_debug */
 		g_ptp_devices[i] = dev;
-		pr_info("[%s] registered ptp device index=%d\n",
-			__func__, i);
+		mse_info("register ptp device index=%d\n", i);
 		*dev_id = i;
 
 		ret = init_ptp_device(dev);
@@ -232,7 +227,7 @@ int mse_ptp_open_dummy(int *dev_id)
 		return 0;
 	}
 
-	pr_err("[%s] unregistered ptp device\n", __func__);
+	mse_err("cannot register ptp device\n");
 
 	return -1;
 }
@@ -243,18 +238,18 @@ int mse_ptp_close_dummy(int dev_id)
 	struct ptp_device *dev;
 
 	if ((dev_id < 0) || (dev_id >= MAX_PTP_DEVICES)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, dev_id);
+		mse_err("invalid argument. index=%d\n", dev_id);
 		return -EINVAL;
 	}
 
-	pr_info("[%s] index=%d\n", __func__, dev_id);
+	mse_info("index=%d\n", dev_id);
 
 	dev = g_ptp_devices[dev_id];
 
 	/* timer stop */
 	ret = hrtimer_try_to_cancel(&dev->timer);
 	if (ret)
-		pr_err("[%s] The timer was still in use...\n", __func__);
+		mse_err("The timer was still in use...\n");
 
 	kfree(dev);
 	g_ptp_devices[dev_id] = NULL;
@@ -267,12 +262,12 @@ int mse_ptp_get_time_dummy(int dev_id, struct ptp_clock_time *clock_time)
 	int ret = 0;
 
 	if ((dev_id < 0) || (dev_id >= MAX_PTP_DEVICES)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, dev_id);
+		mse_err("invalid argument. index=%d\n", dev_id);
 		return -EINVAL;
 	}
 
 	if (!g_ptp_devices[dev_id]) {
-		pr_err("[%s] invalid dev_id=%d\n", __func__, dev_id);
+		mse_err("invalid dev_id=%d\n", dev_id);
 		return -EINVAL;
 	}
 
@@ -291,16 +286,16 @@ int mse_ptp_get_timestamps_dummy(int dev_id,
 	struct ptp_clock_time clock_time;
 	int i;
 
-	pr_debug("[%s] START\n", __func__);
+	mse_debug("START\n");
 
 	if ((dev_id < 0) || (dev_id >= MAX_PTP_DEVICES)) {
-		pr_err("[%s] invalid argument. index=%d\n", __func__, dev_id);
+		mse_err("invalid argument. index=%d\n", dev_id);
 		return -EINVAL;
 	}
 
 	dev = g_ptp_devices[dev_id];
 	if (!dev) {
-		pr_err("[%s] invalid dev_id=%d\n", __func__, dev_id);
+		mse_err("invalid dev_id=%d\n", dev_id);
 		return -EINVAL;
 	}
 
@@ -318,7 +313,7 @@ int mse_ptp_get_timestamps_dummy(int dev_id,
 		return 0;
 	}
 
-	pr_debug("[%s] total=%d\n", __func__, *count);
+	mse_debug("total=%d\n", *count);
 	for (i = 0; i < *count; i++) {
 		dequeue(queue, &clock_time);
 		timestamps[i] = clock_time;
@@ -326,7 +321,7 @@ int mse_ptp_get_timestamps_dummy(int dev_id,
 
 	spin_unlock(&dev->qlock);
 
-	pr_debug("[%s] END\n", __func__);
+	mse_debug("END\n");
 
 	return 0;
 }

@@ -225,7 +225,7 @@ static ssize_t mse_info_device_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_info(index, &data);
 	if (ret)
@@ -233,7 +233,7 @@ static ssize_t mse_info_device_show(struct device *dev,
 
 	ret = sprintf(buf, "%s\n", data.device);
 
-	pr_debug("[%s] end value=%s ret=%d\n", __func__, buf, ret);
+	mse_debug("END value=%s ret=%d\n", buf, ret);
 
 	return ret;
 }
@@ -246,7 +246,7 @@ static ssize_t mse_info_type_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int i, ret;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_info(index, &data);
 	if (ret)
@@ -261,8 +261,7 @@ static ssize_t mse_info_type_show(struct device *dev,
 
 	ret = sprintf(buf, "%s\n", type_table[i].str);
 
-	pr_debug("[%s] end value=%s(%d) ret=%d\n",
-		 __func__, buf, data.type, ret);
+	mse_debug("END value=%s(%d) ret=%d\n", buf, data.type, ret);
 
 	return ret;
 }
@@ -276,7 +275,7 @@ static ssize_t mse_network_device_str_show(struct device *dev,
 	int ret;
 	char *value;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_network_device(index, &data);
 	if (ret)
@@ -304,7 +303,7 @@ static ssize_t mse_network_device_str_show(struct device *dev,
 
 	ret = sprintf(buf, "%s\n", value);
 
-	pr_debug("[%s] end value=%s ret=%d\n", __func__, buf, ret);
+	mse_debug("END value=%s ret=%d\n", buf, ret);
 
 	return ret;
 }
@@ -319,8 +318,7 @@ static ssize_t mse_network_device_str_store(struct device *dev,
 	int ret, cplen;
 	char *value, *value_org;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = mse_config_get_network_device(index, &data);
 	if (ret)
@@ -360,8 +358,7 @@ static ssize_t mse_network_device_str_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%s ret=%d\n",
-		 __func__, value_org, cplen);
+	mse_debug("END value=%s ret=%d\n", value_org, cplen);
 
 	return len;
 }
@@ -374,7 +371,7 @@ static ssize_t mse_packetizer_name_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int i, ret;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_packetizer(index, &data);
 	if (ret)
@@ -389,8 +386,7 @@ static ssize_t mse_packetizer_name_show(struct device *dev,
 
 	ret = sprintf(buf, "%s\n", packetizer_table[i].str);
 
-	pr_debug("[%s] end value=%s(%d) ret=%d\n",
-		 __func__, buf, data.packetizer, ret);
+	mse_debug("END value=%s(%d) ret=%d\n", buf, data.packetizer, ret);
 
 	return ret;
 }
@@ -404,8 +400,7 @@ static ssize_t mse_packetizer_name_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int i, ret;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	for (i = 0; i < MSE_PACKETIZER_MAX; i++) {
 		if (!strncmp(buf, packetizer_table[i].str,
@@ -421,8 +416,7 @@ static ssize_t mse_packetizer_name_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%d ret=%zd\n",
-		 __func__, data.packetizer, len);
+	mse_debug("END value=%d ret=%zd\n", data.packetizer, len);
 
 	return len;
 }
@@ -435,7 +429,7 @@ static ssize_t mse_avtp_tx_dst_mac_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_avtp_tx_param(index, &data);
 	if (ret)
@@ -445,7 +439,7 @@ static ssize_t mse_avtp_tx_dst_mac_show(struct device *dev,
 		      data.dst_mac[0], data.dst_mac[1], data.dst_mac[2],
 		      data.dst_mac[3], data.dst_mac[4], data.dst_mac[5]);
 
-	pr_debug("[%s] end value=%s ret=%d\n", __func__, buf, ret);
+	mse_debug("END value=%s ret=%d\n", buf, ret);
 
 	return ret;
 }
@@ -459,8 +453,7 @@ static ssize_t mse_avtp_tx_dst_mac_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = mse_config_get_avtp_tx_param(index, &data);
 	if (ret)
@@ -472,9 +465,9 @@ static ssize_t mse_avtp_tx_dst_mac_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%02x%02x%02x%02x%02x%02x ret=%zd\n",
-		 __func__, data.dst_mac[0], data.dst_mac[1], data.dst_mac[2],
-		 data.dst_mac[3], data.dst_mac[4], data.dst_mac[5], len);
+	mse_debug("END value=%02x%02x%02x%02x%02x%02x ret=%zd\n",
+		  data.dst_mac[0], data.dst_mac[1], data.dst_mac[2],
+		  data.dst_mac[3], data.dst_mac[4], data.dst_mac[5], len);
 
 	return len;
 }
@@ -487,7 +480,7 @@ static ssize_t mse_avtp_tx_src_mac_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_avtp_tx_param(index, &data);
 	if (ret)
@@ -497,7 +490,7 @@ static ssize_t mse_avtp_tx_src_mac_show(struct device *dev,
 		      data.src_mac[0], data.src_mac[1], data.src_mac[2],
 		      data.src_mac[3], data.src_mac[4], data.src_mac[5]);
 
-	pr_debug("[%s] end value=%s ret=%d\n", __func__, buf, ret);
+	mse_debug("END value=%s ret=%d\n", buf, ret);
 
 	return ret;
 }
@@ -511,8 +504,7 @@ static ssize_t mse_avtp_tx_src_mac_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = mse_config_get_avtp_tx_param(index, &data);
 	if (ret)
@@ -524,9 +516,9 @@ static ssize_t mse_avtp_tx_src_mac_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%02x%02x%02x%02x%02x%02x ret=%zd\n",
-		 __func__, data.src_mac[0], data.src_mac[1], data.src_mac[2],
-		 data.src_mac[3], data.src_mac[4], data.src_mac[5], len);
+	mse_debug("END value=%02x%02x%02x%02x%02x%02x ret=%zd\n",
+		  data.src_mac[0], data.src_mac[1], data.src_mac[2],
+		  data.src_mac[3], data.src_mac[4], data.src_mac[5], len);
 
 	return len;
 }
@@ -539,7 +531,7 @@ static ssize_t mse_avtp_tx_int_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_avtp_tx_param(index, &data);
 	if (ret)
@@ -559,7 +551,7 @@ static ssize_t mse_avtp_tx_int_show(struct device *dev,
 
 	ret = sprintf(buf, "%d\n", value);
 
-	pr_debug("[%s] end value=%s ret=%d\n", __func__, buf, ret);
+	mse_debug("END value=%s ret=%d\n", buf, ret);
 
 	return ret;
 }
@@ -573,8 +565,7 @@ static ssize_t mse_avtp_tx_int_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = kstrtol(buf, 0, (long *)&value);
 	if (ret)
@@ -600,7 +591,7 @@ static ssize_t mse_avtp_tx_int_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%d ret=%zd\n", __func__, value, len);
+	mse_debug("END value=%d ret=%zd\n", value, len);
 
 	return len;
 }
@@ -613,7 +604,7 @@ static ssize_t mse_avtp_rx_streamid_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_avtp_rx_param(index, &data);
 	if (ret)
@@ -624,7 +615,7 @@ static ssize_t mse_avtp_rx_streamid_show(struct device *dev,
 		      data.streamid[3], data.streamid[4], data.streamid[5],
 		      data.streamid[6], data.streamid[7]);
 
-	pr_debug("[%s] end value=%s ret=%d\n", __func__, buf, ret);
+	mse_debug("END value=%s ret=%d\n", buf, ret);
 
 	return ret;
 }
@@ -638,8 +629,7 @@ static ssize_t mse_avtp_rx_streamid_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = mse_config_get_avtp_rx_param(index, &data);
 	if (ret)
@@ -651,10 +641,10 @@ static ssize_t mse_avtp_rx_streamid_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%02x%02x%02x%02x%02x%02x%02x%02x ret=%zd\n",
-		 __func__, data.streamid[0], data.streamid[1],
-		 data.streamid[2], data.streamid[3], data.streamid[4],
-		 data.streamid[5], data.streamid[6], data.streamid[7], len);
+	mse_debug("END value=%02x%02x%02x%02x%02x%02x%02x%02x ret=%zd\n",
+		  data.streamid[0], data.streamid[1], data.streamid[2],
+		  data.streamid[3], data.streamid[4], data.streamid[5],
+		  data.streamid[6], data.streamid[7], len);
 
 	return len;
 }
@@ -667,7 +657,7 @@ static ssize_t mse_audio_config_int_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_media_audio_config(index, &data);
 	if (ret)
@@ -681,7 +671,7 @@ static ssize_t mse_audio_config_int_show(struct device *dev,
 
 	ret = sprintf(buf, "%d\n", value);
 
-	pr_debug("[%s] end value=%d ret=%d\n", __func__, value, ret);
+	mse_debug("END value=%d ret=%d\n", value, ret);
 
 	return ret;
 }
@@ -695,8 +685,7 @@ static ssize_t mse_audio_config_int_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = kstrtol(buf, 0, (long *)&value);
 	if (ret)
@@ -716,7 +705,7 @@ static ssize_t mse_audio_config_int_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%d ret=%zd\n", __func__, value, len);
+	mse_debug("END value=%d ret=%zd\n", value, len);
 
 	return len;
 }
@@ -729,7 +718,7 @@ static ssize_t mse_audio_config_crf_type_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int i, ret;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_media_audio_config(index, &data);
 	if (ret)
@@ -744,8 +733,7 @@ static ssize_t mse_audio_config_crf_type_show(struct device *dev,
 
 	ret = sprintf(buf, "%s\n", crf_table[i].str);
 
-	pr_debug("[%s] end value=%s(%d) ret=%d\n",
-		 __func__, buf, data.crf_type, ret);
+	mse_debug("END value=%s(%d) ret=%d\n", buf, data.crf_type, ret);
 
 	return ret;
 }
@@ -759,8 +747,7 @@ static ssize_t mse_audio_config_crf_type_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int i, ret;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = mse_config_get_media_audio_config(index, &data);
 	if (ret)
@@ -780,8 +767,7 @@ static ssize_t mse_audio_config_crf_type_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%s(%d) ret=%zd\n",
-		 __func__, buf, data.crf_type, len);
+	mse_debug("END value=%s(%d) ret=%zd\n", buf, data.crf_type, len);
 
 	return len;
 }
@@ -794,7 +780,7 @@ static ssize_t mse_video_config_int_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_media_video_config(index, &data);
 	if (ret)
@@ -817,7 +803,7 @@ static ssize_t mse_video_config_int_show(struct device *dev,
 
 	ret = sprintf(buf, "%d\n", value);
 
-	pr_debug("[%s] end %d ret:%d\n", __func__, value, ret);
+	mse_debug("END %d ret:%d\n", value, ret);
 
 	return ret;
 }
@@ -831,8 +817,7 @@ static ssize_t mse_video_config_int_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = kstrtol(buf, 0, (long *)&value);
 	if (ret)
@@ -861,7 +846,7 @@ static ssize_t mse_video_config_int_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%d ret=%zd\n", __func__, value, len);
+	mse_debug("END value=%d ret=%zd\n", value, len);
 
 	return len;
 }
@@ -874,7 +859,7 @@ static ssize_t mse_mpeg2ts_config_int_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_media_mpeg2ts_config(index, &data);
 	if (ret)
@@ -894,7 +879,7 @@ static ssize_t mse_mpeg2ts_config_int_show(struct device *dev,
 
 	ret = sprintf(buf, "%d\n", value);
 
-	pr_debug("[%s] end value=%d ret=%d\n", __func__, value, ret);
+	mse_debug("END value=%d ret=%d\n", value, ret);
 
 	return ret;
 }
@@ -908,8 +893,7 @@ static ssize_t mse_mpeg2ts_config_int_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = kstrtol(buf, 0, (long *)&value);
 	if (ret)
@@ -935,7 +919,7 @@ static ssize_t mse_mpeg2ts_config_int_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%d ret=%zd\n", __func__, value, len);
+	mse_debug("END value=%d ret=%zd\n", value, len);
 
 	return len;
 }
@@ -948,7 +932,7 @@ static ssize_t mse_ptp_config_type_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int i, ret;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_ptp_config(index, &data);
 	if (ret)
@@ -963,8 +947,7 @@ static ssize_t mse_ptp_config_type_show(struct device *dev,
 
 	ret = sprintf(buf, "%s\n", ptp_type_table[i].str);
 
-	pr_debug("[%s] end value=%s(%d) ret=%d\n",
-		 __func__, buf, data.type, ret);
+	mse_debug("END value=%s(%d) ret=%d\n", buf, data.type, ret);
 
 	return ret;
 }
@@ -978,8 +961,7 @@ static ssize_t mse_ptp_config_type_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int i, ret;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = mse_config_get_ptp_config(index, &data);
 	if (ret)
@@ -999,8 +981,7 @@ static ssize_t mse_ptp_config_type_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%s(%d) ret=%zd\n",
-		 __func__, buf, data.type, len);
+	mse_debug("END value=%s(%d) ret=%zd\n", buf, data.type, len);
 
 	return len;
 }
@@ -1013,7 +994,7 @@ static ssize_t mse_ptp_config_int_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_ptp_config(index, &data);
 	if (ret)
@@ -1037,7 +1018,7 @@ static ssize_t mse_ptp_config_int_show(struct device *dev,
 
 	ret = sprintf(buf, "%d\n", value);
 
-	pr_debug("[%s] end value=%d ret=%d\n", __func__, value, ret);
+	mse_debug("END value=%d ret=%d\n", value, ret);
 
 	return ret;
 }
@@ -1051,8 +1032,7 @@ static ssize_t mse_ptp_config_int_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = kstrtol(buf, 0, (long *)&value);
 	if (ret)
@@ -1082,7 +1062,7 @@ static ssize_t mse_ptp_config_int_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%d ret=%zd\n", __func__, value, len);
+	mse_debug("END value=%d ret=%zd\n", value, len);
 
 	return len;
 }
@@ -1095,7 +1075,7 @@ static ssize_t mse_mch_config_int_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_mch_config(index, &data);
 	if (ret)
@@ -1109,7 +1089,7 @@ static ssize_t mse_mch_config_int_show(struct device *dev,
 
 	ret = sprintf(buf, "%d\n", value);
 
-	pr_debug("[%s] end value=%d ret=%d\n", __func__, value, ret);
+	mse_debug("END value=%d ret=%d\n", value, ret);
 
 	return ret;
 }
@@ -1123,8 +1103,7 @@ static ssize_t mse_mch_config_int_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = kstrtol(buf, 0, (long *)&value);
 	if (ret)
@@ -1144,7 +1123,7 @@ static ssize_t mse_mch_config_int_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%d ret=%zd\n", __func__, value, len);
+	mse_debug("END value=%d ret=%zd\n", value, len);
 
 	return len;
 }
@@ -1157,7 +1136,7 @@ static ssize_t mse_avtp_tx_crf_dst_mac_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_avtp_tx_param_crf(index, &data);
 	if (ret)
@@ -1167,7 +1146,7 @@ static ssize_t mse_avtp_tx_crf_dst_mac_show(struct device *dev,
 		      data.dst_mac[0], data.dst_mac[1], data.dst_mac[2],
 		      data.dst_mac[3], data.dst_mac[4], data.dst_mac[5]);
 
-	pr_debug("[%s] end value=%s ret=%d\n", __func__, buf, ret);
+	mse_debug("END value=%s ret=%d\n", buf, ret);
 
 	return ret;
 }
@@ -1181,8 +1160,7 @@ static ssize_t mse_avtp_tx_crf_dst_mac_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = mse_config_get_avtp_tx_param_crf(index, &data);
 	if (ret)
@@ -1194,9 +1172,9 @@ static ssize_t mse_avtp_tx_crf_dst_mac_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%02x%02x%02x%02x%02x%02x ret=%zd\n",
-		 __func__, data.dst_mac[0], data.dst_mac[1], data.dst_mac[2],
-		 data.dst_mac[3], data.dst_mac[4], data.dst_mac[5], len);
+	mse_debug("END value=%02x%02x%02x%02x%02x%02x ret=%zd\n",
+		  data.dst_mac[0], data.dst_mac[1], data.dst_mac[2],
+		  data.dst_mac[3], data.dst_mac[4], data.dst_mac[5], len);
 
 	return len;
 }
@@ -1209,7 +1187,7 @@ static ssize_t mse_avtp_tx_crf_src_mac_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_avtp_tx_param_crf(index, &data);
 	if (ret)
@@ -1219,7 +1197,7 @@ static ssize_t mse_avtp_tx_crf_src_mac_show(struct device *dev,
 		      data.src_mac[0], data.src_mac[1], data.src_mac[2],
 		      data.src_mac[3], data.src_mac[4], data.src_mac[5]);
 
-	pr_debug("[%s] end value=%s ret=%d\n", __func__, buf, ret);
+	mse_debug("END value=%s ret=%d\n", buf, ret);
 
 	return ret;
 }
@@ -1233,8 +1211,7 @@ static ssize_t mse_avtp_tx_crf_src_mac_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = mse_config_get_avtp_tx_param_crf(index, &data);
 	if (ret)
@@ -1246,9 +1223,9 @@ static ssize_t mse_avtp_tx_crf_src_mac_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%02x%02x%02x%02x%02x%02x ret=%zd\n",
-		 __func__, data.src_mac[0], data.src_mac[1], data.src_mac[2],
-		 data.src_mac[3], data.src_mac[4], data.src_mac[5], len);
+	mse_debug("END value=%02x%02x%02x%02x%02x%02x ret=%zd\n",
+		  data.src_mac[0], data.src_mac[1], data.src_mac[2],
+		  data.src_mac[3], data.src_mac[4], data.src_mac[5], len);
 
 	return len;
 }
@@ -1261,7 +1238,7 @@ static ssize_t mse_avtp_tx_crf_int_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_avtp_tx_param_crf(index, &data);
 	if (ret)
@@ -1281,7 +1258,7 @@ static ssize_t mse_avtp_tx_crf_int_show(struct device *dev,
 
 	ret = sprintf(buf, "%d\n", value);
 
-	pr_debug("[%s] end value=%s ret=%d\n", __func__, buf, ret);
+	mse_debug("END value=%s ret=%d\n", buf, ret);
 
 	return ret;
 }
@@ -1295,8 +1272,7 @@ static ssize_t mse_avtp_tx_crf_int_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = kstrtol(buf, 0, (long *)&value);
 	if (ret)
@@ -1322,7 +1298,7 @@ static ssize_t mse_avtp_tx_crf_int_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%d ret=%zd\n", __func__, value, len);
+	mse_debug("END value=%d ret=%zd\n", value, len);
 
 	return len;
 }
@@ -1335,7 +1311,7 @@ static ssize_t mse_avtp_rx_crf_streamid_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_avtp_rx_param_crf(index, &data);
 	if (ret)
@@ -1346,7 +1322,7 @@ static ssize_t mse_avtp_rx_crf_streamid_show(struct device *dev,
 		      data.streamid[3], data.streamid[4], data.streamid[5],
 		      data.streamid[6], data.streamid[7]);
 
-	pr_debug("[%s] end value=%s ret=%d\n", __func__, buf, ret);
+	mse_debug("END value=%s ret=%d\n", buf, ret);
 
 	return ret;
 }
@@ -1360,8 +1336,7 @@ static ssize_t mse_avtp_rx_crf_streamid_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = mse_config_get_avtp_rx_param_crf(index, &data);
 	if (ret)
@@ -1373,10 +1348,10 @@ static ssize_t mse_avtp_rx_crf_streamid_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%02x%02x%02x%02x%02x%02x%02x%02x ret=%zd\n",
-		 __func__, data.streamid[0], data.streamid[1],
-		 data.streamid[2], data.streamid[3], data.streamid[4],
-		 data.streamid[5], data.streamid[6], data.streamid[7], len);
+	mse_debug("END value=%02x%02x%02x%02x%02x%02x%02x%02x ret=%zd\n",
+		  data.streamid[0], data.streamid[1], data.streamid[2],
+		  data.streamid[3], data.streamid[4], data.streamid[5],
+		  data.streamid[6], data.streamid[7], len);
 
 	return len;
 }
@@ -1389,7 +1364,7 @@ static ssize_t mse_delay_time_int_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s\n", __func__, attr->attr.name);
+	mse_debug("START %s\n", attr->attr.name);
 
 	ret = mse_config_get_delay_time(index, &data);
 	if (ret)
@@ -1409,7 +1384,7 @@ static ssize_t mse_delay_time_int_show(struct device *dev,
 
 	ret = sprintf(buf, "%d\n", value);
 
-	pr_debug("[%s] end value=%s ret=%d\n", __func__, buf, ret);
+	mse_debug("END value=%s ret=%d\n", buf, ret);
 
 	return ret;
 }
@@ -1423,8 +1398,7 @@ static ssize_t mse_delay_time_int_store(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret, value;
 
-	pr_debug("[%s] start %s(%zd) to %s\n",
-		 __func__, buf, len, attr->attr.name);
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
 	ret = kstrtol(buf, 0, (long *)&value);
 	if (ret)
@@ -1450,7 +1424,7 @@ static ssize_t mse_delay_time_int_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	pr_debug("[%s] end value=%d ret=%zd\n", __func__, value, len);
+	mse_debug("END value=%d ret=%zd\n", value, len);
 
 	return len;
 }

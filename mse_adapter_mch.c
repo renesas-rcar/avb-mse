@@ -109,7 +109,7 @@ static int __init mse_adapter_mch_init(void)
 {
 	int inst_id;
 
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 
 	inst_id = mse_register_mch(&mch_mse_ops);
 	if (inst_id < 0)
@@ -128,7 +128,7 @@ static int __init mse_adapter_mch_init(void)
 
 static void __exit mse_adapter_mch_exit(void)
 {
-	pr_debug("[%s]\n", __func__);
+	mse_debug("START\n");
 	mse_unregister_mch(mch_mse_if_instance_id);
 	mse_unregister_ptp(ptp_mse_if_instance_id);
 }
