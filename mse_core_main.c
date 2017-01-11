@@ -792,7 +792,7 @@ static int mse_ptp_get_first_index(void)
 		if (mse->ptp_table[i])
 			return i;
 
-	return -1; /* not found, use dummy ops */
+	return MSE_INDEX_UNDEFINED; /* not found, use dummy ops */
 }
 
 static struct mse_ptp_ops *mse_ptp_find_ops(int index)
@@ -2343,7 +2343,7 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 			       char *name,
 			       char *device_name)
 {
-	int i, err;
+	int index, err;
 	unsigned long flags;
 
 	/* check argument */
@@ -2362,36 +2362,42 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 		return -EINVAL;
 	}
 
-	mse_debug("type=%d name=%s\n", type, name);
+	mse_debug("type=%d name=%s device_name=%s\n", type, name, device_name);
+
 	spin_lock_irqsave(&mse->lock_tables, flags);
 
-	/* register table */
-	for (i = 0; i < ARRAY_SIZE(mse->media_table); i++) {
-		if (!mse->media_table[i].used_f) {
-			/* init table */
-			mse->media_table[i].used_f = true;
-			mse->media_table[i].index = i;
-			mse->media_table[i].type = type;
-			strncpy(mse->media_table[i].name, name,
-				MSE_NAME_LEN_MAX);
+	/* search unused index */
+	for (index = 0; index < ARRAY_SIZE(mse->media_table) &&
+	     mse->media_table[index].used_f; index++)
+		;
 
-			spin_unlock_irqrestore(&mse->lock_tables, flags);
+	if (index >= ARRAY_SIZE(mse->media_table)) {
+		spin_unlock_irqrestore(&mse->lock_tables, flags);
+		mse_err("%s is not registered\n", name);
 
-			/* create control device */
-			err = mse_create_config_device(i, device_name);
-			if (err < 0)
-				return -EPERM;
-
-			mse_debug("registered index=%d\n", i);
-			return i;
-		}
+		return -EBUSY;
 	}
 
-	mse_err("%s is not registered\n", name);
+	/* init table */
+	mse->media_table[index].used_f = true;
+	mse->media_table[index].index = index;
+	mse->media_table[index].type = type;
+	strncpy(mse->media_table[index].name, name, MSE_NAME_LEN_MAX);
 
 	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
-	return -EBUSY;
+	/* create control device */
+	err = mse_create_config_device(index, device_name);
+	if (err < 0) {
+		mse->media_table[index].used_f = false;
+		mse_err("%s is not registered\n", name);
+
+		return -EPERM;
+	}
+
+	mse_debug("registered index=%d\n", index);
+
+	return index;
 }
 EXPORT_SYMBOL(mse_register_adapter_media);
 
@@ -2408,7 +2414,7 @@ int mse_unregister_adapter_media(int index_media)
 	mse_debug("index=%d\n", index_media);
 
 	if (!mse->media_table[index_media].used_f) {
-		mse_err("%d is not unregistered\n", index_media);
+		mse_err("%d is not registered\n", index_media);
 		return -EINVAL;
 	}
 
@@ -2422,12 +2428,12 @@ int mse_unregister_adapter_media(int index_media)
 	/* delete control device */
 	mse_delete_config_device(index_media);
 
-	spin_lock_irqsave(&mse->lock_tables, flags);
-
 	/* table delete */
+	spin_lock_irqsave(&mse->lock_tables, flags);
 	memset(&mse->media_table[index_media], 0, sizeof(struct mse_adapter));
-	mse_debug("unregistered\n");
 	spin_unlock_irqrestore(&mse->lock_tables, flags);
+
+	mse_debug("unregistered\n");
 
 	return 0;
 }
@@ -2435,7 +2441,7 @@ EXPORT_SYMBOL(mse_unregister_adapter_media);
 
 int mse_register_adapter_network(struct mse_adapter_network_ops *ops)
 {
-	int i;
+	int index;
 	unsigned long flags;
 
 	/* check argument */
@@ -2456,26 +2462,30 @@ int mse_register_adapter_network(struct mse_adapter_network_ops *ops)
 	mse_debug("type=%d name=%s\n", ops->type, ops->name);
 	spin_lock_irqsave(&mse->lock_tables, flags);
 
-	/* register table */
-	for (i = 0; i < ARRAY_SIZE(mse->network_table); i++) {
-		if (!mse->network_table[i]) {
-			mse->network_table[i] = ops;
-			mse_debug("registered index=%d\n", i);
-			spin_unlock_irqrestore(&mse->lock_tables, flags);
-			return i;
-		}
+	/* search unused index */
+	for (index = 0; index < ARRAY_SIZE(mse->network_table) &&
+	     mse->network_table[index]; index++)
+		;
+
+	if (index >= ARRAY_SIZE(mse->network_table)) {
+		spin_unlock_irqrestore(&mse->lock_tables, flags);
+		mse_err("%s is not registered\n", ops->name);
+
+		return -EBUSY;
 	}
 
-	mse_err("%s is not registered\n", ops->name);
-
+	/* register table */
+	mse->network_table[index] = ops;
+	mse_debug("registered index=%d\n", index);
 	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
-	return -EBUSY;
+	return index;
 }
 EXPORT_SYMBOL(mse_register_adapter_network);
 
 int mse_unregister_adapter_network(int index)
 {
+	int i;
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_ADAPTER_NETWORK_MAX)) {
@@ -2484,11 +2494,24 @@ int mse_unregister_adapter_network(int index)
 	}
 
 	mse_debug("index=%d\n", index);
+
+	if (!mse->network_table[index]) {
+		mse_err("%d is not registered\n", index);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
+		if (mse->instance_table[i].index_network == index) {
+			mse_err("module is in use. instance=%d\n", i);
+			return -EPERM;
+		}
+	}
+
 	spin_lock_irqsave(&mse->lock_tables, flags);
-
 	mse->network_table[index] = NULL;
-
 	spin_unlock_irqrestore(&mse->lock_tables, flags);
+
+	mse_debug("unregistered\n");
 
 	return 0;
 }
@@ -2496,7 +2519,7 @@ EXPORT_SYMBOL(mse_unregister_adapter_network);
 
 int mse_register_packetizer(struct mse_packetizer_ops *ops)
 {
-	int i;
+	int index;
 	unsigned long flags;
 
 	/* check argument */
@@ -2509,26 +2532,30 @@ int mse_register_packetizer(struct mse_packetizer_ops *ops)
 
 	spin_lock_irqsave(&mse->lock_tables, flags);
 
-	/* register table */
-	for (i = 0; i < ARRAY_SIZE(mse->packetizer_table); i++) {
-		if (!mse->packetizer_table[i]) {
-			mse->packetizer_table[i] = ops;
-			mse_debug("registered index=%d\n", i);
-			spin_unlock_irqrestore(&mse->lock_tables, flags);
-			return i;
-		}
+	/* search unused index */
+	for (index = 0; index < ARRAY_SIZE(mse->packetizer_table) &&
+	     mse->packetizer_table[index]; index++)
+		;
+
+	if (index >= ARRAY_SIZE(mse->packetizer_table)) {
+		mse_err("id=%d is not registered\n", ops->id);
+		spin_unlock_irqrestore(&mse->lock_tables, flags);
+
+		return -EBUSY;
 	}
 
-	mse_err("id=%d is not registered\n", ops->id);
-
+	/* register table */
+	mse->packetizer_table[index] = ops;
+	mse_debug("registered index=%d\n", index);
 	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
-	return -EBUSY;
+	return index;
 }
 EXPORT_SYMBOL(mse_register_packetizer);
 
 int mse_unregister_packetizer(int index)
 {
+	int i;
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_PACKETIZER_TABLE_MAX)) {
@@ -2537,6 +2564,13 @@ int mse_unregister_packetizer(int index)
 	}
 
 	mse_debug("index=%d\n", index);
+
+	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
+		if (mse->instance_table[i].index_packetizer == index) {
+			mse_err("module is in use. instance=%d\n", i);
+			return -EPERM;
+		}
+	}
 
 	spin_lock_irqsave(&mse->lock_tables, flags);
 
@@ -3034,7 +3068,6 @@ int mse_open(int index_media, bool tx)
 	if (ret < 0)
 		mse_err("cannot get configurations\n");
 
-	instance->mch_index = -1;
 	if (instance->media_clock_recovery == 1) {
 		for (i = 0; i < MSE_MCH_MAX; i++) {
 			m_ops = mse->mch_table[i];
@@ -3053,7 +3086,7 @@ int mse_open(int index_media, bool tx)
 		ret = m_ops->open(&instance->mch_dev_id);
 		if (ret < 0) {
 			mse_err("mch open error(%d).\n", ret);
-			instance->mch_index = -1;
+			instance->mch_index = MSE_INDEX_UNDEFINED;
 			err = -EINVAL;
 
 			goto error_mch_cannot_open;
@@ -3210,6 +3243,8 @@ int mse_close(int index)
 	instance->index_media = MSE_INDEX_UNDEFINED;
 	instance->index_network = MSE_INDEX_UNDEFINED;
 	instance->index_packetizer = MSE_INDEX_UNDEFINED;
+	instance->mch_index = MSE_INDEX_UNDEFINED;
+	instance->ptp_index = MSE_INDEX_UNDEFINED;
 	adapter->ro_config_f = false;
 
 	return 0;
@@ -3325,7 +3360,7 @@ EXPORT_SYMBOL(mse_start_transmission);
 
 int mse_register_mch(struct mch_ops *ops)
 {
-	int i;
+	int index;
 	unsigned long flags;
 
 	if (!ops) {
@@ -3335,26 +3370,29 @@ int mse_register_mch(struct mch_ops *ops)
 
 	spin_lock_irqsave(&mse->lock_tables, flags);
 
-	for (i = 0; i < ARRAY_SIZE(mse->mch_table); i++) {
-		if (!mse->mch_table[i]) {
-			/* init table */
-			mse->mch_table[i] = ops;
-			mse_debug("registered index=%d\n", i);
-			spin_unlock_irqrestore(&mse->lock_tables, flags);
-			return i;
-		}
+	for (index = 0; index < ARRAY_SIZE(mse->mch_table) &&
+	     mse->mch_table[index]; index++)
+		;
+
+	if (index >= ARRAY_SIZE(mse->mch_table)) {
+		mse_err("ops is not registered\n");
+		spin_unlock_irqrestore(&mse->lock_tables, flags);
+
+		return -EBUSY;
 	}
 
-	mse_err("ops is not registered\n");
-
+	/* init table */
+	mse->mch_table[index] = ops;
+	mse_debug("registered index=%d\n", index);
 	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
-	return -EBUSY;
+	return index;
 }
 EXPORT_SYMBOL(mse_register_mch);
 
 int mse_unregister_mch(int index)
 {
+	int i;
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_MCH_MAX)) {
@@ -3363,6 +3401,13 @@ int mse_unregister_mch(int index)
 	}
 
 	mse_debug("index=%d\n", index);
+
+	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
+		if (mse->instance_table[i].mch_index == index) {
+			mse_err("module is in use. instance=%d\n", i);
+			return -EPERM;
+		}
+	}
 
 	spin_lock_irqsave(&mse->lock_tables, flags);
 	mse->mch_table[index] = NULL;
@@ -3374,7 +3419,7 @@ EXPORT_SYMBOL(mse_unregister_mch);
 
 int mse_register_ptp(struct mse_ptp_ops *ops)
 {
-	int i;
+	int index;
 	unsigned long flags;
 
 	if (!ops) {
@@ -3384,26 +3429,30 @@ int mse_register_ptp(struct mse_ptp_ops *ops)
 
 	spin_lock_irqsave(&mse->lock_tables, flags);
 
-	for (i = 0; i < (ARRAY_SIZE(mse->ptp_table) - 1); i++) {
-		if (!mse->ptp_table[i]) {
-			/* init table */
-			mse->ptp_table[i] = ops;
-			mse_debug("registered index=%d\n", i);
-			spin_unlock_irqrestore(&mse->lock_tables, flags);
-			return i;
-		}
+	/* search unused index */
+	for (index = 0; index < ARRAY_SIZE(mse->ptp_table) &&
+	     mse->ptp_table[index]; index++)
+		;
+
+	if (index >= ARRAY_SIZE(mse->ptp_table)) {
+		mse_err("ops is not registered\n");
+		spin_unlock_irqrestore(&mse->lock_tables, flags);
+
+		return -EBUSY;
 	}
 
-	mse_err("ops is not registered\n");
-
+	/* register table */
+	mse->ptp_table[index] = ops;
+	mse_debug("registered index=%d\n", index);
 	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
-	return -EBUSY;
+	return index;
 }
 EXPORT_SYMBOL(mse_register_ptp);
 
 int mse_unregister_ptp(int index)
 {
+	int i;
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_PTP_MAX)) {
@@ -3412,6 +3461,13 @@ int mse_unregister_ptp(int index)
 	}
 
 	mse_debug("index=%d\n", index);
+
+	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
+		if (mse->instance_table[i].ptp_index == index) {
+			mse_err("module is in use. instance=%d\n", i);
+			return -EPERM;
+		}
+	}
 
 	spin_lock_irqsave(&mse->lock_tables, flags);
 	mse->ptp_table[index] = NULL;
@@ -3468,6 +3524,9 @@ static int mse_probe(void)
 	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
 		mse->instance_table[i].index_media = MSE_INDEX_UNDEFINED;
 		mse->instance_table[i].index_network = MSE_INDEX_UNDEFINED;
+		mse->instance_table[i].index_packetizer = MSE_INDEX_UNDEFINED;
+		mse->instance_table[i].mch_index = MSE_INDEX_UNDEFINED;
+		mse->instance_table[i].ptp_index = MSE_INDEX_UNDEFINED;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(mse->media_table); i++)
