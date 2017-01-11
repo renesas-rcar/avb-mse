@@ -2352,6 +2352,11 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 		return -EINVAL;
 	}
 
+	if (!device_name) {
+		mse_err("invalid argument. device_name\n");
+		return -EINVAL;
+	}
+
 	switch (type) {
 	case MSE_TYPE_ADAPTER_AUDIO:
 	case MSE_TYPE_ADAPTER_VIDEO:
