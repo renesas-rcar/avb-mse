@@ -1429,9 +1429,8 @@ static void mse_work_packetize(struct work_struct *work)
 	if (instance->f_stopping)
 		return;
 
-	switch (instance->media->type) {
-	case MSE_TYPE_ADAPTER_AUDIO:
-		/* make AVTP packet */
+	if (instance->media->type == MSE_TYPE_ADAPTER_AUDIO) {
+		/* make AVTP packet with timestamps */
 		ret = mse_packet_ctrl_make_packet(
 			instance->index_packetizer,
 			instance->media_buffer,
@@ -1443,29 +1442,12 @@ static void mse_work_packetize(struct work_struct *work)
 			instance->packet_buffer,
 			instance->packetizer,
 			&instance->work_length);
-		if (ret < 0) {
-			mse_err("erorr=%d\n", ret);
-			return;
-		}
-		mse_debug("packetized=%d len=%zu\n",
-			  ret, instance->work_length);
-		/* start workqueue for streaming */
-		instance->f_continue =
-			(instance->work_length < instance->media_buffer_size);
-
-		if (!instance->f_streaming) {
-			instance->f_streaming = true;
-			queue_work(instance->wq_stream, &instance->wk_stream);
-		}
-		break;
-
-	case MSE_TYPE_ADAPTER_VIDEO:
-	case MSE_TYPE_ADAPTER_MPEG2TS:
-		/* make AVTP packet */
+	} else {
+		/* make AVTP packet with one timesamp */
 		ret = mse_packet_ctrl_make_packet(
 			instance->index_packetizer,
-			instance->media_buffer + instance->work_length,
-			instance->media_buffer_size - instance->work_length,
+			instance->media_buffer,
+			instance->media_buffer_size,
 			-1,
 			NULL,
 			1,
@@ -1473,25 +1455,27 @@ static void mse_work_packetize(struct work_struct *work)
 			instance->packet_buffer,
 			instance->packetizer,
 			&instance->work_length);
-		if (ret < 0)
-			return;
-		mse_debug("media_buffer=%p packetized=%d\n",
-			  instance->media_buffer, ret);
+	}
 
-		if (instance->use_temp_video_buffer_mjpeg ||
-		    instance->use_temp_video_buffer_mpeg2ts)
-			instance->f_temp_video_buffer_rewind = true;
+	if (ret < 0) {
+		mse_err("error=%d\n", ret);
+		return;
+	}
+	mse_debug("packetized=%d len=%zu\n",
+		  ret, instance->work_length);
+	/* start workqueue for streaming */
+	instance->f_continue =
+		(instance->work_length < instance->media_buffer_size);
 
-		/* start workqueue for streaming */
-		if (!instance->f_streaming) {
-			instance->f_streaming = true;
-			queue_work(instance->wq_stream, &instance->wk_stream);
-		}
-		break;
+	if (!instance->f_continue &&
+	    (instance->use_temp_video_buffer_mjpeg ||
+	     instance->use_temp_video_buffer_mpeg2ts))
+		instance->f_temp_video_buffer_rewind = true;
 
-	default:
-		mse_err("unknown type=0x%08x\n", instance->media->type);
-		break;
+	/* start workqueue for streaming */
+	if (!instance->f_streaming) {
+		instance->f_streaming = true;
+		queue_work(instance->wq_stream, &instance->wk_stream);
 	}
 }
 
