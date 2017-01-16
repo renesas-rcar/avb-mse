@@ -80,8 +80,8 @@
 #define CBS_ADJUSTMENT_NUMERATOR        (103)
 #define CBS_ADJUSTMENT_DENOMINATOR      (100)
 
-/* preamble + FCS + IGP */
-#define ETHERNET_SPECIAL        (8 + 4 + 12)
+/* preamble + FCS */
+#define ETHERNET_SPECIAL        (8 + 4)
 
 #define CLASS_INTERVAL_FRAMES   (8000) /* class A */
 #define INTERVAL_FRAMES         (1)

@@ -76,7 +76,6 @@
 
 #define SEQNUM_INIT             (-1)
 
-#define ETH_IPG                 (12)
 #define AVTP_PAYLOAD_MIN        (AVTP_FRAME_SIZE_MIN - AVTP_IEC61883_4_PAYLOAD_OFFSET)
 
 #define AVTP_SOURCE_PACKET_SIZE (4 + 188) /* timestamp + TSP */
@@ -279,7 +278,7 @@ static int mse_packetizer_iec61883_4_calc_cbs(int index,
 	payload_size = iec61883_4->mpeg2ts_config.tspackets_per_frame *
 		MSE_TS_PACKET_SIZE;
 	packet_size =
-		ETH_IPG + AVTP_IEC61883_4_PAYLOAD_OFFSET +
+		AVTP_IEC61883_4_PAYLOAD_OFFSET +
 		iec61883_4->mpeg2ts_config.tspackets_per_frame *
 		AVTP_SOURCE_PACKET_SIZE;
 	mse_debug("payload_size=%d packet_size=%d\n",

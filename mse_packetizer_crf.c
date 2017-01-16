@@ -83,10 +83,10 @@
 
 #define CBS_ADJUSTMENT_NUMERATOR        (103)
 #define CBS_ADJUSTMENT_DENOMINATOR      (100)
-/* preamble + FCS + IGP */
-#define ETHERNET_SPECIAL        (8 + 4 + 12)
+/* preamble + FCS */
+#define ETHERNET_SPECIAL        (8 + 4)
 
-#define CLASS_INTERVAL_FRAMES   (8000) /* class A */
+#define CLASS_INTERVAL_FRAMES   (50) /* CRF AVTPDUs per Second */
 #define INTERVAL_FRAMES         (1)
 
 #define MSE_CRFDATA_MAX         (6)
@@ -114,8 +114,6 @@ struct crf_packetizer {
 };
 
 struct crf_packetizer crf_packetizer_table[MSE_PACKETIZER_MAX];
-
-static int class_interval_frames;
 
 static int mse_packetizer_crf_audio_open(void)
 {
@@ -286,7 +284,7 @@ static int mse_packetizer_crf_audio_calc_cbs(int index,
 
 	bandwidth_fraction_numerator =
 		(ETHERNET_SPECIAL + crf->crf_packet_size) * BYTE_TO_BIT *
-		class_interval_frames * INTERVAL_FRAMES *
+		CLASS_INTERVAL_FRAMES * INTERVAL_FRAMES *
 		CBS_ADJUSTMENT_NUMERATOR;
 
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;

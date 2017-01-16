@@ -77,7 +77,6 @@
 #define NSEC                    (1000000000L)
 #define SEQNUM_INIT             (-1)
 
-#define ETHFRAMELEN_MAX_IPG     (ETHFRAMELEN_MAX + 12)
 #define AVTP_PAYLOAD_MAX        (ETHFRAMELEN_MAX - AVTP_PAYLOAD_OFFSET)
 
 #define TRANSMIT_RATE_BASE      (1000000)
@@ -309,7 +308,7 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 	}
 
 	bandwidth_fraction_numerator = (u64)cvf_mjpeg->video_config.bitrate *
-				       (u64)ETHFRAMELEN_MAX_IPG;
+				       (u64)ETHFRAMELEN_MAX;
 	do_div(bandwidth_fraction_numerator, TRANSMIT_RATE_BASE);
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
 	do_div(value, bandwidth_fraction_denominator);
