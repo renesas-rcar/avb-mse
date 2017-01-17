@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2016 Renesas Electronics Corporation
+ Copyright (C) 2015-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -77,11 +77,10 @@
 #include <linux/ptp_clock.h>
 #include "avtp.h"
 #include "ravb_mse_kernel.h"
-#include "mse_core.h"
+#include "mse_packetizer.h"
 #include "mse_config.h"
 #include "mse_packet_ctrl.h"
 #include "mse_sysfs.h"
-#include "mse_packetizer.h"
 #include "mse_ptp.h"
 #include "mse_ioctl_local.h"
 
@@ -93,8 +92,6 @@
 #define MSE_RADIX_HEXADECIMAL   (16)
 #define MSE_DEFAULT_BITRATE     (50000000) /* 50Mbps */
 
-/** @brief MSE's packetizer max */
-#define MSE_PACKETIZER_TABLE_MAX   (10)
 /** @brief MCH table max */
 #define MSE_MCH_MAX                (10)
 /** @brief PTP table max */
@@ -387,7 +384,6 @@ struct mse_device {
 	/* @brief device class */
 	struct class *class;
 
-	struct mse_packetizer_ops *packetizer_table[MSE_PACKETIZER_TABLE_MAX];
 	struct mse_adapter_network_ops *network_table[MSE_ADAPTER_NETWORK_MAX];
 	struct mse_adapter media_table[MSE_ADAPTER_MEDIA_MAX];
 	struct mse_instance instance_table[MSE_INSTANCE_MAX];
@@ -2506,71 +2502,6 @@ int mse_unregister_adapter_network(int index)
 }
 EXPORT_SYMBOL(mse_unregister_adapter_network);
 
-int mse_register_packetizer(struct mse_packetizer_ops *ops)
-{
-	int index;
-	unsigned long flags;
-
-	/* check argument */
-	if (!ops) {
-		mse_err("invalid argument. ops\n");
-		return -EINVAL;
-	}
-
-	mse_debug("id=%d\n", ops->id);
-
-	spin_lock_irqsave(&mse->lock_tables, flags);
-
-	/* search unused index */
-	for (index = 0; index < ARRAY_SIZE(mse->packetizer_table) &&
-	     mse->packetizer_table[index]; index++)
-		;
-
-	if (index >= ARRAY_SIZE(mse->packetizer_table)) {
-		mse_err("id=%d is not registered\n", ops->id);
-		spin_unlock_irqrestore(&mse->lock_tables, flags);
-
-		return -EBUSY;
-	}
-
-	/* register table */
-	mse->packetizer_table[index] = ops;
-	mse_debug("registered index=%d\n", index);
-	spin_unlock_irqrestore(&mse->lock_tables, flags);
-
-	return index;
-}
-EXPORT_SYMBOL(mse_register_packetizer);
-
-int mse_unregister_packetizer(int index)
-{
-	int i;
-	unsigned long flags;
-
-	if ((index < 0) || (index >= MSE_PACKETIZER_TABLE_MAX)) {
-		mse_err("invalid argument. index=%d\n", index);
-		return -EINVAL;
-	}
-
-	mse_debug("index=%d\n", index);
-
-	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
-		if (mse->instance_table[i].index_packetizer == index) {
-			mse_err("module is in use. instance=%d\n", i);
-			return -EPERM;
-		}
-	}
-
-	spin_lock_irqsave(&mse->lock_tables, flags);
-
-	mse->packetizer_table[index] = NULL;
-
-	spin_unlock_irqrestore(&mse->lock_tables, flags);
-
-	return 0;
-}
-EXPORT_SYMBOL(mse_unregister_packetizer);
-
 int mse_get_audio_config(int index, struct mse_audio_config *config)
 {
 	struct mse_instance *instance;
@@ -2948,7 +2879,7 @@ int mse_open(int index_media, bool tx)
 	}
 
 	/* packetizer for configuration value */
-	packetizer = mse->packetizer_table[config_packetizer->packetizer];
+	packetizer = mse_packetizer_get_ops(config_packetizer->packetizer);
 
 	mse_debug("packetizer index=%d\n", config_packetizer->packetizer);
 
@@ -3504,11 +3435,6 @@ static int mse_probe(void)
 	/* init ioctl device */
 	major = mse_ioctl_init(major, mse_instance_max);
 
-	/* initialize packetizer */
-	err = mse_packetizer_init();
-	if (err)
-		return err;
-
 	/* init table */
 	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
 		mse->instance_table[i].index_media = MSE_INDEX_UNDEFINED;
@@ -3531,8 +3457,6 @@ static int mse_probe(void)
  */
 static int mse_remove(void)
 {
-	/* release packetizer */
-	mse_packetizer_exit();
 	/* release ioctl device */
 	mse_ioctl_exit(major, mse_instance_max);
 	/* destroy class */

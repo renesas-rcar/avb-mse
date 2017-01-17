@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2016 Renesas Electronics Corporation
+ Copyright (C) 2015-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -69,7 +69,6 @@
 #include <uapi/linux/if_ether.h>
 
 #include "ravb_mse_kernel.h"
-#include "mse_core.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
 
@@ -80,8 +79,6 @@
 #define SEQNUM_INIT            (-1)
 
 #define TRANSMIT_RATE_BASE     (1000000)
-
-#define MSE_PACKETIZER_MAX     (10)
 
 #define MBIT_ADDR (0x28)
 #define MBIT_SET  (0x10)
@@ -167,7 +164,7 @@ struct cvf_h264_packetizer {
 	struct mse_video_config video_config;
 };
 
-struct cvf_h264_packetizer cvf_h264_packetizer_table[MSE_PACKETIZER_MAX];
+struct cvf_h264_packetizer cvf_h264_packetizer_table[MSE_INSTANCE_MAX];
 
 static int mse_packetizer_cvf_h264_open(void)
 {
@@ -286,7 +283,7 @@ static int mse_packetizer_cvf_h264_header_build(
 	set_ieee8021q_ethtype(dst, ETH_P_1722);
 
 	/* 1722 header update + payload */
-	mse_make_streamid(streamid, param->source_addr, param->uniqueid);
+	avtp_make_streamid(streamid, param->source_addr, param->uniqueid);
 
 	avtp_copy_cvf_h264_template(dst);
 
@@ -723,7 +720,6 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 }
 
 struct mse_packetizer_ops mse_packetizer_cvf_h264_d13_ops = {
-	.id = MSE_PACKETIZER_CVF_H264_D13,
 	.open = mse_packetizer_cvf_h264_d13_open,
 	.release = mse_packetizer_cvf_h264_release,
 	.init = mse_packetizer_cvf_h264_packet_init,
@@ -735,7 +731,6 @@ struct mse_packetizer_ops mse_packetizer_cvf_h264_d13_ops = {
 };
 
 struct mse_packetizer_ops mse_packetizer_cvf_h264_ops = {
-	.id = MSE_PACKETIZER_CVF_H264,
 	.open = mse_packetizer_cvf_h264_open,
 	.release = mse_packetizer_cvf_h264_release,
 	.init = mse_packetizer_cvf_h264_packet_init,

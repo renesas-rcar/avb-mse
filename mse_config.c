@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2016 Renesas Electronics Corporation
+ Copyright (C) 2015-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -73,7 +73,7 @@
 #include <linux/init.h>
 #include "ravb_mse_kernel.h"
 #include "mse_config.h"
-#include "mse_core.h"
+#include "mse_packetizer.h"
 
 int mse_config_get_info(int index, struct mse_info *data)
 {
@@ -156,42 +156,24 @@ int mse_config_set_packetizer(int index, struct mse_packetizer *data)
 		return -EBUSY;
 	}
 
-	mse_debug("START\n");
-
-	switch (config->info.type) {
-	case MSE_STREAM_TYPE_AUDIO:
-		if ((data->packetizer != MSE_PACKETIZER_AAF_PCM) &&
-		    (data->packetizer != MSE_PACKETIZER_IEC61883_6))
-			goto wrong_combination;
-		break;
-
-	case MSE_STREAM_TYPE_VIDEO:
-		if ((data->packetizer != MSE_PACKETIZER_CVF_H264) &&
-		    (data->packetizer != MSE_PACKETIZER_CVF_H264_D13) &&
-		    (data->packetizer != MSE_PACKETIZER_CVF_MJPEG))
-			goto wrong_combination;
-		break;
-
-	case MSE_STREAM_TYPE_MPEG2TS:
-		if (data->packetizer != MSE_PACKETIZER_IEC61883_4)
-			goto wrong_combination;
-		break;
-
-	default:
+	if (!mse_packetizer_is_valid(data->packetizer)) {
 		mse_err("invalid value. packetizer=%d\n", data->packetizer);
 		return -EINVAL;
 	}
+
+	if (config->info.type != mse_packetizer_get_type(data->packetizer)) {
+		mse_err("invalid combination. type=%d, packetizer=%d\n",
+			config->info.type, data->packetizer);
+		return -EINVAL;
+	}
+
+	mse_debug("START\n");
 
 	spin_lock_irqsave(&config->lock, flags);
 	config->packetizer = *data;
 	spin_unlock_irqrestore(&config->lock, flags);
 
 	return 0;
-
-wrong_combination:
-	mse_err("invalid combination. type=%d, packetizer=%d\n",
-		config->info.type, data->packetizer);
-	return -EINVAL;
 }
 
 int mse_config_get_packetizer(int index, struct mse_packetizer *data)

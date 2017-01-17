@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2016 Renesas Electronics Corporation
+ Copyright (C) 2015-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -66,10 +66,8 @@
 #include <linux/of_device.h>
 
 #include "ravb_mse_kernel.h"
-#include "mse_core.h"
 #include "mse_sysfs.h"
 #include "mse_config.h"
-#include "mse_packetizer.h"
 
 /* macro */
 #define __MSE_ATTR(_name, _mode, _show, _store) { \
@@ -151,27 +149,27 @@ static struct convert_table type_table[] = {
 static struct convert_table packetizer_table[] = {
 	{
 		MSE_PACKETIZER_AAF_PCM,
-		MSE_PACKETIZER_NAME_STR_AAF_PCM,
+		"aaf_pcm",
 	},
 	{
 		MSE_PACKETIZER_IEC61883_6,
-		MSE_PACKETIZER_NAME_STR_IEC61883_6,
+		"iec61883-6",
 	},
 	{
 		MSE_PACKETIZER_CVF_H264_D13,
-		MSE_PACKETIZER_NAME_STR_CVF_H264_D13,
+		"cvf_h264_d13",
 	},
 	{
 		MSE_PACKETIZER_CVF_H264,
-		MSE_PACKETIZER_NAME_STR_CVF_H264,
+		"cvf_h264",
 	},
 	{
 		MSE_PACKETIZER_CVF_MJPEG,
-		MSE_PACKETIZER_NAME_STR_CVF_MJPEG,
+		"cvf_mjpeg",
 	},
 	{
 		MSE_PACKETIZER_IEC61883_4,
-		MSE_PACKETIZER_NAME_STR_IEC61883_4,
+		"iec61883-4",
 	},
 };
 

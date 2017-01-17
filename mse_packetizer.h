@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2016 Renesas Electronics Corporation
+ Copyright (C) 2015-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -62,13 +62,86 @@
 #ifndef __MSE_PACKETIZER_H__
 #define __MSE_PACKETIZER_H__
 
-#define MSE_PACKETIZER_NAME_STR_AAF_PCM         "aaf_pcm"
-#define MSE_PACKETIZER_NAME_STR_IEC61883_6      "iec61883-6"
-#define MSE_PACKETIZER_NAME_STR_CVF_H264_D13    "cvf_h264_d13"
-#define MSE_PACKETIZER_NAME_STR_CVF_H264        "cvf_h264"
-#define MSE_PACKETIZER_NAME_STR_CVF_MJPEG       "cvf_mjpeg"
-#define MSE_PACKETIZER_NAME_STR_CRF_TIMESTAMP   "crf_timestamp"
-#define MSE_PACKETIZER_NAME_STR_IEC61883_4      "iec61883-4"
+/**
+ * @brief packetizer status
+ */
+enum MSE_PACKETIZE_STATUS  {
+	MSE_PACKETIZE_STATUS_CONTINUE,
+	MSE_PACKETIZE_STATUS_COMPLETE,
+	MSE_PACKETIZE_STATUS_MAY_COMPLETE,
+	MSE_PACKETIZE_STATUS_NOT_ENOUGH,
+};
+
+/**
+ * @brief audio stream information
+ */
+struct mse_audio_info {
+	int avtp_packet_size;
+	int sample_per_packet;
+	int frame_interval_time;
+};
+
+static inline int mse_get_bit_depth(enum MSE_AUDIO_BIT bit_depth)
+{
+	switch (bit_depth) {
+	case MSE_AUDIO_BIT_16:
+		return 16;
+	case MSE_AUDIO_BIT_18:
+		return 18;
+	case MSE_AUDIO_BIT_20:
+		return 20;
+	case MSE_AUDIO_BIT_24:
+		return 24;
+	case MSE_AUDIO_BIT_32:
+		return 32;
+	default:
+		return 0;
+	}
+}
+
+/**
+ * @brief registered operations for packetizer
+ */
+struct mse_packetizer_ops {
+	/** @brief open function pointer */
+	int (*open)(void);
+	/** @brief release function pointer */
+	int (*release)(int index);
+	/** @brief init function pointer */
+	int (*init)(int index);
+	/** @brief set network config function pointer */
+	int (*set_network_config)(int index,
+				  struct mse_network_config *config);
+	/** @brief set audio config function pointer */
+	int (*set_audio_config)(int index, struct mse_audio_config *config);
+	/** @brief set video config function pointer */
+	int (*set_video_config)(int index, struct mse_video_config *config);
+	/** @brief set mpeg2ts config function pointer */
+	int (*set_mpeg2ts_config)(int index,
+				  struct mse_mpeg2ts_config *config);
+	/** @brief get audio info function pointer */
+	int (*get_audio_info)(int index, struct mse_audio_info *info);
+
+	/** @brief calc_cbs function pointer */
+	int (*calc_cbs)(int index, struct mse_cbsparam *cbs);
+
+	/** @brief packetize function pointer */
+	int (*packetize)(int index,
+			 void *packet,
+			 size_t *packet_size,
+			 void *buffer,
+			 size_t buffer_size,
+			 size_t *buffer_processed,
+			 unsigned int *timestamp);
+	/** @brief depacketize function pointer */
+	int (*depacketize)(int index,
+			   void *buffer,
+			   size_t buffer_size,
+			   size_t *buffer_processed,
+			   unsigned int *timestamp,
+			   void *packet,
+			   size_t packet_size);
+};
 
 /* Audio Packetizer for AAF */
 extern struct mse_packetizer_ops mse_packetizer_aaf_ops;
@@ -85,7 +158,8 @@ extern struct mse_packetizer_ops mse_packetizer_crf_tstamp_audio_ops;
 /* Video Packetizer for IEC61883-4 */
 extern struct mse_packetizer_ops mse_packetizer_iec61883_4_ops;
 
-int mse_packetizer_init(void);
-void mse_packetizer_exit(void);
+enum MSE_STREAM_TYPE mse_packetizer_get_type(enum MSE_PACKETIZER id);
+struct mse_packetizer_ops *mse_packetizer_get_ops(enum MSE_PACKETIZER id);
+bool mse_packetizer_is_valid(enum MSE_PACKETIZER id);
 
 #endif /* __MSE_PACKETIZER_H__ */

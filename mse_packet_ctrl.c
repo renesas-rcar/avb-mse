@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2016 Renesas Electronics Corporation
+ Copyright (C) 2015-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -70,9 +70,8 @@
 #include <linux/if_vlan.h>
 
 #include "ravb_mse_kernel.h"
-#include "mse_core.h"
-#include "mse_packet_ctrl.h"
 #include "mse_packetizer.h"
+#include "mse_packet_ctrl.h"
 #include "avtp.h"
 
 #define MSE_DMA_BUF_RECEIVE_SIZE 10

@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2016 Renesas Electronics Corporation
+ Copyright (C) 2016-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -70,13 +70,10 @@
 #include <linux/ptp_clock.h>
 
 #include "ravb_mse_kernel.h"
-#include "mse_core.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
 
 #define SEQNUM_INIT             (-1)
-
-#define MSE_PACKETIZER_MAX      (10)
 
 #define NSEC_SCALE              (1000000000ul)
 #define BYTE_TO_BIT             (8)
@@ -113,7 +110,7 @@ struct crf_packetizer {
 	struct mse_audio_config   crf_audio_config;
 };
 
-struct crf_packetizer crf_packetizer_table[MSE_PACKETIZER_MAX];
+struct crf_packetizer crf_packetizer_table[MSE_INSTANCE_MAX];
 
 static int mse_packetizer_crf_audio_open(void)
 {
@@ -203,7 +200,7 @@ static int mse_packetizer_crf_audio_header_build(void *dst,
 	set_ieee8021q_ethtype(dst, ETH_P_1722);
 
 	/* 1722 header update + payload */
-	mse_make_streamid(streamid, param->source_addr, param->uniqueid);
+	avtp_make_streamid(streamid, param->source_addr, param->uniqueid);
 
 	avtp_copy_crf_template(dst);
 

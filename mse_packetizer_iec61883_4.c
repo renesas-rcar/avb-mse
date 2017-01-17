@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2016 Renesas Electronics Corporation
+ Copyright (C) 2016-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -70,7 +70,6 @@
 #include <linux/math64.h>
 
 #include "ravb_mse_kernel.h"
-#include "mse_core.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
 
@@ -80,8 +79,6 @@
 
 #define AVTP_SOURCE_PACKET_SIZE (4 + 188) /* timestamp + TSP */
 #define TRANSMIT_RATE_BASE      (1000000)
-
-#define MSE_PACKETIZER_MAX      (10)
 
 #define MSE_TS_PACKET_SIZE      (188)
 #define MSE_TIMESTAMP_SIZE      (4)
@@ -119,7 +116,7 @@ struct iec61883_4_packetizer {
 	struct mse_mpeg2ts_config mpeg2ts_config;
 };
 
-struct iec61883_4_packetizer iec61883_4_packetizer_table[MSE_PACKETIZER_MAX];
+struct iec61883_4_packetizer iec61883_4_packetizer_table[MSE_INSTANCE_MAX];
 
 static int mse_packetizer_iec61883_4_open(void)
 {
@@ -222,7 +219,7 @@ static int mse_packetizer_iec61883_4_header_build(
 	len = param->payload_size;
 
 	/* 1722 header update + payload */
-	mse_make_streamid(streamid, param->source_addr, param->uniqueid);
+	avtp_make_streamid(streamid, param->source_addr, param->uniqueid);
 
 	avtp_copy_iec61883_4_template(dst);
 
@@ -538,7 +535,6 @@ static int mse_packetizer_iec61883_4_depacketize(int index,
 }
 
 struct mse_packetizer_ops mse_packetizer_iec61883_4_ops = {
-	.id = MSE_PACKETIZER_IEC61883_4,
 	.open = mse_packetizer_iec61883_4_open,
 	.release = mse_packetizer_iec61883_4_release,
 	.init = mse_packetizer_iec61883_4_packet_init,

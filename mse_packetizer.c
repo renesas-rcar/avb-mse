@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2016 Renesas Electronics Corporation
+ Copyright (C) 2015-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -63,46 +63,65 @@
 #include <linux/kernel.h>
 
 #include "ravb_mse_kernel.h"
-#include "mse_core.h"
 #include "mse_packetizer.h"
 
-/* init function array */
-static struct {
-	int index;
+/* MSE packetizer function table */
+struct mse_packetizer_ops_table {
+	/** @brief stream type of packetizer */
+	enum MSE_STREAM_TYPE type;
+	/** @brief function array of packetizer */
 	struct mse_packetizer_ops *ops;
-} mse_packetizer_ops_table[] = {
-	{ -1, &mse_packetizer_aaf_ops },
-	{ -1, &mse_packetizer_iec61883_6_ops },
-	{ -1, &mse_packetizer_cvf_h264_ops },
-	{ -1, &mse_packetizer_cvf_h264_d13_ops },
-	{ -1, &mse_packetizer_cvf_mjpeg_ops },
-	{ -1, &mse_packetizer_iec61883_4_ops },
-	{ -1, NULL },
 };
 
-int mse_packetizer_init(void)
+static const struct mse_packetizer_ops_table
+packetizer_table[MSE_PACKETIZER_MAX] = {
+	[MSE_PACKETIZER_AAF_PCM] = {
+		MSE_STREAM_TYPE_AUDIO,
+		&mse_packetizer_aaf_ops
+	},
+	[MSE_PACKETIZER_IEC61883_6] = {
+		MSE_STREAM_TYPE_AUDIO,
+		&mse_packetizer_iec61883_6_ops
+	},
+	[MSE_PACKETIZER_CVF_H264] = {
+		MSE_STREAM_TYPE_VIDEO,
+		&mse_packetizer_cvf_h264_ops
+	},
+	[MSE_PACKETIZER_CVF_H264_D13] = {
+		MSE_STREAM_TYPE_VIDEO,
+		&mse_packetizer_cvf_h264_d13_ops
+	},
+	[MSE_PACKETIZER_CVF_MJPEG] = {
+		MSE_STREAM_TYPE_VIDEO,
+		&mse_packetizer_cvf_mjpeg_ops
+	},
+	[MSE_PACKETIZER_IEC61883_4] = {
+		MSE_STREAM_TYPE_MPEG2TS,
+		&mse_packetizer_iec61883_4_ops
+	},
+};
+
+enum MSE_STREAM_TYPE mse_packetizer_get_type(enum MSE_PACKETIZER id)
 {
-	int i, index;
+	enum MSE_STREAM_TYPE type = -1;
 
-	for (i = 0; mse_packetizer_ops_table[i].ops != NULL; i++) {
-		index = mse_register_packetizer(mse_packetizer_ops_table[i].ops);
-		if (index < 0) {
-			mse_err("cannot register\n");
-			return -EPERM;
-		}
-		mse_packetizer_ops_table[i].index = index;
-	}
+	if (id < MSE_PACKETIZER_MAX)
+		type = packetizer_table[id].type;
 
-	return 0;
+	return type;
 }
 
-void mse_packetizer_exit(void)
+struct mse_packetizer_ops *mse_packetizer_get_ops(enum MSE_PACKETIZER id)
 {
-	int i, index;
+	struct mse_packetizer_ops *ops = NULL;
 
-	for (i = 0; mse_packetizer_ops_table[i].ops != NULL; i++) {
-		index = mse_packetizer_ops_table[i].index;
-		if (index != -1)
-			mse_unregister_packetizer(index);
-	}
+	if (id < MSE_PACKETIZER_MAX)
+		ops = packetizer_table[id].ops;
+
+	return ops;
+}
+
+bool mse_packetizer_is_valid(enum MSE_PACKETIZER id)
+{
+	return mse_packetizer_get_ops(id) ? true : false;
 }

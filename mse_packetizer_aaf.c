@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2016 Renesas Electronics Corporation
+ Copyright (C) 2015-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -70,7 +70,6 @@
 #include <linux/of_device.h>
 
 #include "ravb_mse_kernel.h"
-#include "mse_core.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
 
@@ -86,8 +85,6 @@
 
 #define CLASS_INTERVAL_FRAMES   (8000) /* class A */
 #define INTERVAL_FRAMES         (1)
-
-#define MSE_PACKETIZER_MAX      (10)
 
 struct avtp_aaf_param {
 	char dest_addr[MSE_MAC_LEN_MAX];
@@ -127,7 +124,7 @@ struct aaf_packetizer {
 	struct mse_audio_config audio_config;
 };
 
-struct aaf_packetizer aaf_packetizer_table[MSE_PACKETIZER_MAX];
+struct aaf_packetizer aaf_packetizer_table[MSE_INSTANCE_MAX];
 
 static enum AVTP_AAF_FORMAT get_aaf_format(enum MSE_AUDIO_BIT bit_depth)
 {
@@ -366,7 +363,7 @@ static int mse_packetizer_aaf_header_build(void *dst,
 	len = (param->samples_per_frame * param->channels * sizeof(u16));
 
 	/* 1722 header update + payload */
-	mse_make_streamid(streamid, param->source_addr, param->uniqueid);
+	avtp_make_streamid(streamid, param->source_addr, param->uniqueid);
 
 	avtp_copy_aaf_pcm_template(dst);
 	avtp_set_stream_id(dst, streamid);
@@ -854,7 +851,6 @@ static int mse_packetizer_aaf_depacketize(int index,
 }
 
 struct mse_packetizer_ops mse_packetizer_aaf_ops = {
-	.id = MSE_PACKETIZER_AAF_PCM,
 	.open = mse_packetizer_aaf_open,
 	.release = mse_packetizer_aaf_release,
 	.init = mse_packetizer_aaf_packet_init,

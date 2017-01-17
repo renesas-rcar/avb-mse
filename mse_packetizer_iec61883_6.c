@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2016 Renesas Electronics Corporation
+ Copyright (C) 2015-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -69,7 +69,6 @@
 #include <uapi/linux/if_ether.h>
 
 #include "ravb_mse_kernel.h"
-#include "mse_core.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
 
@@ -86,8 +85,6 @@
 #define CLASS_INTERVAL_FRAMES   (8000) /* class A */
 #define INTERVAL_FRAMES         (1)
 #define AM824_DATA_SIZE         (sizeof(u32))
-
-#define MSE_PACKETIZER_MAX      (10)
 
 struct avtp_iec61883_6_param {
 	char dest_addr[MSE_MAC_LEN_MAX];
@@ -125,7 +122,7 @@ struct iec61883_6_packetizer {
 	struct mse_audio_config audio_config;
 };
 
-struct iec61883_6_packetizer iec61883_6_packetizer_table[MSE_PACKETIZER_MAX];
+struct iec61883_6_packetizer iec61883_6_packetizer_table[MSE_INSTANCE_MAX];
 
 static int check_receive_packet(int index, int channels, void *packet)
 {
@@ -311,7 +308,7 @@ static int mse_packetizer_iec61883_6_header_build(
 	len = (param->samples_per_frame * param->channels * sizeof(u32));
 
 	/* 1722 header update + payload */
-	mse_make_streamid(streamid, param->source_addr, param->uniqueid);
+	avtp_make_streamid(streamid, param->source_addr, param->uniqueid);
 
 	avtp_copy_iec61883_6_template(dst);
 	avtp_set_stream_id(dst, streamid);
@@ -850,7 +847,6 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 }
 
 struct mse_packetizer_ops mse_packetizer_iec61883_6_ops = {
-	.id = MSE_PACKETIZER_IEC61883_6,
 	.open = mse_packetizer_iec61883_6_open,
 	.release = mse_packetizer_iec61883_6_release,
 	.init = mse_packetizer_iec61883_6_packet_init,
