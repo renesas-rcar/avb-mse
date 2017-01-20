@@ -72,9 +72,6 @@
 #include "mse_packetizer.h"
 #include "avtp.h"
 
-/* configure send single NAL unit packet instead of FU-A */
-#define CONFIG_CVF_H264_SEND_SINGLE_NAL     (true)
-
 #define NSEC                   (1000000000L)
 #define SEQNUM_INIT            (-1)
 
@@ -144,7 +141,6 @@ struct cvf_h264_packetizer {
 	bool used_f;
 	bool is_vcl;
 	bool f_start_code;
-	bool f_single_nal;
 
 	int send_seq_num;
 	int old_seq_num;
@@ -320,7 +316,6 @@ static int mse_packetizer_cvf_h264_set_video_config(
 		mse_err("unknown format=%08x\n", config->format);
 		return -EPERM;
 	}
-	h264->f_single_nal = CONFIG_CVF_H264_SEND_SINGLE_NAL;
 
 	data_offset = h264->header_size + FU_HEADER_LEN;
 	bytes_per_frame = h264->video_config.bytes_per_frame;
@@ -474,16 +469,18 @@ static int mse_packetizer_cvf_h264_packetize(int index,
 			h264->is_vcl = false;
 			break;
 		}
-		if (h264->f_single_nal &&
-		    (h264->next_nal - cur_nal < h264->payload_max)) {
+
+		h264->fu_indicator =
+				(*cur_nal & FU_I_F_NRI_MASK) | NALU_TYPE_FU_A;
+		h264->fu_header = FU_H_S_BIT | (*cur_nal & NALU_TYPE_MASK);
+
+#if defined(CONFIG_MSE_PACKETIZER_CVF_H264_SINGLE_NAL)
+		if (h264->next_nal - cur_nal < h264->payload_max) {
 			h264->fu_indicator =
 				*cur_nal & (FU_I_F_NRI_MASK | NALU_TYPE_MASK);
-		} else {
-			h264->fu_indicator =
-				(*cur_nal & FU_I_F_NRI_MASK) | NALU_TYPE_FU_A;
-			h264->fu_header =
-				FU_H_S_BIT | (*cur_nal & NALU_TYPE_MASK);
 		}
+#endif
+
 		cur_nal++;
 		(*buffer_processed) += sizeof(u32) + 1;
 	} else {

@@ -75,14 +75,19 @@ struct mse_packetizer_ops_table {
 
 static const struct mse_packetizer_ops_table
 packetizer_table[MSE_PACKETIZER_MAX] = {
+#if defined(CONFIG_MSE_PACKETIZER_AAF)
 	[MSE_PACKETIZER_AAF_PCM] = {
 		MSE_STREAM_TYPE_AUDIO,
 		&mse_packetizer_aaf_ops
 	},
+#endif
+#if defined(CONFIG_MSE_PACKETIZER_IEC61883_6)
 	[MSE_PACKETIZER_IEC61883_6] = {
 		MSE_STREAM_TYPE_AUDIO,
 		&mse_packetizer_iec61883_6_ops
 	},
+#endif
+#if defined(CONFIG_MSE_PACKETIZER_CVF_H264)
 	[MSE_PACKETIZER_CVF_H264] = {
 		MSE_STREAM_TYPE_VIDEO,
 		&mse_packetizer_cvf_h264_ops
@@ -91,14 +96,19 @@ packetizer_table[MSE_PACKETIZER_MAX] = {
 		MSE_STREAM_TYPE_VIDEO,
 		&mse_packetizer_cvf_h264_d13_ops
 	},
+#endif
+#if defined(CONFIG_MSE_PACKETIZER_CVF_MJPEG)
 	[MSE_PACKETIZER_CVF_MJPEG] = {
 		MSE_STREAM_TYPE_VIDEO,
 		&mse_packetizer_cvf_mjpeg_ops
 	},
+#endif
+#if defined(CONFIG_MSE_PACKETIZER_IEC61883_4)
 	[MSE_PACKETIZER_IEC61883_4] = {
 		MSE_STREAM_TYPE_MPEG2TS,
 		&mse_packetizer_iec61883_4_ops
 	},
+#endif
 };
 
 enum MSE_STREAM_TYPE mse_packetizer_get_type(enum MSE_PACKETIZER id)

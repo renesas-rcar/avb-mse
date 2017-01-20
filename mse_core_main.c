@@ -2799,7 +2799,7 @@ int mse_open(int index_media, bool tx)
 	struct mch_ops *m_ops = NULL;
 	unsigned long flags;
 	struct mse_network_device *network_device;
-	struct mse_packetizer *config_packetizer;
+	enum MSE_PACKETIZER packetizer_id;
 	char *dev_name;
 
 	if ((index_media < 0) || (index_media >= MSE_ADAPTER_MEDIA_MAX)) {
@@ -2860,18 +2860,24 @@ int mse_open(int index_media, bool tx)
 
 	mse_debug("network adapter index=%d name=%s\n", i, network->name);
 
-	/* get config packetizer */
-	config_packetizer = &adapter->config.packetizer;
+	/* get packetizer id */
+	packetizer_id = adapter->config.packetizer.packetizer;
+	if (!mse_packetizer_is_valid(packetizer_id)) {
+		mse_err("packetizer is not valid\n");
+		err = -EINVAL;
+
+		goto error_packetizer_is_not_valid;
+	}
 
 	/* if mjpeg input */
-	if (config_packetizer->packetizer == MSE_PACKETIZER_CVF_MJPEG && tx) {
+	if (packetizer_id == MSE_PACKETIZER_CVF_MJPEG && tx) {
 		mse_debug("use mjpeg\n");
 		instance->use_temp_video_buffer_mjpeg = true;
 		instance->f_first_vframe = true;
 	}
 
 	/* if mpeg2-ts input */
-	if (config_packetizer->packetizer == MSE_PACKETIZER_IEC61883_4 && tx) {
+	if (packetizer_id == MSE_PACKETIZER_IEC61883_4 && tx) {
 		mse_debug("use mpeg2ts\n");
 		instance->use_temp_video_buffer_mpeg2ts = true;
 		instance->f_first_vframe = true;
@@ -2879,9 +2885,9 @@ int mse_open(int index_media, bool tx)
 	}
 
 	/* packetizer for configuration value */
-	packetizer = mse_packetizer_get_ops(config_packetizer->packetizer);
+	packetizer = mse_packetizer_get_ops(packetizer_id);
 
-	mse_debug("packetizer index=%d\n", config_packetizer->packetizer);
+	mse_debug("packetizer id=%d\n", packetizer_id);
 
 	/* ptp open */
 	instance->ptp_index = mse_ptp_get_first_index();
@@ -3103,6 +3109,7 @@ error_cannot_open_network_adapter:
 
 error_cannot_open_ptp:
 error_network_adapter_not_found:
+error_packetizer_is_not_valid:
 	instance->used_f = false;
 	adapter->ro_config_f = false;
 

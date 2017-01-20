@@ -26,6 +26,61 @@ config MSE_CORE
 	  - Sysfs I/F for configuration by userland process.
 	  - AVTP Packetizer/De-Packetizer.
 
+config MSE_PACKETIZER_AAF
+	bool "MSE Packetizer AAF"
+	depends on MSE_CORE
+	default y
+	---help---
+	  This option enable packetizer functions in MSE.
+	  Say Y here to enable AVTP Packetizer/De-Packetizer AAF.
+	  Say N if unsure.
+
+config MSE_PACKETIZER_IEC61883_4
+	bool "MSE Packetizer IEC61883_4"
+	depends on MSE_CORE
+	default y
+	---help---
+	  This option enable packetizer functions in MSE.
+	  Say Y here to enable AVTP Packetizer/De-Packetizer IEC61883_4.
+	  Say N if unsure.
+
+config MSE_PACKETIZER_IEC61883_6
+	bool "MSE Core Packetizer IEC61883_6"
+	depends on MSE_CORE
+	default y
+	---help---
+	  This option enable packetizer functions in MSE.
+	  Say Y here to enable AVTP Packetizer/De-Packetizer IEC61883_6.
+	  Say N if unsure.
+
+config MSE_PACKETIZER_CVF_H264
+	bool "MSE Core Packetizer CVF_H264"
+	depends on MSE_CORE
+	default y
+	---help---
+	  This option enable packetizer functions in MSE.
+	  Say Y here to enable AVTP Packetizer/De-Packetizer CVF_H264.
+	  Say N if unsure.
+
+config MSE_PACKETIZER_CVF_H264_SINGLE_NAL
+	bool "MSE Core Packetizer CVF_H264 Single NAL format"
+	depends on MSE_CORE
+	depends on MSE_PACKETIZER_CVF_H264
+	default y
+	---help---
+	  This option enable packetizer functions in MSE.
+	  Say Y here to enable AVTP Packetizer CVF_H264 Single NAL format.
+	  Say N if unsure.
+
+config MSE_PACKETIZER_CVF_MJPEG
+	bool "MSE Core Packetizer CVF_MJPEG"
+	depends on MSE_CORE
+	default y
+	---help---
+	  This option enable packetizer functions in MSE.
+	  Say Y here to enable AVTP Packetizer/De-Packetizer CVF_MJPEG.
+	  Say N if unsure.
+
 config MSE_ADAPTER_EAVB
 	tristate "MSE EAVB Adapter"
 	depends on MSE_CORE
