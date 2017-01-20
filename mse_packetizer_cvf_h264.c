@@ -690,7 +690,7 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 		data_len += fu_size;
 
 		pic_end = check_pic_end(h264, buf, nalu_type);
-		set_nal_header(h264, buf, fu_size);
+		set_nal_header(h264, buf, data_len);
 	} else {
 		mse_err("unkonwon nal unit = %02x\n",
 			fu_indicator & NALU_TYPE_MASK);
