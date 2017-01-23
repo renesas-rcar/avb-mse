@@ -62,8 +62,11 @@
 #ifndef __MSE_SYSFS_H__
 #define __MSE_SYSFS_H__
 
-extern const struct attribute_group *mse_attr_groups_audio[];
-extern const struct attribute_group *mse_attr_groups_video[];
-extern const struct attribute_group *mse_attr_groups_mpeg2ts[];
+#if defined(CONFIG_MSE_SYSFS)
+void mse_sysfs_set_device_groups(struct device *dev, enum MSE_STREAM_TYPE type);
+#else
+static inline void
+mse_sysfs_set_device_groups(struct device *dev, enum MSE_STREAM_TYPE type) {}
+#endif
 
 #endif /* __MSE_SYSFS_H__ */

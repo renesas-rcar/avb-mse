@@ -1731,3 +1731,13 @@ const struct attribute_group *mse_attr_groups_mpeg2ts[] = {
 	&mse_attr_group_delay_time,
 	NULL,
 };
+
+void mse_sysfs_set_device_groups(struct device *dev, enum MSE_STREAM_TYPE type)
+{
+	if (type == MSE_STREAM_TYPE_AUDIO)
+		dev->groups = mse_attr_groups_audio;
+	else if (type == MSE_STREAM_TYPE_VIDEO)
+		dev->groups = mse_attr_groups_video;
+	else if (type == MSE_STREAM_TYPE_MPEG2TS)
+		dev->groups = mse_attr_groups_mpeg2ts;
+}

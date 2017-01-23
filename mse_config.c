@@ -75,6 +75,7 @@
 #include "mse_config.h"
 #include "mse_packetizer.h"
 
+/* external functions for configuration */
 int mse_config_get_info(int index, struct mse_info *data)
 {
 	struct mse_config *config;
@@ -816,3 +817,160 @@ int mse_config_get_delay_time(int index, struct mse_delay_time *data)
 	return 0;
 }
 
+/* default config parameters */
+static struct mse_config mse_config_default_audio = {
+	.info = {
+		.device = "",
+		.type = MSE_STREAM_TYPE_AUDIO,
+	},
+	.network_device = {
+		.module_name = MSE_CONFIG_DEFAULT_MODULE_NAME,
+		.device_name_tx = MSE_CONFIG_DEFAULT_DEVICE_NAME_TX,
+		.device_name_rx = MSE_CONFIG_DEFAULT_DEVICE_NAME_RX,
+		.device_name_tx_crf = MSE_CONFIG_DEFAULT_DEVICE_NAME_TX,
+		.device_name_rx_crf = MSE_CONFIG_DEFAULT_DEVICE_NAME_RX,
+	},
+	.packetizer = {
+		.packetizer = MSE_PACKETIZER_AAF_PCM,
+	},
+	.avtp_tx_param = {
+		.dst_mac = {0x91, 0xe0, 0xf0, 0x00, 0x0e, 0x80},
+		.src_mac = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00},
+		.vlan = 2,
+		.priority = 3,
+		.uniqueid = 1,
+	},
+	.avtp_rx_param = {
+		.streamid = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00, 0x00, 0x01},
+	},
+	.media_audio_config = {
+		.samples_per_frame = 0,
+		.crf_type = MSE_CRF_TYPE_NOT_USE,
+	},
+	.ptp_config = {
+		.type = MSE_PTP_TYPE_CURRENT_TIME,
+		.deviceid = 0,
+		.capture_ch = 2,
+		.capture_freq = 300,
+		.recovery_capture_freq = MSE_RECOVERY_CAPTURE_FREQ_FIXED,
+	},
+	.mch_config = {
+		.enable = false,
+	},
+	.avtp_tx_param_crf = {
+		.dst_mac = {0x91, 0xe0, 0xf0, 0x00, 0x0e, 0x80},
+		.src_mac = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00},
+		.vlan = 2,
+		.priority = 3,
+		.uniqueid = 1,
+	},
+	.avtp_rx_param_crf = {
+		.streamid = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00, 0x00, 0x01},
+	},
+	.delay_time = {
+		.max_transit_time_ns = 2000000,
+		.tx_delay_time_ns = 2000000,
+		.rx_delay_time_ns = 2000000,
+	},
+};
+
+static struct mse_config mse_config_default_video = {
+	.info = {
+		.device = "",
+		.type = MSE_STREAM_TYPE_VIDEO,
+	},
+	.network_device = {
+		.module_name = MSE_CONFIG_DEFAULT_MODULE_NAME,
+		.device_name_tx = MSE_CONFIG_DEFAULT_DEVICE_NAME_TX,
+		.device_name_rx = MSE_CONFIG_DEFAULT_DEVICE_NAME_RX,
+	},
+	.packetizer = {
+		.packetizer = MSE_PACKETIZER_CVF_H264,
+	},
+	.avtp_tx_param = {
+		.dst_mac = {0x91, 0xe0, 0xf0, 0x00, 0x0e, 0x80},
+		.src_mac = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00},
+		.vlan = 2,
+		.priority = 3,
+		.uniqueid = 1,
+	},
+	.avtp_rx_param = {
+		.streamid = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00, 0x00, 0x01},
+	},
+	.media_video_config = {
+		.bytes_per_frame = 0,
+		.fps_denominator = 0,
+		.fps_numerator = 0,
+		.bitrate = 50000000,
+	},
+	.ptp_config = {
+		.type = MSE_PTP_TYPE_CURRENT_TIME,
+		.deviceid = 0,
+	},
+	.delay_time = {
+		.max_transit_time_ns = 2000000,
+		.tx_delay_time_ns = 2000000,
+		.rx_delay_time_ns = 2000000,
+	},
+};
+
+static struct mse_config mse_config_default_mpeg2ts = {
+	.info = {
+		.device = "",
+		.type = MSE_STREAM_TYPE_MPEG2TS,
+	},
+	.network_device = {
+		.module_name = MSE_CONFIG_DEFAULT_MODULE_NAME,
+		.device_name_tx = MSE_CONFIG_DEFAULT_DEVICE_NAME_TX,
+		.device_name_rx = MSE_CONFIG_DEFAULT_DEVICE_NAME_RX,
+	},
+	.packetizer = {
+		.packetizer = MSE_PACKETIZER_IEC61883_4,
+	},
+	.avtp_tx_param = {
+		.dst_mac = {0x91, 0xe0, 0xf0, 0x00, 0x0e, 0x80},
+		.src_mac = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00},
+		.vlan = 2,
+		.priority = 3,
+		.uniqueid = 1,
+	},
+	.avtp_rx_param = {
+		.streamid = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00, 0x00, 0x01},
+	},
+	.media_mpeg2ts_config = {
+		.tspackets_per_frame = 7,
+		.bitrate = 50000000,
+		.pcr_pid = MSE_CONFIG_PCR_PID_MAX,
+	},
+	.ptp_config = {
+		.type = MSE_PTP_TYPE_CURRENT_TIME,
+		.deviceid = 0,
+	},
+	.delay_time = {
+		.max_transit_time_ns = 2000000,
+		.tx_delay_time_ns = 2000000,
+		.rx_delay_time_ns = 2000000,
+	},
+};
+
+/* config init */
+void mse_config_init(struct mse_config *config,
+		     enum MSE_STREAM_TYPE type,
+		     char *device_name)
+{
+	/* initialize config data */
+	if (type == MSE_STREAM_TYPE_AUDIO)
+		memcpy(config, &mse_config_default_audio,
+		       sizeof(*config));
+	else if (type == MSE_STREAM_TYPE_VIDEO)
+		memcpy(config, &mse_config_default_video,
+		       sizeof(*config));
+	else if (type == MSE_STREAM_TYPE_MPEG2TS)
+		memcpy(config, &mse_config_default_mpeg2ts,
+		       sizeof(*config));
+
+	spin_lock_init(&config->lock);
+
+	/* device name */
+	strncpy(config->info.device, device_name, MSE_NAME_LEN_MAX);
+}

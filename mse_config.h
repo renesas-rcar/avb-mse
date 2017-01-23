@@ -128,5 +128,8 @@ int mse_config_get_avtp_rx_param_crf(int index,
 				     struct mse_avtp_rx_param *data);
 int mse_config_set_delay_time(int index, struct mse_delay_time *data);
 int mse_config_get_delay_time(int index, struct mse_delay_time *data);
+void mse_config_init(struct mse_config *config,
+		     enum MSE_STREAM_TYPE type,
+		     char *device_name);
 
 #endif /* __MSE_CONFIG_H__ */

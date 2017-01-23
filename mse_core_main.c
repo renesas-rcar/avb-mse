@@ -133,7 +133,7 @@
 #define MPEG2TS_CLOCK_D         (100000)              /* 10^9(NSEC) / 10K */
 #define MPEG2TS_PCR90K_BITS     (33)
 #define MPEG2TS_PCR90K_INVALID  (BIT(MPEG2TS_PCR90K_BITS))
-#define MPEG2TS_PCR_PID_IGNORE  (0x2000)
+#define MPEG2TS_PCR_PID_IGNORE  (MSE_CONFIG_PCR_PID_MAX)
 
 /**
  * @brief main data for Adapter
@@ -401,143 +401,8 @@ static int major;
 module_param(major, int, 0440);
 
 /*
- * global parameters
+ * internal functions
  */
-static struct mse_config mse_config_default_audio = {
-	.info = {
-		.device = "",
-		.type = MSE_STREAM_TYPE_AUDIO,
-	},
-	.network_device = {
-		.module_name = MSE_CONFIG_DEFAULT_MODULE_NAME,
-		.device_name_tx = MSE_CONFIG_DEFAULT_DEVICE_NAME_TX,
-		.device_name_rx = MSE_CONFIG_DEFAULT_DEVICE_NAME_RX,
-		.device_name_tx_crf = MSE_CONFIG_DEFAULT_DEVICE_NAME_TX,
-		.device_name_rx_crf = MSE_CONFIG_DEFAULT_DEVICE_NAME_RX,
-	},
-	.packetizer = {
-		.packetizer = MSE_PACKETIZER_AAF_PCM,
-	},
-	.avtp_tx_param = {
-		.dst_mac = {0x91, 0xe0, 0xf0, 0x00, 0x0e, 0x80},
-		.src_mac = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00},
-		.vlan = 2,
-		.priority = 3,
-		.uniqueid = 1,
-	},
-	.avtp_rx_param = {
-		.streamid = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00, 0x00, 0x01},
-	},
-	.media_audio_config = {
-		.samples_per_frame = 0,
-		.crf_type = MSE_CRF_TYPE_NOT_USE,
-	},
-	.ptp_config = {
-		.type = MSE_PTP_TYPE_CURRENT_TIME,
-		.deviceid = 0,
-		.capture_ch = 2,
-		.capture_freq = 300,
-		.recovery_capture_freq = MSE_RECOVERY_CAPTURE_FREQ_FIXED,
-	},
-	.mch_config = {
-		.enable = false,
-	},
-	.avtp_tx_param_crf = {
-		.dst_mac = {0x91, 0xe0, 0xf0, 0x00, 0x0e, 0x80},
-		.src_mac = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00},
-		.vlan = 2,
-		.priority = 3,
-		.uniqueid = 1,
-	},
-	.avtp_rx_param_crf = {
-		.streamid = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00, 0x00, 0x01},
-	},
-	.delay_time = {
-		.max_transit_time_ns = 2000000,
-		.tx_delay_time_ns = 2000000,
-		.rx_delay_time_ns = 2000000,
-	},
-};
-
-static struct mse_config mse_config_default_video = {
-	.info = {
-		.device = "",
-		.type = MSE_STREAM_TYPE_VIDEO,
-	},
-	.network_device = {
-		.module_name = MSE_CONFIG_DEFAULT_MODULE_NAME,
-		.device_name_tx = MSE_CONFIG_DEFAULT_DEVICE_NAME_TX,
-		.device_name_rx = MSE_CONFIG_DEFAULT_DEVICE_NAME_RX,
-	},
-	.packetizer = {
-		.packetizer = MSE_PACKETIZER_CVF_H264,
-	},
-	.avtp_tx_param = {
-		.dst_mac = {0x91, 0xe0, 0xf0, 0x00, 0x0e, 0x80},
-		.src_mac = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00},
-		.vlan = 2,
-		.priority = 3,
-		.uniqueid = 1,
-	},
-	.avtp_rx_param = {
-		.streamid = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00, 0x00, 0x01},
-	},
-	.media_video_config = {
-		.bytes_per_frame = 0,
-		.fps_denominator = 0,
-		.fps_numerator = 0,
-		.bitrate = 50000000,
-	},
-	.ptp_config = {
-		.type = MSE_PTP_TYPE_CURRENT_TIME,
-		.deviceid = 0,
-	},
-	.delay_time = {
-		.max_transit_time_ns = 2000000,
-		.tx_delay_time_ns = 2000000,
-		.rx_delay_time_ns = 2000000,
-	},
-};
-
-static struct mse_config mse_config_default_mpeg2ts = {
-	.info = {
-		.device = "",
-		.type = MSE_STREAM_TYPE_MPEG2TS,
-	},
-	.network_device = {
-		.module_name = MSE_CONFIG_DEFAULT_MODULE_NAME,
-		.device_name_tx = MSE_CONFIG_DEFAULT_DEVICE_NAME_TX,
-		.device_name_rx = MSE_CONFIG_DEFAULT_DEVICE_NAME_RX,
-	},
-	.packetizer = {
-		.packetizer = MSE_PACKETIZER_IEC61883_4,
-	},
-	.avtp_tx_param = {
-		.dst_mac = {0x91, 0xe0, 0xf0, 0x00, 0x0e, 0x80},
-		.src_mac = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00},
-		.vlan = 2,
-		.priority = 3,
-		.uniqueid = 1,
-	},
-	.avtp_rx_param = {
-		.streamid = {0x76, 0x90, 0x50, 0x00, 0x00, 0x00, 0x00, 0x01},
-	},
-	.media_mpeg2ts_config = {
-		.tspackets_per_frame = 7,
-		.bitrate = 50000000,
-		.pcr_pid = MPEG2TS_PCR_PID_IGNORE,
-	},
-	.ptp_config = {
-		.type = MSE_PTP_TYPE_CURRENT_TIME,
-		.deviceid = 0,
-	},
-	.delay_time = {
-		.max_transit_time_ns = 2000000,
-		.tx_delay_time_ns = 2000000,
-		.rx_delay_time_ns = 2000000,
-	},
-};
-
 static bool compare_pcr(u64 a, u64 b)
 {
 	u64 diff;
@@ -546,38 +411,22 @@ static bool compare_pcr(u64 a, u64 b)
 	return (diff < BIT(MPEG2TS_PCR90K_BITS - 1));
 }
 
+#if !(defined(CONFIG_MSE_SYSFS) || defined(CONFIG_MSE_IOCTL))
+static inline int mse_create_config_device(int index_media) { return 0; }
+static inline int mse_delete_config_device(int index_media) { return 0; }
+#else
 static void mse_device_release(struct device *dev)
 {
 	mse_debug("do noting\n");
 }
 
-static int mse_create_config_device(int index_media, char *device_name)
+static int mse_create_config_device(int index_media)
 {
 	struct device *device;
-	const struct attribute_group **groups;
 	struct mse_adapter *adapter = &mse->media_table[index_media];
 	int err;
 
-	mse_debug("%s\n", device_name);
-
-	/* initialize data */
-	if (IS_MSE_TYPE_AUDIO(adapter->type)) {
-		memcpy(&adapter->config, &mse_config_default_audio,
-		       sizeof(adapter->config));
-		groups = mse_attr_groups_audio;
-	} else if (IS_MSE_TYPE_VIDEO(adapter->type)) {
-		memcpy(&adapter->config, &mse_config_default_video,
-		       sizeof(adapter->config));
-		groups = mse_attr_groups_video;
-	} else {
-		memcpy(&adapter->config, &mse_config_default_mpeg2ts,
-		       sizeof(adapter->config));
-		groups = mse_attr_groups_mpeg2ts;
-	}
-	spin_lock_init(&adapter->config.lock);
-
-	/* device name */
-	strncpy(adapter->config.info.device, device_name, MSE_NAME_LEN_MAX);
+	mse_debug("index=%d\n", index_media);
 
 	err = mse_ioctl_register(index_media);
 	if (err < 0)
@@ -587,8 +436,9 @@ static int mse_create_config_device(int index_media, char *device_name)
 	device = &adapter->device;
 	device->devt = MKDEV(major, index_media);
 	device->class = mse->class;
-	device->groups = groups;
 	device->release = mse_device_release;
+
+	mse_sysfs_set_device_groups(device, adapter->config.info.type);
 	dev_set_name(device, "mse%d", index_media);
 
 	err = device_register(device);
@@ -617,6 +467,7 @@ static int mse_delete_config_device(int index_media)
 
 	return 0;
 }
+#endif
 
 static int mse_get_default_config(int index, struct mse_instance *instance)
 {
@@ -2270,6 +2121,19 @@ static void mse_work_start_transmission(struct work_struct *work)
 	spin_unlock_irqrestore(&instance->lock_timer, flags);
 }
 
+static inline
+enum MSE_STREAM_TYPE mse_type_to_stream_type(enum MSE_TYPE type)
+{
+	if (IS_MSE_TYPE_AUDIO(type))
+		return MSE_STREAM_TYPE_AUDIO;
+	else if (IS_MSE_TYPE_VIDEO(type))
+		return MSE_STREAM_TYPE_VIDEO;
+	else if (IS_MSE_TYPE_MPEG2TS(type))
+		return MSE_STREAM_TYPE_MPEG2TS;
+	else
+		return -1;
+}
+
 /* External function for configuration */
 int mse_dev_to_index(struct device *dev)
 {
@@ -2295,7 +2159,7 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 			       char *name,
 			       char *device_name)
 {
-	int index, err;
+	int index;
 	unsigned long flags;
 
 	/* check argument */
@@ -2343,9 +2207,13 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 
 	spin_unlock_irqrestore(&mse->lock_tables, flags);
 
+	/* init config data */
+	mse_config_init(&mse->media_table[index].config,
+			mse_type_to_stream_type(type),
+			device_name);
+
 	/* create control device */
-	err = mse_create_config_device(index, device_name);
-	if (err < 0) {
+	if (mse_create_config_device(index) < 0) {
 		mse->media_table[index].used_f = false;
 		mse_err("%s is not registered\n", name);
 
@@ -3381,7 +3249,7 @@ EXPORT_SYMBOL(mse_unregister_ptp);
  */
 static int mse_probe(void)
 {
-	int i, err;
+	int i;
 
 	/* allocate device data */
 	mse = kzalloc(sizeof(*mse), GFP_KERNEL);
@@ -3402,14 +3270,16 @@ static int mse_probe(void)
 	/* W/A for cannot using DMA APIs */
 	of_dma_configure(&mse->pdev->dev, NULL);
 
+#if defined(CONFIG_MSE_SYSFS)
 	/* create class */
 	mse->class = class_create(THIS_MODULE, "ravb_mse");
 	if (IS_ERR(mse->class)) {
-		err = PTR_RET(mse->class);
+		int err = PTR_RET(mse->class);
 		mse_err("failed class_create() ret=%d\n", err);
 		kfree(mse);
 		return err;
 	}
+#endif
 
 	/* init ioctl device */
 	major = mse_ioctl_init(major, mse_instance_max);
@@ -3439,7 +3309,8 @@ static int mse_remove(void)
 	/* release ioctl device */
 	mse_ioctl_exit(major, mse_instance_max);
 	/* destroy class */
-	class_destroy(mse->class);
+	if (mse->class)
+		class_destroy(mse->class);
 	/* unregister platform device */
 	platform_device_unregister(mse->pdev);
 	/* release device data */
