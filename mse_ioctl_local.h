@@ -62,9 +62,16 @@
 #ifndef __MSE_IOCTL_LOCAL_H__
 #define __MSE_IOCTL_LOCAL_H__
 
+#if defined(CONFIG_MSE_IOCTL)
 int mse_ioctl_register(int index);
 int mse_ioctl_unregister(int index);
 int mse_ioctl_init(int major, int mse_instance_max);
 int mse_ioctl_exit(int major, int mse_instance_max);
+#else
+static inline int mse_ioctl_register(int index) { return 0; }
+static inline int mse_ioctl_unregister(int index) { return 0; }
+static inline int mse_ioctl_init(int major, int mse_instance_max) { return 0; }
+static inline int mse_ioctl_exit(int major, int mse_instance_max) { return 0; }
+#endif
 
 #endif /* __MSE_IOCTL_LOCAL_H__ */
