@@ -75,6 +75,12 @@
 #define mse_debug(fmt, ...) pr_debug("%s: "fmt, __func__, ## __VA_ARGS__)
 
 /**
+ * @brief Compare param function for MSE
+ *
+ */
+#define mse_compare_param_key(val, key) strncmp(val, key, MSE_NAME_LEN_MAX)
+
+/**
  * @brief Unresistered device index
  */
 #define MSE_INDEX_UNDEFINED	(-1)

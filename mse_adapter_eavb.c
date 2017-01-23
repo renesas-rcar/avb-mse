@@ -76,9 +76,6 @@
 
 #define MSE_EAVB_PACKET_LENGTH (1526)
 
-#define avb_compare_param_key(val, key) \
-	strncmp(val, key, MSE_NAME_LEN_MAX)
-
 struct mse_adapter_eavb {
 	bool used_f;
 	struct eavb_entry *entry;
@@ -127,7 +124,7 @@ static enum AVB_DEVNAME mse_adapter_eavb_set_devname(const char *val)
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(avb_devname_table); i++)
-		if (!avb_compare_param_key(val, avb_devname_table[i].key))
+		if (!mse_compare_param_key(val, avb_devname_table[i].key))
 			return avb_devname_table[i].value;
 
 	return -EINVAL;
