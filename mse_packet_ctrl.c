@@ -278,28 +278,30 @@ int mse_packet_ctrl_send_packet(int index,
 		return -EINVAL;
 	}
 
-	now_write_p = dma->write_p;
-	send_size = now_write_p - dma->read_p;
-	if (send_size < 0)	    /* wrap */
-		send_size += dma->size;
+	while (dma->write_p != dma->read_p) {
+		now_write_p = dma->write_p;
+		send_size = now_write_p - dma->read_p;
+		if (send_size < 0)	    /* wrap */
+			send_size += dma->size;
 
-	if (send_size <= 0)
-		return 0;
+		if (send_size <= 0)
+			return 0;
 
-	if (send_size > MSE_PACKET_COUNT_MAX)
-		return -EPERM;
+		if (send_size > MSE_PACKET_COUNT_MAX)
+			send_size = MSE_PACKET_COUNT_MAX;
 
-	/* send packets */
-	ret = ops->send(index, dma->packet_table, send_size);
-	if (ret < 0)
-		return -EPERM;
+		/* send packets */
+		ret = ops->send(index, dma->packet_table, send_size);
+		if (ret < 0)
+			return -EPERM;
 
-	new_read_p = (dma->read_p + ret) % dma->size;
+		new_read_p = (dma->read_p + ret) % dma->size;
 
-	mse_debug("%d packtets w=%d r=%d -> %d\n",
-		  ret, now_write_p, dma->read_p, new_read_p);
+		mse_debug("%d packtets w=%d r=%d -> %d\n",
+			  ret, now_write_p, dma->read_p, new_read_p);
 
-	dma->read_p = new_read_p;
+		dma->read_p = new_read_p;
+	}
 
 	return 0;
 }
