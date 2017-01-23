@@ -9,12 +9,16 @@ CONFIG_MSE_ADAPTER_ALSA ?= m
 CONFIG_MSE_ADAPTER_V4L2 ?= m
 CONFIG_MSE_ADAPTER_MCH ?= m
 
+CONFIG_MSE_IOCTL ?= y
+
 CONFIG_MSE_PACKETIZER_AAF ?= y
 CONFIG_MSE_PACKETIZER_IEC61883_4 ?= y
 CONFIG_MSE_PACKETIZER_IEC61883_6 ?= y
 CONFIG_MSE_PACKETIZER_CVF_H264 ?= y
 CONFIG_MSE_PACKETIZER_CVF_H264_SINGLE_NAL ?= y
 CONFIG_MSE_PACKETIZER_CVF_MJPEG ?= y
+
+ccflags-$(CONFIG_MSE_IOCTL) += -DCONFIG_MSE_IOCTL
 
 ccflags-$(CONFIG_MSE_PACKETIZER_AAF) += -DCONFIG_MSE_PACKETIZER_AAF
 ccflags-$(CONFIG_MSE_PACKETIZER_IEC61883_4) += -DCONFIG_MSE_PACKETIZER_IEC61883_4
@@ -34,11 +38,12 @@ mse_core-objs := mse_core_main.o \
                  mse_packet_ctrl.o \
                  mse_config.o \
                  mse_sysfs.o \
-                 mse_ioctl.o \
                  avtp.o \
                  mse_packetizer.o \
                  mse_packetizer_crf.o \
                  mse_ptp_dummy.o
+# configration interface
+mse_core-$(CONFIG_MSE_IOCTL) += mse_ioctl.o
 # packetizer objects
 mse_core-$(CONFIG_MSE_PACKETIZER_AAF) += mse_packetizer_aaf.o
 mse_core-$(CONFIG_MSE_PACKETIZER_IEC61883_4) += mse_packetizer_iec61883_4.o
