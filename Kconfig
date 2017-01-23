@@ -23,8 +23,17 @@ config MSE_CORE
 	  This option enable core functions in MSE.
 	  Core functions contains following features.
 	  - In kernel API for MSE Adapters.
-	  - Sysfs I/F for configuration by userland process.
+	  - Sysfs and ioct I/F for configuration by userland process.
 	  - AVTP Packetizer/De-Packetizer.
+
+config MSE_IOCTL
+	bool "MSE ioctl interface for configuration"
+	depends on MSE_CORE
+	default y
+	---help---
+	  This option enable ioctl interface for MSE.
+	  Say Y here to enable ioctl interface.
+	  Say N if unsure.
 
 config MSE_PACKETIZER_AAF
 	bool "MSE Packetizer AAF"
