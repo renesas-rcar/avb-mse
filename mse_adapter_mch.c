@@ -66,27 +66,9 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
+
 #include "ravb_mse_kernel.h"
-
-/* TODO: move to header */
-extern int mch_open(int *dev_id);
-extern int mch_close(int dev_id);
-extern int mch_send_timestamps(int dev_id,
-			       int time_rate_ns,
-			       int master_count,
-			       unsigned int master_timestamps[],
-			       int device_count,
-			       unsigned int device_timestamps[]);
-extern int mch_get_recovery_value(int dev_id, int *value);
-
-extern int mch_ptp_open(int *dev_id);
-extern int mch_ptp_close(int dev_id);
-extern int mch_ptp_get_time(int dev_id,
-			    struct ptp_clock_time *clock_time);
-extern int mch_ptp_get_timestamps(int dev_id,
-				  int ch,
-				  int *count,
-				  struct ptp_clock_time timestamps[]);
+#include "ravb_mch.h"
 
 static struct mch_ops mch_mse_ops = {
 	.open = mch_open,
