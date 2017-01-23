@@ -7,7 +7,7 @@ CONFIG_MSE_CORE ?= m
 CONFIG_MSE_ADAPTER_EAVB ?= m
 CONFIG_MSE_ADAPTER_ALSA ?= m
 CONFIG_MSE_ADAPTER_V4L2 ?= m
-CONFIG_MSE_ADAPTER_MCH ?= n
+CONFIG_MSE_ADAPTER_MCH ?= m
 
 CONFIG_MSE_PACKETIZER_AAF ?= y
 CONFIG_MSE_PACKETIZER_IEC61883_4 ?= y
@@ -24,9 +24,11 @@ ccflags-$(CONFIG_MSE_PACKETIZER_CVF_H264_SINGLE_NAL) += -DCONFIG_MSE_PACKETIZER_
 ccflags-$(CONFIG_MSE_PACKETIZER_CVF_MJPEG) += -DCONFIG_MSE_PACKETIZER_CVF_MJPEG
 endif
 
-INCSHARED ?= drivers/staging/avb-streaming
+INCSHARED ?= drivers/staging/avb-streaming \
+             drivers/staging/avb-mch
 
-ccflags-y += -I$(INCSHARED)
+comma := ,
+ccflags-y += $(addprefix -I,$(subst $(comma), ,$(INCSHARED)))
 
 mse_core-objs := mse_core_main.o \
                  mse_packet_ctrl.o \

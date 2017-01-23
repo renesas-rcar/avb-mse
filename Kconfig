@@ -111,7 +111,7 @@ config MSE_ADAPTER_MCH
 	tristate "MSE MCH Adapter"
 	depends on MSE_CORE
 	depends on MCH_CORE
-	default n
+	default m
 	---help---
 	  Renesas Ethernet AVB software.
 	  Support MSE Adapter for MCH.
