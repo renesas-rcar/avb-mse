@@ -688,6 +688,7 @@ static void mse_work_stream(struct work_struct *work)
 			if (instance->timer_delay == 0 ||
 			    instance->f_force_flush) {
 				instance->f_force_flush = false;
+				instance->f_trans_start = false;
 				instance->mse_completion(
 						instance->private_data, 0);
 			}
@@ -1381,6 +1382,7 @@ static void mse_work_depacketize(struct work_struct *work)
 				&instance->work_length);
 
 			if (ret < -1) {
+				instance->f_trans_start = false;
 				instance->mse_completion(
 						instance->private_data, ret);
 				break;
@@ -1414,6 +1416,11 @@ static void mse_work_depacketize(struct work_struct *work)
 
 	case MSE_TYPE_ADAPTER_VIDEO:
 	case MSE_TYPE_ADAPTER_MPEG2TS:
+		if (!instance->f_trans_start) {
+			instance->f_depacketizing = false;
+			return;
+		}
+
 		/* get AVTP packet payload */
 		ret = mse_packet_ctrl_take_out_packet(
 						instance->index_packetizer,
@@ -1434,6 +1441,7 @@ static void mse_work_depacketize(struct work_struct *work)
 
 		/* complete callback */
 		if (ret >= 0) {
+			instance->f_trans_start = false;
 			instance->mse_completion(instance->private_data, ret);
 			instance->work_length = 0;
 		} else {
@@ -1502,6 +1510,7 @@ static void mse_work_callback(struct work_struct *work)
 	}
 
 	/* complete callback anytime */
+	instance->f_trans_start = false;
 	instance->mse_completion(instance->private_data, 0);
 }
 
@@ -2084,6 +2093,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 			instance->state = MSE_STATE_EXECUTE;
 			instance->media_buffer = instance->temp_video_buffer;
 			instance->media_buffer_size = instance->parsed;
+			instance->f_trans_start = true;
 			instance->f_temp_video_buffer_rewind = true;
 		} else {
 			(*mse_completion)(instance->private_data, 0);
@@ -2116,9 +2126,11 @@ static void mse_work_start_transmission(struct work_struct *work)
 		}
 	}
 
-	spin_lock_irqsave(&instance->lock_timer, flags);
-	instance->timer_cnt++;
-	spin_unlock_irqrestore(&instance->lock_timer, flags);
+	if (!instance->f_force_flush) {
+		spin_lock_irqsave(&instance->lock_timer, flags);
+		instance->timer_cnt++;
+		spin_unlock_irqrestore(&instance->lock_timer, flags);
+	}
 }
 
 static inline
@@ -2721,8 +2733,8 @@ int mse_open(int index_media, bool tx)
 		mse_debug("use mpeg2ts\n");
 		instance->use_temp_video_buffer_mpeg2ts = true;
 		instance->f_first_vframe = true;
-		instance->f_force_flush = false;
 	}
+	instance->f_force_flush = false;
 
 	/* packetizer for configuration value */
 	packetizer = mse_packetizer_get_ops(packetizer_id);
