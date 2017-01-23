@@ -35,6 +35,15 @@ config MSE_IOCTL
 	  Say Y here to enable ioctl interface.
 	  Say N if unsure.
 
+config MSE_SYSFS
+	bool "MSE sysfs interface for configuration"
+	depends on MSE_CORE
+	default y
+	---help---
+	  This option enable sysfs interface for MSE.
+	  Say Y here to enable sysfs interface.
+	  Say N if unsure.
+
 config MSE_PACKETIZER_AAF
 	bool "MSE Packetizer AAF"
 	depends on MSE_CORE
