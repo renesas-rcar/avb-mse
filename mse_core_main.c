@@ -546,34 +546,6 @@ static bool compare_pcr(u64 a, u64 b)
 	return (diff < BIT(MPEG2TS_PCR90K_BITS - 1));
 }
 
-static int sysfs_name_cmp(char *defname, char *sysfsname)
-{
-	int ret = 0;
-
-	if (!defname || (*defname == '\0'))
-		return 1;
-	if (!sysfsname)
-		return 1;
-
-	while (*defname) {
-		if ((*sysfsname == '\0') || (*sysfsname == '\n')) {
-			ret = 1;
-			break;
-		}
-		if (*defname != *sysfsname) {
-			ret = 1;
-			break;
-		}
-		defname++;
-		sysfsname++;
-	}
-
-	if ((*sysfsname != '\0') && (*sysfsname != '\n'))
-		ret = 1;
-
-	return ret;
-}
-
 static void mse_device_release(struct device *dev)
 {
 	mse_debug("do noting\n");
@@ -2846,8 +2818,8 @@ int mse_open(int index_media, bool tx)
 		if (!network)
 			continue;
 
-		if (!sysfs_name_cmp(network->name,
-				    network_device->module_name))
+		if (!mse_compare_param_key(network_device->module_name,
+					   network->name))
 			break;
 	}
 
