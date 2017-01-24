@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2016 Renesas Electronics Corporation
+ Copyright (C) 2015-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -86,6 +86,8 @@ struct mse_adapter_eavb {
 	int entried, unentry;
 	int num_send;
 	struct ravb_streaming_kernel_if ravb;
+	enum AVB_DEVNAME device_id;
+	struct eavb_rxparam rxparam;
 	struct eavb_entry read_entry[MSE_EAVB_ADAPTER_ENTRY_MAX];
 };
 
@@ -115,6 +117,11 @@ static struct {
 	{ "avb_tx0", AVB_DEVNAME_TX0 },
 };
 
+static inline bool avb_device_is_tx(enum AVB_DEVNAME device_id)
+{
+	return device_id <= AVB_DEVNAME_TX1;
+}
+
 static enum AVB_DEVNAME mse_adapter_eavb_set_devname(const char *val)
 {
 	int i;
@@ -129,7 +136,7 @@ static enum AVB_DEVNAME mse_adapter_eavb_set_devname(const char *val)
 static int mse_adapter_eavb_open(char *name)
 {
 	int err, index;
-	int id;
+	int device_id;
 	struct mse_adapter_eavb *eavb;
 	static struct eavb_option option = {
 		.id = EAVB_OPTIONID_BLOCKMODE,
@@ -137,13 +144,13 @@ static int mse_adapter_eavb_open(char *name)
 	};
 
 	/* convert table string->id */
-	id = mse_adapter_eavb_set_devname(name);
-	if (id < 0) {
+	device_id = mse_adapter_eavb_set_devname(name);
+	if (device_id < 0) {
 		mse_err("error unknown dev=%s\n", name);
 		return -EPERM;
 	}
 
-	mse_debug("dev=%s(%d)\n", name, id);
+	mse_debug("dev=%s(%d)\n", name, device_id);
 
 	for (index = 0; index < ARRAY_SIZE(eavb_table) &&
 	     eavb_table[index].used_f; index++)
@@ -153,25 +160,40 @@ static int mse_adapter_eavb_open(char *name)
 		return -EPERM;
 
 	eavb = &eavb_table[index];
-	eavb->used_f = true;
 
-	err = ravb_streaming_open_stq_kernel(id, &eavb->ravb, 0);
+	err = ravb_streaming_open_stq_kernel(device_id, &eavb->ravb, 0);
 	if (err) {
 		mse_err("error open dev=%s code=%d\n", name, err);
 		return err;
 	}
 
 	err = eavb->ravb.set_option(eavb->ravb.handle, &option);
-	if (err)
-		mse_err("error option_kernel code=%d\n", err);
+	if (err) {
+		mse_err("error set_option code=%d\n", err);
+		ravb_streaming_release_stq_kernel(eavb->ravb.handle);
+		return err;
+	}
+
+	if (!avb_device_is_tx(device_id)) {
+		err = eavb->ravb.get_rxparam(eavb->ravb.handle, &eavb->rxparam);
+		if (err) {
+			mse_err("error get_rxparam code=%d\n", err);
+			ravb_streaming_release_stq_kernel(eavb->ravb.handle);
+			return err;
+		}
+	}
 
 	eavb->entry = kcalloc(MSE_EAVB_ADAPTER_ENTRY_MAX * 2,
 			      sizeof(struct eavb_entry),
 			      GFP_KERNEL);
-	if (!eavb->entry)
+	if (!eavb->entry) {
+		ravb_streaming_release_stq_kernel(eavb->ravb.handle);
 		return -ENOMEM;
+	}
 
 	eavb->num_entry = 0;
+	eavb->device_id = device_id;
+	eavb->used_f = true;
 
 	return index;
 }
@@ -191,12 +213,20 @@ static int mse_adapter_eavb_release(int index)
 
 	mse_debug("index=%d\n", index);
 
+	if (!avb_device_is_tx(eavb->device_id)) {
+		err = eavb->ravb.set_rxparam(eavb->ravb.handle, &eavb->rxparam);
+		if (err) {
+			mse_err("error set_rxparam code=%d\n", err);
+			return err;
+		}
+	}
+
 	err = ravb_streaming_release_stq_kernel(eavb->ravb.handle);
 	if (err) {
 		mse_err("error release code=%d\n", err);
 	} else {
 		kfree(eavb->entry);
-		eavb->used_f = false;
+		memset(eavb, 0, sizeof(*eavb));
 	}
 
 	return err;
@@ -219,6 +249,9 @@ static int mse_adapter_eavb_set_cbs_param(int index, struct mse_cbsparam *cbs)
 	eavb = &eavb_table[index];
 
 	if (!eavb->used_f)
+		return -EPERM;
+
+	if (!avb_device_is_tx(eavb->device_id))
 		return -EPERM;
 
 	mse_debug("index=%d\n", index);
@@ -257,6 +290,9 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 	if (!eavb->used_f)
 		return -EPERM;
 
+	if (avb_device_is_tx(eavb->device_id))
+		return -EPERM;
+
 	mse_debug("index=%d\n", index);
 
 	memcpy(rxparam.streamid, streamid, sizeof(rxparam.streamid));
@@ -288,6 +324,9 @@ static int mse_adapter_eavb_check_receive(int index)
 	if (!eavb->used_f)
 		return -EPERM;
 
+	if (avb_device_is_tx(eavb->device_id))
+		return -EPERM;
+
 	err = eavb->ravb.get_entrynum(eavb->ravb.handle, &en);
 	mse_debug("index=%d ret=%ld entry=%d wait=%d log=%d\n",
 		  index, err, en.accepted, en.processed, en.completed);
@@ -315,6 +354,9 @@ static int mse_adapter_eavb_send_prepare(int index,
 	eavb = &eavb_table[index];
 
 	if (!eavb->used_f)
+		return -EPERM;
+
+	if (!avb_device_is_tx(eavb->device_id))
 		return -EPERM;
 
 	if (num_packets <= 0)
@@ -358,6 +400,9 @@ static int mse_adapter_eavb_send(int index,
 	eavb = &eavb_table[index];
 
 	if (!eavb->used_f)
+		return -EPERM;
+
+	if (!avb_device_is_tx(eavb->device_id))
 		return -EPERM;
 
 	if (num_packets <= 0)
@@ -456,6 +501,9 @@ static int mse_adapter_eavb_receive_prepare(int index,
 	if (!eavb->used_f)
 		return -EPERM;
 
+	if (avb_device_is_tx(eavb->device_id))
+		return -EPERM;
+
 	if (num_packets <= 0)
 		return -EPERM;
 
@@ -508,6 +556,9 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 	eavb = &eavb_table[index];
 
 	if (!eavb->used_f)
+		return -EPERM;
+
+	if (avb_device_is_tx(eavb->device_id))
 		return -EPERM;
 
 	if (num_packets <= 0)
