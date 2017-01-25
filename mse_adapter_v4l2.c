@@ -1481,7 +1481,6 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	q->mem_ops = &vb2_vmalloc_memops;
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	q->lock = &vadp_dev->mutex_vb2;
-	q->gfp_flags = GFP_DMA32;
 	q->min_buffers_needed = 2;
 
 	err = vb2_queue_init(q);
@@ -1499,7 +1498,6 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	q->mem_ops = &vb2_vmalloc_memops;
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	q->lock = &vadp_dev->mutex_vb2;
-	q->gfp_flags = GFP_DMA32;
 	q->min_buffers_needed = 2;
 
 	err = vb2_queue_init(q);
