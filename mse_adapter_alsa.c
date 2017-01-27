@@ -75,8 +75,9 @@
 
 #include "ravb_mse_kernel.h"
 
-/* TODO need expand device max */
-#define MSE_ADAPTER_ALSA_DEVICE_MAX	(2)
+/* ALSA PCM device max */
+#define ALSA_PCM_DEVICE_MAX		(8)
+#define MSE_ADAPTER_ALSA_DEVICE_MAX	(ALSA_PCM_DEVICE_MAX)
 #define MSE_ADAPTER_ALSA_DEVICE_DEFAULT	(2)
 #define MSE_ADAPTER_ALSA_PAGE_SIZE	(64 * 1024)
 
@@ -100,13 +101,17 @@ struct alsa_stream {
 
 /* Device info */
 struct alsa_device {
-	struct device			dev;
-	struct snd_card			*card;
 	struct snd_pcm			*pcm;
 	int				adapter_index;
 
 	struct alsa_stream		playback;
 	struct alsa_stream		capture;
+};
+
+/* Adapter info */
+struct alsa_adapter {
+	struct device			dev;
+	struct snd_card			*card;
 };
 
 /* hw - Playback */
@@ -581,23 +586,27 @@ struct snd_pcm_ops g_mse_adapter_alsa_capture_ops = {
 
 /* Global variable */
 static struct alsa_device **g_rchip;
+static struct alsa_adapter g_adapter;
 
-static int mse_adapter_alsa_free(struct alsa_device *chip)
+static int mse_adapter_alsa_free(struct alsa_adapter *chip)
 {
-	int err;
+	int err, i;
 
 	mse_debug("START\n");
 
 	if (!chip)
 		return 0;
 
-	err = mse_unregister_adapter_media(chip->adapter_index);
-	if (err < 0)
-		mse_err("Failed unregister adapter err=%d\n", err);
+	for (i = 0; i < alsa_devices; i++) {
+		if (!g_rchip[i])
+			continue;
 
-	device_del(&chip->dev);
+		err = mse_unregister_adapter_media(g_rchip[i]->adapter_index);
+		if (err < 0)
+			mse_err("Failed unregister adapter err=%d\n", err);
 
-	kfree(chip);
+		kfree(g_rchip[i]);
+	}
 
 	return 0;
 }
@@ -614,71 +623,39 @@ static void alsa_chip_dev_release(struct device *dev)
 	/* reserved */
 }
 
-static int mse_adapter_alsa_probe(int devno)
+static int mse_adapter_alsa_probe(struct snd_card *card, int devno)
 {
 	struct snd_pcm *pcm;
-	static struct snd_device_ops ops = {
-		.dev_free = mse_adapter_alsa_dev_free,
-	};
 	struct alsa_device *chip;
-	struct snd_card *card;
 	int err;
 	int index;
 	char device_name[MSE_NAME_LEN_MAX];
+	char pcm_name[MSE_NAME_LEN_MAX];
 
 	mse_debug("devno=%d\n", devno);
 
-	/* allocate a chip-specific data with zero filled */
-	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
-	if (!chip)
-		return -ENOMEM;
+	snprintf(device_name, MSE_NAME_LEN_MAX,
+		 "hw:%d,%d", card->number, devno);
 
-	/* device initialize */
-	device_initialize(&chip->dev);
-	chip->dev.release = alsa_chip_dev_release;
-	dev_set_name(&chip->dev, "mse_alsa%d", devno);
-	err = device_add(&chip->dev);
-	if (err) {
-		mse_err("Failed device_add() err=%d\n", err);
+	/* regist mse */
+	index = mse_register_adapter_media(MSE_TYPE_ADAPTER_AUDIO,
+					   "ALSA Adapter",
+					   device_name);
+	if (index < 0) {
+		mse_err("Failed register adapter index=%d\n", index);
 		return -EPERM;
 	}
 
-	err = snd_card_new(
-		&chip->dev,
-		SNDRV_DEFAULT_IDX1,
-		SNDRV_DEFAULT_STR1,
-		THIS_MODULE,
-		0,
-		&card);
-	if (err < 0) {
-		mse_err("Failed snd_card_new() err=%d\n", err);
-		return -EPERM;
-	}
+	snprintf(pcm_name, MSE_NAME_LEN_MAX, "ravb_mse.mse%d", index);
 
-	chip->card = card;
-	chip->adapter_index = MSE_INDEX_UNDEFINED;
-
-	err = snd_device_new(card, SNDRV_DEV_PCM, chip, &ops);
-	if (err < 0) {
-		mse_err("Failed snd_device_new() err=%d\n", err);
-		kfree(chip);
-		return -EPERM;
-	}
-
-	/* driver name */
-	strcpy(card->driver, "renesas-mse");
-	strcpy(card->shortname, "Renesas ALSA Adapter");
-	sprintf(card->longname, "Renesas MSE ALSA Adapter %d", devno);
-
-	/* other setup */
-	err = snd_pcm_new(chip->card, "ALSA Adapter", 0, 1, 1, &pcm);
+	/* pcm device initialize */
+	err = snd_pcm_new(card, pcm_name, devno, 1, 1, &pcm);
 	if (err < 0) {
 		mse_err("Failed snd_pcm_new() err=%d\n", err);
+		mse_unregister_adapter_media(index);
 		return -EPERM;
 	}
-	pcm->private_data = chip;
-	strcpy(pcm->name, "ALSA Adapter");
-	chip->pcm = pcm;
+	strlcpy(pcm->name, pcm_name, sizeof(pcm->name));
 
 	/* set operators */
 	snd_pcm_set_ops(pcm,
@@ -697,26 +674,19 @@ static int mse_adapter_alsa_probe(int devno)
 					MSE_ADAPTER_ALSA_PAGE_SIZE);
 	if (err < 0) {
 		mse_err("Failed pre-allocation err=%d\n", err);
+		mse_unregister_adapter_media(index);
 		return -EPERM;
 	}
 
-	/* regist card */
-	err = snd_card_register(card);
-	if (err < 0) {
-		mse_err("Failed snd_card_register() err=%d\n", err);
-		return -EPERM;
+	/* allocate a chip-specific data with zero filled */
+	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
+	if (!chip) {
+		mse_unregister_adapter_media(index);
+		return -ENOMEM;
 	}
 
-	sprintf(device_name, "hw:%d,0", card->number);
-
-	/* regist mse */
-	index = mse_register_adapter_media(MSE_TYPE_ADAPTER_AUDIO,
-					   "ALSA Adapter",
-					   device_name);
-	if (index < 0) {
-		mse_err("Failed register adapter index=%d\n", index);
-		return -EPERM;
-	}
+	pcm->private_data = chip;
+	chip->pcm = pcm;
 	chip->adapter_index = index;
 	g_rchip[devno] = chip;
 
@@ -726,6 +696,10 @@ static int mse_adapter_alsa_probe(int devno)
 static int __init mse_adapter_alsa_init(void)
 {
 	int i, err;
+	struct snd_card *card;
+	static struct snd_device_ops ops = {
+		.dev_free = mse_adapter_alsa_dev_free,
+	};
 
 	mse_debug("Start ALSA adapter\n");
 
@@ -739,30 +713,85 @@ static int __init mse_adapter_alsa_init(void)
 		;
 	}
 
+	/* device initialize */
+	device_initialize(&g_adapter.dev);
+	g_adapter.dev.release = alsa_chip_dev_release;
+	dev_set_name(&g_adapter.dev, "mse_adapter_alsa");
+	err = device_add(&g_adapter.dev);
+	if (err) {
+		mse_err("Failed device_add() err=%d\n", err);
+		return -EPERM;
+	}
+
+	/* card initialize */
+	err = snd_card_new(&g_adapter.dev,
+			   SNDRV_DEFAULT_IDX1,
+			   SNDRV_DEFAULT_STR1,
+			   THIS_MODULE,
+			   0,
+			   &card);
+	if (err < 0) {
+		mse_err("Failed snd_card_new() err=%d\n", err);
+		device_del(&g_adapter.dev);
+		return -EPERM;
+	}
+
+	err = snd_device_new(card, SNDRV_DEV_PCM, &g_adapter, &ops);
+	if (err < 0) {
+		mse_err("Failed snd_device_new() err=%d\n", err);
+		goto init_fail;
+	}
+
+	/* card name */
+	strlcpy(card->id, "ravbmse", sizeof(card->id));
+	strlcpy(card->driver, "ravb_mse", sizeof(card->driver));
+	strlcpy(card->shortname, "ravb_mse", sizeof(card->shortname));
+	strlcpy(card->longname, "ravb_mse", sizeof(card->longname));
+
 	g_rchip = kcalloc(alsa_devices, sizeof(*g_rchip), GFP_KERNEL);
 	if (!g_rchip)
 		return -ENOMEM;
 
 	for (i = 0; i < alsa_devices; i++) {
-		err = mse_adapter_alsa_probe(i);
+		err = mse_adapter_alsa_probe(card, i);
 		if (err < 0)
-			return err;
+			goto init_fail;
 	}
 
+	/* register card */
+	err = snd_card_register(card);
+	if (err < 0) {
+		mse_err("Failed snd_card_register() err=%d\n", err);
+		goto init_fail;
+	}
+
+	g_adapter.card = card;
+
 	return 0;
+
+init_fail:
+	err = snd_card_free(card);
+	if (err < 0)
+		mse_err("Failed snd_card_free() err=%d\n", err);
+
+	device_del(&g_adapter.dev);
+
+	kfree(g_rchip);
+
+	return -EPERM;
 }
 
 static void __exit mse_adapter_alsa_exit(void)
 {
-	int i, err;
+	int err;
 
 	mse_debug("Stop ALSA adapter\n");
 
-	for (i = 0; i < alsa_devices; i++) {
-		err = snd_card_free(g_rchip[i]->card);
-		if (err < 0)
-			mse_err("Failed snd_card_free() err=%d\n", err);
-	}
+	err = snd_card_free(g_adapter.card);
+	if (err < 0)
+		mse_err("Failed snd_card_free() err=%d\n", err);
+
+	device_del(&g_adapter.dev);
 
 	kfree(g_rchip);
 }
