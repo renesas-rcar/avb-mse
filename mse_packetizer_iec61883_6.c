@@ -372,6 +372,10 @@ static int mse_packetizer_iec61883_6_set_audio_config(
 				       payload_size;
 	if (iec61883_6->avtp_packet_size < ETHFRAMELEN_MIN)
 		iec61883_6->avtp_packet_size = ETHFRAMELEN_MIN;
+	if (iec61883_6->avtp_packet_size > ETHFRAMELEN_MAX) {
+		mse_err("insufficient payload size\n");
+		return -EPERM;
+	}
 
 	net_config = &iec61883_6->net_config;
 	memcpy(param.dest_addr, net_config->dest_addr, MSE_MAC_LEN_MAX);
@@ -407,7 +411,7 @@ static int mse_packetizer_iec61883_6_calc_cbs(int index,
 					      struct mse_cbsparam *cbs)
 {
 	struct iec61883_6_packetizer *iec61883_6;
-	u64 value;
+	int ret;
 	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
 
 	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
@@ -417,40 +421,26 @@ static int mse_packetizer_iec61883_6_calc_cbs(int index,
 	iec61883_6 = &iec61883_6_packetizer_table[index];
 
 	bandwidth_fraction_denominator =
-				(u64)iec61883_6->net_config.port_transmit_rate *
-				(u64)CBS_ADJUSTMENT_DENOMINATOR;
+				(u64)iec61883_6->net_config.port_transmit_rate;
 	if (!bandwidth_fraction_denominator) {
 		mse_err("cbs error(null)\n");
 		return -EPERM;
 	}
 
 	bandwidth_fraction_numerator =
-		(ETHERNET_SPECIAL + iec61883_6->avtp_packet_size) *
-		BYTE_TO_BIT * iec61883_6->class_interval_frames *
-		INTERVAL_FRAMES * CBS_ADJUSTMENT_NUMERATOR;
-
-	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
-	/* divide denominator into 2 */
-	do_div(value, iec61883_6->net_config.port_transmit_rate);
-	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	if (value > UINT_MAX) {
-		mse_err("cbs error(too big)\n");
+		(ETHERNET_SPECIAL + (u64)iec61883_6->avtp_packet_size) *
+		BYTE_TO_BIT * (u64)iec61883_6->class_interval_frames *
+		INTERVAL_FRAMES * CBS_ADJUSTMENT_NUMERATOR /
+		CBS_ADJUSTMENT_DENOMINATOR;
+	if (bandwidth_fraction_numerator > UINT_MAX) {
+		mse_err("cbs error(numerator too big)\n");
 		return -EPERM;
 	}
-	cbs->bandwidth_fraction = value;
 
-	value = USHRT_MAX * bandwidth_fraction_numerator;
-	/* divide denominator into 2 */
-	do_div(value, iec61883_6->net_config.port_transmit_rate);
-	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	cbs->send_slope = value;
-
-	value = USHRT_MAX * (bandwidth_fraction_denominator -
-					 bandwidth_fraction_numerator);
-	/* divide denominator into 2 */
-	do_div(value, iec61883_6->net_config.port_transmit_rate);
-	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	cbs->idle_slope = value;
+	ret = mse_packetizer_calc_cbs(bandwidth_fraction_denominator,
+				      bandwidth_fraction_numerator, cbs);
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }
