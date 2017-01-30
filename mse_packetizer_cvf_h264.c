@@ -348,7 +348,8 @@ static int mse_packetizer_cvf_h264_calc_cbs(int index,
 					    struct mse_cbsparam *cbs)
 {
 	struct cvf_h264_packetizer *h264;
-	u64 value;
+	struct mse_network_config *net_config;
+	int ret;
 	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
 
 	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
@@ -356,38 +357,26 @@ static int mse_packetizer_cvf_h264_calc_cbs(int index,
 
 	mse_debug("index=%d\n", index);
 	h264 = &cvf_h264_packetizer_table[index];
+	net_config = &h264->net_config;
 
 	bandwidth_fraction_denominator =
-		(u64)h264->net_config.port_transmit_rate / TRANSMIT_RATE_BASE;
-
+		((u64)net_config->port_transmit_rate / TRANSMIT_RATE_BASE) *
+		(u64)h264->payload_max;
 	if (!bandwidth_fraction_denominator) {
 		mse_err("Link speed %lu bps is not support\n",
-			h264->net_config.port_transmit_rate);
+			net_config->port_transmit_rate);
 		return -EPERM;
 	}
 
 	bandwidth_fraction_numerator = (u64)h264->video_config.bitrate *
 				       (u64)ETHFRAMELEN_MAX;
-	do_div(bandwidth_fraction_numerator, TRANSMIT_RATE_BASE);
-	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
-	do_div(value, bandwidth_fraction_denominator);
-	do_div(value, h264->payload_max);
-	if (value > UINT_MAX) {
-		mse_err("cbs error value=0x%016llx\n", value);
-		return -EPERM;
-	}
-	cbs->bandwidth_fraction = (u32)value;
+	bandwidth_fraction_numerator = div64_u64(bandwidth_fraction_numerator,
+						 TRANSMIT_RATE_BASE);
 
-	value = (u64)USHRT_MAX * bandwidth_fraction_numerator;
-	do_div(value, bandwidth_fraction_denominator);
-	do_div(value, h264->payload_max);
-	cbs->send_slope = (u32)value;
-
-	value = (u64)USHRT_MAX * (bandwidth_fraction_denominator *
-			(u64)h264->payload_max - bandwidth_fraction_numerator);
-	do_div(value, bandwidth_fraction_denominator);
-	do_div(value, h264->payload_max);
-	cbs->idle_slope = (u32)value;
+	ret = mse_packetizer_calc_cbs(bandwidth_fraction_denominator,
+				      bandwidth_fraction_numerator, cbs);
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }
