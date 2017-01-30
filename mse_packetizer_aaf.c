@@ -423,6 +423,10 @@ static int mse_packetizer_aaf_set_audio_config(int index,
 	aaf->avtp_packet_size = AVTP_AAF_PAYLOAD_OFFSET + payload_size;
 	if (aaf->avtp_packet_size < ETHFRAMELEN_MIN)
 		aaf->avtp_packet_size = ETHFRAMELEN_MIN;
+	if (aaf->avtp_packet_size > ETHFRAMELEN_MAX) {
+		mse_err("insufficient payload size\n");
+		return -EPERM;
+	}
 
 	memcpy(param.dest_addr, aaf->net_config.dest_addr, MSE_MAC_LEN_MAX);
 	memcpy(param.source_addr, aaf->net_config.source_addr,
@@ -456,7 +460,7 @@ static int mse_packetizer_aaf_calc_cbs(int index,
 				       struct mse_cbsparam *cbs)
 {
 	struct aaf_packetizer *aaf;
-	u64 value;
+	int ret;
 	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
 
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
@@ -466,40 +470,25 @@ static int mse_packetizer_aaf_calc_cbs(int index,
 	aaf = &aaf_packetizer_table[index];
 
 	bandwidth_fraction_denominator =
-				(u64)aaf->net_config.port_transmit_rate *
-				(u64)CBS_ADJUSTMENT_DENOMINATOR;
+				(u64)aaf->net_config.port_transmit_rate;
 	if (!bandwidth_fraction_denominator) {
 		mse_err("cbs error(null)\n");
 		return -EPERM;
 	}
 
 	bandwidth_fraction_numerator =
-		(ETHERNET_SPECIAL + aaf->avtp_packet_size) * BYTE_TO_BIT *
-		aaf->class_interval_frames * INTERVAL_FRAMES *
-		CBS_ADJUSTMENT_NUMERATOR;
-
-	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
-	/* divide denominator into 2 */
-	do_div(value, aaf->net_config.port_transmit_rate);
-	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	if (value > UINT_MAX) {
-		mse_err("cbs error(too big)\n");
+		(ETHERNET_SPECIAL + (u64)aaf->avtp_packet_size) * BYTE_TO_BIT *
+		(u64)aaf->class_interval_frames * INTERVAL_FRAMES *
+		CBS_ADJUSTMENT_NUMERATOR / CBS_ADJUSTMENT_DENOMINATOR;
+	if (bandwidth_fraction_numerator > UINT_MAX) {
+		mse_err("cbs error(numerator too big)\n");
 		return -EPERM;
 	}
-	cbs->bandwidth_fraction = value;
 
-	value = USHRT_MAX * bandwidth_fraction_numerator;
-	/* divide denominator into 2 */
-	do_div(value, aaf->net_config.port_transmit_rate);
-	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	cbs->send_slope = value;
-
-	value = USHRT_MAX * (bandwidth_fraction_denominator -
-					 bandwidth_fraction_numerator);
-	/* divide denominator into 2 */
-	do_div(value, aaf->net_config.port_transmit_rate);
-	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	cbs->idle_slope = value;
+	ret = mse_packetizer_calc_cbs(bandwidth_fraction_denominator,
+				      bandwidth_fraction_numerator, cbs);
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }
