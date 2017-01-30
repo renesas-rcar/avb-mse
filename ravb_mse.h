@@ -156,8 +156,8 @@ struct mse_media_audio_config {
 };
 
 #define MSE_CONFIG_BYTES_PER_FRAME_MAX (1480)
-#define MSE_CONFIG_FPS_DENOMINATOR_MAX (60000)
-#define MSE_CONFIG_FPS_NUMERATOR_MAX   (1001)
+#define MSE_CONFIG_FPS_DENOMINATOR_MAX (1001)
+#define MSE_CONFIG_FPS_NUMERATOR_MAX   (60000)
 #define MSE_CONFIG_BITRATE_MIN         (1)
 
 struct mse_media_video_config {
