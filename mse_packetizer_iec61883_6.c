@@ -348,8 +348,9 @@ static int mse_packetizer_iec61883_6_set_audio_config(
 	/* when samples_per_frame is not set */
 	if (!audio_config->samples_per_frame) {
 		iec61883_6->class_interval_frames = CLASS_INTERVAL_FRAMES;
-		iec61883_6->sample_per_packet = audio_config->sample_rate /
-			(iec61883_6->class_interval_frames * INTERVAL_FRAMES);
+		iec61883_6->sample_per_packet = DIV_ROUND_UP(
+			audio_config->sample_rate,
+			iec61883_6->class_interval_frames * INTERVAL_FRAMES);
 		iec61883_6->frame_interval_time = NSEC / CLASS_INTERVAL_FRAMES;
 	} else {
 		iec61883_6->sample_per_packet = audio_config->samples_per_frame;
@@ -358,8 +359,9 @@ static int mse_packetizer_iec61883_6_set_audio_config(
 		else if (iec61883_6->sample_per_packet > 128)
 			iec61883_6->sample_per_packet = 128;
 
-		iec61883_6->class_interval_frames = audio_config->sample_rate /
-					iec61883_6->sample_per_packet;
+		iec61883_6->class_interval_frames = DIV_ROUND_UP(
+			audio_config->sample_rate,
+			iec61883_6->sample_per_packet);
 		iec61883_6->frame_interval_time =
 				NSEC / iec61883_6->class_interval_frames;
 	}
