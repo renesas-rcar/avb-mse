@@ -262,7 +262,7 @@ static int mse_packetizer_crf_audio_calc_cbs(int index,
 					     struct mse_cbsparam *cbs)
 {
 	struct crf_packetizer *crf;
-	u64 value;
+	int ret;
 	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
 
 	if (index >= ARRAY_SIZE(crf_packetizer_table))
@@ -272,40 +272,25 @@ static int mse_packetizer_crf_audio_calc_cbs(int index,
 	crf = &crf_packetizer_table[index];
 
 	bandwidth_fraction_denominator =
-				(u64)crf->net_config.port_transmit_rate *
-				(u64)CBS_ADJUSTMENT_DENOMINATOR;
+				(u64)crf->net_config.port_transmit_rate;
 	if (!bandwidth_fraction_denominator) {
 		mse_err("cbs error(null)\n");
 		return -EPERM;
 	}
 
 	bandwidth_fraction_numerator =
-		(ETHERNET_SPECIAL + crf->crf_packet_size) * BYTE_TO_BIT *
+		(ETHERNET_SPECIAL + (u64)crf->crf_packet_size) * BYTE_TO_BIT *
 		CLASS_INTERVAL_FRAMES * INTERVAL_FRAMES *
-		CBS_ADJUSTMENT_NUMERATOR;
-
-	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
-	/* divide denominator into 2 */
-	do_div(value, crf->net_config.port_transmit_rate);
-	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	if (value > UINT_MAX) {
-		mse_err("cbs error(too big)\n");
+		CBS_ADJUSTMENT_NUMERATOR / CBS_ADJUSTMENT_DENOMINATOR;
+	if (bandwidth_fraction_numerator > UINT_MAX) {
+		mse_err("cbs error(numerator too big)\n");
 		return -EPERM;
 	}
-	cbs->bandwidth_fraction = value;
 
-	value = USHRT_MAX * bandwidth_fraction_numerator;
-	/* divide denominator into 2 */
-	do_div(value, crf->net_config.port_transmit_rate);
-	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	cbs->send_slope = value;
-
-	value = USHRT_MAX * (bandwidth_fraction_denominator
-					 - bandwidth_fraction_numerator);
-	/* divide denominator into 2 */
-	do_div(value, crf->net_config.port_transmit_rate);
-	do_div(value, CBS_ADJUSTMENT_DENOMINATOR);
-	cbs->idle_slope = value;
+	ret = mse_packetizer_calc_cbs(bandwidth_fraction_denominator,
+				      bandwidth_fraction_numerator, cbs);
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }
