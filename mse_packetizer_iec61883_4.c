@@ -78,7 +78,7 @@
 #define AVTP_PAYLOAD_MIN        (AVTP_FRAME_SIZE_MIN - AVTP_IEC61883_4_PAYLOAD_OFFSET)
 
 #define AVTP_SOURCE_PACKET_SIZE (4 + 188) /* timestamp + TSP */
-#define TRANSMIT_RATE_BASE      (1000000)
+#define TRANSMIT_RATE_BASE      (1000)
 
 #define MSE_TS_PACKET_SIZE      (188)
 #define MSE_TIMESTAMP_SIZE      (4)
@@ -262,9 +262,8 @@ static int mse_packetizer_iec61883_4_calc_cbs(int index,
 					      struct mse_cbsparam *cbs)
 {
 	struct iec61883_4_packetizer *iec61883_4;
-	u64 value;
 	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
-	int payload_size, packet_size;
+	int payload_size, packet_size, ret;
 	struct mse_network_config *net_config;
 
 	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
@@ -283,7 +282,8 @@ static int mse_packetizer_iec61883_4_calc_cbs(int index,
 
 	net_config = &iec61883_4->net_config;
 	bandwidth_fraction_denominator =
-		(u64)net_config->port_transmit_rate * (u64)payload_size;
+		(u64)(net_config->port_transmit_rate / TRANSMIT_RATE_BASE) *
+		(u64)payload_size;
 
 	if (!bandwidth_fraction_denominator) {
 		mse_err("Link speed %lu bps is not support\n",
@@ -292,21 +292,13 @@ static int mse_packetizer_iec61883_4_calc_cbs(int index,
 	}
 
 	bandwidth_fraction_numerator =
-		(u64)iec61883_4->mpeg2ts_config.bitrate * (u64)packet_size;
-	bandwidth_fraction_denominator >>= 8;
-	bandwidth_fraction_numerator >>= 8;
-	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
-	value = div64_u64(value, bandwidth_fraction_denominator);
-	if (value > UINT_MAX) {
-		mse_err("cbs error value=0x%016llx\n", value);
-		return -EPERM;
-	}
+		(u64)(iec61883_4->mpeg2ts_config.bitrate / TRANSMIT_RATE_BASE) *
+		(u64)packet_size;
 
-	cbs->bandwidth_fraction = (u32)value;
-
-	cbs->send_slope = value >> 16;
-	cbs->idle_slope = USHRT_MAX - cbs->send_slope;
-
+	ret = mse_packetizer_calc_cbs(bandwidth_fraction_denominator,
+				      bandwidth_fraction_numerator, cbs);
+	if (ret < 0)
+		return ret;
 	return 0;
 }
 
