@@ -402,8 +402,9 @@ static int mse_packetizer_aaf_set_audio_config(int index,
 	/* when samples_per_frame is not set */
 	if (!aaf->audio_config.samples_per_frame) {
 		aaf->class_interval_frames = CLASS_INTERVAL_FRAMES;
-		aaf->sample_per_packet = aaf->audio_config.sample_rate /
-				(aaf->class_interval_frames * INTERVAL_FRAMES);
+		aaf->sample_per_packet = DIV_ROUND_UP(
+			aaf->audio_config.sample_rate,
+			aaf->class_interval_frames * INTERVAL_FRAMES);
 		aaf->frame_interval_time = NSEC / aaf->class_interval_frames;
 	} else {
 		aaf->sample_per_packet = aaf->audio_config.samples_per_frame;
@@ -411,8 +412,9 @@ static int mse_packetizer_aaf_set_audio_config(int index,
 			aaf->sample_per_packet = 2;
 		else if (aaf->sample_per_packet > 128)
 			aaf->sample_per_packet = 128;
-		aaf->class_interval_frames = aaf->audio_config.sample_rate /
-					aaf->sample_per_packet;
+		aaf->class_interval_frames = DIV_ROUND_UP(
+			aaf->audio_config.sample_rate,
+			aaf->sample_per_packet);
 		aaf->frame_interval_time = NSEC / aaf->class_interval_frames;
 	}
 
