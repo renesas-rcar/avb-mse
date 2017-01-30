@@ -135,3 +135,21 @@ bool mse_packetizer_is_valid(enum MSE_PACKETIZER id)
 {
 	return mse_packetizer_get_ops(id) ? true : false;
 }
+
+int mse_packetizer_calc_cbs(u64 bandwidth_fraction_denominator,
+			    u64 bandwidth_fraction_numerator,
+			    struct mse_cbsparam *cbs)
+{
+	u64 value;
+
+	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
+	value = div64_u64(value, bandwidth_fraction_denominator);
+	if (value > UINT_MAX) {
+		mse_err("cbs error value=0x%016llx\n", value);
+		return -EPERM;
+	}
+	cbs->bandwidth_fraction = (u32)value;
+	cbs->send_slope = value >> 16;
+	cbs->idle_slope = USHRT_MAX - cbs->send_slope;
+	return 0;
+}
