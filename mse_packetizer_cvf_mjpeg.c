@@ -299,7 +299,7 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 {
 	struct cvf_mjpeg_packetizer *cvf_mjpeg;
 	struct mse_network_config *net_config;
-	u64 value;
+	int ret;
 	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
 
 	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
@@ -310,8 +310,8 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 	net_config = &cvf_mjpeg->net_config;
 
 	bandwidth_fraction_denominator =
-		(u64)net_config->port_transmit_rate / TRANSMIT_RATE_BASE;
-
+		((u64)net_config->port_transmit_rate / TRANSMIT_RATE_BASE) *
+		(u64)cvf_mjpeg->payload_max;
 	if (!bandwidth_fraction_denominator) {
 		mse_err("Link speed %lu bps is not support\n",
 			net_config->port_transmit_rate);
@@ -320,27 +320,13 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 
 	bandwidth_fraction_numerator = (u64)cvf_mjpeg->video_config.bitrate *
 				       (u64)ETHFRAMELEN_MAX;
-	do_div(bandwidth_fraction_numerator, TRANSMIT_RATE_BASE);
-	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
-	do_div(value, bandwidth_fraction_denominator);
-	do_div(value, cvf_mjpeg->payload_max);
-	if (value > UINT_MAX) {
-		mse_err("cbs error value=0x%016llx\n", value);
-		return -EPERM;
-	}
+	bandwidth_fraction_numerator = div64_u64(bandwidth_fraction_numerator,
+						 TRANSMIT_RATE_BASE);
 
-	cbs->bandwidth_fraction = (u32)value;
-
-	value = (u64)USHRT_MAX * bandwidth_fraction_numerator;
-	do_div(value, bandwidth_fraction_denominator);
-	do_div(value, cvf_mjpeg->payload_max);
-	cbs->send_slope = (u32)value;
-
-	value = (u64)USHRT_MAX * (bandwidth_fraction_denominator *
-		(u64)cvf_mjpeg->payload_max - bandwidth_fraction_numerator);
-	do_div(value, bandwidth_fraction_denominator);
-	do_div(value, cvf_mjpeg->payload_max);
-	cbs->idle_slope = (u32)value;
+	ret = mse_packetizer_calc_cbs(bandwidth_fraction_denominator,
+				      bandwidth_fraction_numerator, cbs);
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }
