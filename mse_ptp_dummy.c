@@ -126,7 +126,7 @@ static int dequeue(struct ptp_queue *que, struct ptp_clock_time *clock_time)
 	return 0;
 }
 
-static int get_clock_time(struct ptp_clock_time *clock_time)
+static void get_clock_time(struct ptp_clock_time *clock_time)
 {
 	struct timespec time;
 
@@ -134,8 +134,6 @@ static int get_clock_time(struct ptp_clock_time *clock_time)
 	getnstimeofday(&time);
 	clock_time->sec = time.tv_sec;
 	clock_time->nsec = time.tv_nsec;
-
-	return 0;
 }
 
 static enum hrtimer_restart ptp_timestamp_callbak(struct hrtimer *arg)
@@ -143,9 +141,8 @@ static enum hrtimer_restart ptp_timestamp_callbak(struct hrtimer *arg)
 	struct ptp_device *dev;
 	ktime_t ktime;
 	struct ptp_queue *queue;
-	struct ptp_clock_time *clock_time;
+	struct ptp_clock_time clock_time;
 	unsigned long flags;
-	int ret;
 
 	dev = container_of(arg, struct ptp_device, timer);
 
@@ -156,22 +153,11 @@ static enum hrtimer_restart ptp_timestamp_callbak(struct hrtimer *arg)
 			hrtimer_get_expires(&dev->timer),
 			ktime);
 
-	clock_time = kzalloc(sizeof(*clock_time), GFP_ATOMIC);
-	if (!clock_time) {
-		spin_unlock(&dev->qlock);
-		return HRTIMER_RESTART;
-	}
-
-	ret = get_clock_time(clock_time);
-	if (ret) {
-		mse_warn("failed get_clock_time\n");
-		spin_unlock(&dev->qlock);
-		return HRTIMER_RESTART;
-	}
+	get_clock_time(&clock_time);
 
 	/* add to queue */
 	queue = &dev->que;
-	enqueue(queue, clock_time);
+	enqueue(queue, &clock_time);
 
 	spin_unlock_irqrestore(&dev->qlock, flags);
 
@@ -259,8 +245,6 @@ int mse_ptp_close_dummy(int dev_id)
 
 int mse_ptp_get_time_dummy(int dev_id, struct ptp_clock_time *clock_time)
 {
-	int ret = 0;
-
 	if ((dev_id < 0) || (dev_id >= MAX_PTP_DEVICES)) {
 		mse_err("invalid argument. index=%d\n", dev_id);
 		return -EINVAL;
@@ -271,9 +255,9 @@ int mse_ptp_get_time_dummy(int dev_id, struct ptp_clock_time *clock_time)
 		return -EINVAL;
 	}
 
-	ret = get_clock_time(clock_time);
+	get_clock_time(clock_time);
 
-	return ret;
+	return 0;
 }
 
 int mse_ptp_get_timestamps_dummy(int dev_id,
