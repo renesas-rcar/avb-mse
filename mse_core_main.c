@@ -1215,16 +1215,21 @@ static int mse_initialize_crf_packetizer(struct mse_instance *instance)
 	struct mse_packetizer_ops *crf = &mse_packetizer_crf_tstamp_audio_ops;
 	struct mse_audio_config *audio = &instance->media_config.audio;
 	struct mse_audio_config config;
+	struct mse_cbsparam cbs;
+	int ret;
 
-	instance->crf_index = crf->open();
+	ret = instance->crf_index = crf->open();
+	if (instance->crf_index < 0) {
+		mse_err("cannot open packetizer ret=%d\n", ret);
+		return instance->crf_index;
+	}
 
 	crf->init(instance->crf_index);
-
 	crf->set_network_config(instance->crf_index,
 				&instance->crf_net_config);
 
 	/* base_frequency */
-	config.sample_rate     = audio->sample_rate;
+	config.sample_rate = audio->sample_rate;
 	/* timestamp_interval */
 	if (!instance->ptp_clock) {
 		config.samples_per_frame = audio->period_size;
@@ -1232,9 +1237,39 @@ static int mse_initialize_crf_packetizer(struct mse_instance *instance)
 		config.samples_per_frame = audio->sample_rate /
 			instance->ptp_capture_freq;
 	}
-	crf->set_audio_config(instance->crf_index, &config);
+
+	ret = crf->set_audio_config(instance->crf_index, &config);
+	if (ret < 0)
+		goto error_set_audio_config_fail;
+
+	if (instance->send_clock) {
+		ret = crf->calc_cbs(instance->crf_index, &cbs);
+		if (ret < 0)
+			goto error_calc_cbs_fail;
+
+		ret = instance->network->set_cbs_param(
+			instance->crf_index_network, &cbs);
+		if (ret < 0)
+			goto error_set_cbs_param_fail;
+	}
 
 	return 0;
+
+error_set_cbs_param_fail:
+error_calc_cbs_fail:
+error_set_audio_config_fail:
+	crf->release(instance->crf_index);
+	instance->crf_index = MSE_INDEX_UNDEFINED;
+
+	return ret;
+}
+
+static void mse_release_crf_packetizer(struct mse_instance *instance)
+{
+	struct mse_packetizer_ops *crf = &mse_packetizer_crf_tstamp_audio_ops;
+
+	if (instance->crf_index >= 0)
+		crf->release(instance->crf_index);
 }
 
 static void mse_work_packetize(struct work_struct *work)
@@ -2453,8 +2488,11 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 
 	/* use CRF packet */
 	if (instance->send_clock || (instance->media_clock_recovery == 1 &&
-				     instance->media_clock_type == 1))
-		mse_initialize_crf_packetizer(instance);
+				     instance->media_clock_type == 1)) {
+		ret = mse_initialize_crf_packetizer(instance);
+		if (ret < 0)
+			return ret;
+	}
 
 	return 0;
 }
@@ -2801,6 +2839,7 @@ int mse_open(int index_media, bool tx)
 	instance->packetizer = packetizer;
 	instance->network = network;
 	instance->index_media = index_media;
+	instance->crf_index = MSE_INDEX_UNDEFINED;
 
 	/* init work queue */
 	INIT_WORK(&instance->wk_packetize, mse_work_packetize);
@@ -2891,9 +2930,6 @@ int mse_open(int index_media, bool tx)
 	/* send clock using CRF */
 	if (instance->send_clock) {
 		int ret;
-		struct mse_cbsparam cbs;
-		struct mse_packetizer_ops *crf =
-			&mse_packetizer_crf_tstamp_audio_ops;
 
 		dev_name = network_device->device_name_tx_crf;
 		ret = instance->network->open(dev_name);
@@ -2904,11 +2940,6 @@ int mse_open(int index_media, bool tx)
 		}
 
 		instance->crf_index_network = ret;
-
-		crf->calc_cbs(instance->crf_index, &cbs);
-		instance->network->set_cbs_param(
-			instance->crf_index_network,
-			&cbs);
 
 		/* get packet memory */
 		instance->crf_packet_buffer = mse_packet_ctrl_alloc(
@@ -2997,6 +3028,9 @@ int mse_close(int index)
 	if (instance->packet_buffer)
 		mse_packet_ctrl_free(instance->packet_buffer);
 
+	if (instance->crf_packet_buffer)
+		mse_packet_ctrl_free(instance->crf_packet_buffer);
+
 	/* destroy workqueue */
 	destroy_workqueue(instance->wq_packet);
 	destroy_workqueue(instance->wq_stream);
@@ -3007,9 +3041,12 @@ int mse_close(int index)
 
 	/* release network adapter */
 	instance->network->release(instance->index_network);
+	if (instance->send_clock)
+		instance->network->release(instance->crf_index_network);
 
 	/* release packetizer */
 	instance->packetizer->release(instance->index_packetizer);
+	mse_release_crf_packetizer(instance);
 
 	ret = mse_ptp_close(instance->ptp_index, instance->ptp_dev_id);
 	if (ret < 0)
