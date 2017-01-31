@@ -98,9 +98,10 @@
 						__MSE_ATTR_RO(_name, _group)
 
 /* define */
-#define MSE_RADIX_HEXADECIMAL   (16)
-#define MSE_NAME_LEN_MAX        (32)
-#define MSE_MAC_STR_LEN_MAX     (12)
+#define MSE_RADIX_HEXADECIMAL    (16)
+#define MSE_NAME_LEN_MAX         (32)
+#define MSE_MAC_STR_LEN_MAX      (12)
+#define MSE_STREAMID_STR_LEN_MAX (16)
 
 #define MSE_SYSFS_NAME_STR_MODULE_NAME               "module_name"
 #define MSE_SYSFS_NAME_STR_DEVICE_NAME_TX            "device_name_tx"
@@ -667,14 +668,24 @@ static ssize_t mse_avtp_rx_streamid_store(struct device *dev,
 	struct mse_avtp_rx_param data;
 	int index = mse_dev_to_index(dev);
 	int ret;
+	char buf2[MSE_STREAMID_STR_LEN_MAX + 1];
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
+
+	if (len > sizeof(buf2))
+		return -EINVAL;
+
+	ret = mse_sysfs_strncpy_from_user(buf2, buf, sizeof(buf2));
+	if (ret != MSE_STREAMID_STR_LEN_MAX)
+		return -EINVAL;
 
 	ret = mse_config_get_avtp_rx_param(index, &data);
 	if (ret)
 		return ret;
 
-	strtobin(data.streamid, buf, sizeof(u64));
+	ret = strtobin(data.streamid, buf2, sizeof(u64));
+	if (ret < 0)
+		return -EINVAL;
 
 	ret =  mse_config_set_avtp_rx_param(index, &data);
 	if (ret)
@@ -1394,14 +1405,24 @@ static ssize_t mse_avtp_rx_crf_streamid_store(struct device *dev,
 	struct mse_avtp_rx_param data;
 	int index = mse_dev_to_index(dev);
 	int ret;
+	char buf2[MSE_STREAMID_STR_LEN_MAX + 1];
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
+
+	if (len > sizeof(buf2))
+		return -EINVAL;
+
+	ret = mse_sysfs_strncpy_from_user(buf2, buf, sizeof(buf2));
+	if (ret != MSE_STREAMID_STR_LEN_MAX)
+		return -EINVAL;
 
 	ret = mse_config_get_avtp_rx_param_crf(index, &data);
 	if (ret)
 		return ret;
 
-	strtobin(data.streamid, buf, sizeof(u64));
+	ret = strtobin(data.streamid, buf2, sizeof(u64));
+	if (ret < 0)
+		return -EINVAL;
 
 	ret =  mse_config_set_avtp_rx_param_crf(index, &data);
 	if (ret)
