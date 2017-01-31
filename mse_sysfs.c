@@ -1128,7 +1128,8 @@ static ssize_t mse_mch_config_int_show(struct device *dev,
 {
 	struct mse_mch_config data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	bool value;
 
 	mse_debug("START %s\n", attr->attr.name);
 
@@ -1162,6 +1163,9 @@ static ssize_t mse_mch_config_int_store(struct device *dev,
 
 	ret = kstrtol(buf, 0, (long *)&value);
 	if (ret)
+		return -EINVAL;
+
+	if (!(value == 0 || value == 1))
 		return -EINVAL;
 
 	ret = mse_config_get_mch_config(index, &data);
