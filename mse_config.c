@@ -542,19 +542,30 @@ int mse_config_set_ptp_config(int index, struct mse_ptp_config *data)
 
 	mse_debug("START\n");
 
-	if ((data->type < 0) || (data->type >= MSE_PTP_TYPE_MAX))
-		goto wrong_value;
+	if (config->info.type == MSE_STREAM_TYPE_AUDIO) {
+		if (data->type >= MSE_PTP_TYPE_MAX)
+			goto wrong_value;
 
-	if (data->capture_ch > MSE_CONFIG_CAPTURE_CH_MAX)
-		goto wrong_value;
+		if (data->capture_ch > MSE_CONFIG_CAPTURE_CH_MAX)
+			goto wrong_value;
 
-	if ((data->recovery_capture_freq < 0) ||
-	    (data->recovery_capture_freq >= MSE_RECOVERY_CAPTURE_FREQ_MAX))
-		goto wrong_value;
+		if (data->recovery_capture_freq >=
+			MSE_RECOVERY_CAPTURE_FREQ_MAX)
+			goto wrong_value;
 
-	spin_lock_irqsave(&config->lock, flags);
-	config->ptp_config = *data;
-	spin_unlock_irqrestore(&config->lock, flags);
+		spin_lock_irqsave(&config->lock, flags);
+		config->ptp_config = *data;
+		spin_unlock_irqrestore(&config->lock, flags);
+	} else {
+		if (data->type != MSE_PTP_TYPE_CURRENT_TIME)
+			goto wrong_value;
+
+		spin_lock_irqsave(&config->lock, flags);
+		config->ptp_config.type = data->type;
+		config->ptp_config.deviceid = data->deviceid;
+		/* ignore other member */
+		spin_unlock_irqrestore(&config->lock, flags);
+	}
 
 	return 0;
 
