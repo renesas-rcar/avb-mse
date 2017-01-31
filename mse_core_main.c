@@ -2423,6 +2423,11 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	struct mse_instance *instance;
 	u64 timer;
 	struct mse_adapter *adapter;
+	struct mse_media_audio_config *media_audio_config;
+	struct mse_network_config *net_config;
+	struct mse_packetizer_ops *packetizer;
+	struct mse_adapter_network_ops *network;
+	int index_packetizer, index_network;
 	int ret;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
@@ -2452,12 +2457,12 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	}
 
 	adapter = instance->media;
-
-	config->samples_per_frame =
-		adapter->config.media_audio_config.samples_per_frame;
-
-	/* set config */
-	memcpy(&instance->media_config.audio, config, sizeof(*config));
+	media_audio_config = &adapter->config.media_audio_config;
+	net_config = &instance->net_config;
+	packetizer = instance->packetizer;
+	index_packetizer = instance->index_packetizer;
+	network = instance->network;
+	index_network = instance->index_network;
 
 	/* calc timer value */
 	timer = NSEC_SCALE * (u64)config->period_size;
@@ -2466,25 +2471,35 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	mse_info("timer_delay=%d\n", instance->timer_delay);
 
 	/* set AVTP header info */
-	instance->packetizer->set_network_config(
-		instance->index_packetizer, &instance->net_config);
+	ret = packetizer->set_network_config(index_packetizer, net_config);
+	if (ret < 0)
+		return ret;
+
 	/* init packet header */
-	ret = instance->packetizer->set_audio_config(
-		instance->index_packetizer, config);
+	config->samples_per_frame = media_audio_config->samples_per_frame;
+	ret = packetizer->set_audio_config(index_packetizer, config);
 	if (ret < 0)
 		return ret;
 
 	if (instance->tx) {
 		struct mse_cbsparam cbs;
 
-		instance->packetizer->calc_cbs(instance->index_packetizer,
-					       &cbs);
-		instance->network->set_cbs_param(instance->index_network,
-						 &cbs);
+		ret = packetizer->calc_cbs(index_packetizer, &cbs);
+		if (ret < 0)
+			return ret;
+
+		ret = network->set_cbs_param(index_network, &cbs);
+		if (ret < 0)
+			return ret;
 	} else {
-		instance->network->set_streamid(instance->index_network,
-						instance->net_config.streamid);
+		ret = network->set_streamid(index_network,
+					    net_config->streamid);
+		if (ret < 0)
+			return ret;
 	}
+
+	/* set config */
+	memcpy(&instance->media_config.audio, config, sizeof(*config));
 
 	/* use CRF packet */
 	if (instance->send_clock || (instance->media_clock_recovery == 1 &&
@@ -2532,6 +2547,11 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 {
 	struct mse_instance *instance;
 	u64 framerate;
+	struct mse_network_config *net_config;
+	struct mse_packetizer_ops *packetizer;
+	struct mse_adapter_network_ops *network;
+	int index_packetizer, index_network;
+	int ret;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
 		mse_err("invalid argument. index=%d\n", index);
@@ -2556,8 +2576,11 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 		return -EINVAL;
 	}
 
-	/* set config */
-	memcpy(&instance->media_config.video, config, sizeof(*config));
+	net_config = &instance->net_config;
+	packetizer = instance->packetizer;
+	index_packetizer = instance->index_packetizer;
+	network = instance->network;
+	index_network = instance->index_network;
 
 	/* calc timer value */
 	if (instance->tx &&
@@ -2569,25 +2592,37 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 	}
 
 	/* set AVTP header info */
-	instance->packetizer->set_network_config(instance->index_packetizer,
-						 &instance->net_config);
+	ret = packetizer->set_network_config(index_packetizer, net_config);
+	if (ret < 0)
+		return ret;
+
 	/* init packet header */
-	instance->packetizer->set_video_config(instance->index_packetizer,
-					       &instance->media_config.video);
+	ret = packetizer->set_video_config(index_packetizer, config);
+	if (ret < 0)
+		return ret;
 
 	if (instance->tx) {
 		struct mse_cbsparam cbs;
 
-		instance->packetizer->calc_cbs(instance->index_packetizer,
-					       &cbs);
-		instance->network->set_cbs_param(instance->index_network,
-						 &cbs);
+		ret = packetizer->calc_cbs(index_packetizer, &cbs);
+		if (ret < 0)
+			return ret;
+
+		ret = network->set_cbs_param(index_network, &cbs);
+		if (ret < 0)
+			return ret;
+
 		mse_debug("bandwidth fraction = %08x\n",
 			  cbs.bandwidth_fraction);
 	} else {
-		instance->network->set_streamid(instance->index_network,
-						instance->net_config.streamid);
+		ret = network->set_streamid(index_network,
+					    net_config->streamid);
+		if (ret < 0)
+			return ret;
 	}
+
+	/* set config */
+	memcpy(&instance->media_config.video, config, sizeof(*config));
 
 	return 0;
 }
@@ -2626,6 +2661,12 @@ EXPORT_SYMBOL(mse_get_mpeg2ts_config);
 int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 {
 	struct mse_instance *instance;
+	struct mse_network_config *net_config;
+	struct mse_packetizer_ops *packetizer;
+	struct mse_adapter_network_ops *network;
+	int index_packetizer, index_network;
+
+	int ret;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
 		mse_err("invalid argument. index=%d\n", index);
@@ -2644,35 +2685,47 @@ int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 		return -EINVAL;
 	}
 
-	/* set config */
-	memcpy(&instance->media_config.mpeg2ts, config, sizeof(*config));
+	net_config = &instance->net_config;
+	packetizer = instance->packetizer;
+	index_packetizer = instance->index_packetizer;
+	network = instance->network;
+	index_network = instance->index_network;
 
 	instance->timer_delay = MPEG2TS_TIMER_NS;
 	mse_info("timer_delay=%d\n", instance->timer_delay);
 
 	/* set AVTP header info */
-	instance->packetizer->set_network_config(
-		instance->index_packetizer,
-		&instance->net_config);
+	ret = packetizer->set_network_config(index_packetizer, net_config);
+	if (ret < 0)
+		return ret;
 
 	/* init packet header */
-	instance->packetizer->set_mpeg2ts_config(
-		instance->index_packetizer,
-		&instance->media_config.mpeg2ts);
+	ret = packetizer->set_mpeg2ts_config(index_packetizer, config);
+	if (ret < 0)
+		return ret;
 
 	if (instance->tx) {
 		struct mse_cbsparam cbs;
 
-		instance->packetizer->calc_cbs(
-			instance->index_packetizer, &cbs);
-		instance->network->set_cbs_param(
-			instance->index_network, &cbs);
+		ret = packetizer->calc_cbs(index_packetizer, &cbs);
+		if (ret < 0)
+			return ret;
+
+		ret = network->set_cbs_param(index_network, &cbs);
+		if (ret < 0)
+			return ret;
+
 		mse_debug("bandwidth fraction = %08x\n",
 			  cbs.bandwidth_fraction);
 	} else {
-		instance->network->set_streamid(instance->index_network,
-						instance->net_config.streamid);
+		ret = network->set_streamid(index_network,
+					    net_config->streamid);
+		if (ret < 0)
+			return ret;
 	}
+
+	/* set config */
+	memcpy(&instance->media_config.mpeg2ts, config, sizeof(*config));
 
 	return 0;
 }
