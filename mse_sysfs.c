@@ -1451,7 +1451,8 @@ static ssize_t mse_delay_time_int_show(struct device *dev,
 {
 	struct mse_delay_time data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	u32 value;
 
 	mse_debug("START %s\n", attr->attr.name);
 
@@ -1471,7 +1472,7 @@ static ssize_t mse_delay_time_int_show(struct device *dev,
 	else
 		return -EPERM;
 
-	ret = sprintf(buf, "%d\n", value);
+	ret = sprintf(buf, "%u\n", value);
 
 	mse_debug("END value=%s ret=%d\n", buf, ret);
 
@@ -1485,11 +1486,12 @@ static ssize_t mse_delay_time_int_store(struct device *dev,
 {
 	struct mse_delay_time data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	u32 value;
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
-	ret = kstrtol(buf, 0, (long *)&value);
+	ret = kstrtouint(buf, 0, &value);
 	if (ret)
 		return -EINVAL;
 
@@ -1513,7 +1515,7 @@ static ssize_t mse_delay_time_int_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	mse_debug("END value=%d ret=%zd\n", value, len);
+	mse_debug("END value=%u ret=%zd\n", value, len);
 
 	return len;
 }
