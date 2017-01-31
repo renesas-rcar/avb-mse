@@ -2315,6 +2315,7 @@ int mse_register_adapter_network(struct mse_adapter_network_ops *ops)
 {
 	int index;
 	unsigned long flags;
+	char name[MSE_NAME_LEN_MAX + 1];
 
 	/* check argument */
 	if (!ops) {
@@ -2331,7 +2332,9 @@ int mse_register_adapter_network(struct mse_adapter_network_ops *ops)
 		return -EINVAL;
 	}
 
-	mse_debug("type=%d name=%s\n", ops->type, ops->name);
+	mse_name_strlcpy(name, ops->name);
+	mse_debug("type=%d name=%s\n", ops->type, name);
+
 	spin_lock_irqsave(&mse->lock_tables, flags);
 
 	/* search unused index */
@@ -2341,7 +2344,7 @@ int mse_register_adapter_network(struct mse_adapter_network_ops *ops)
 
 	if (index >= ARRAY_SIZE(mse->network_table)) {
 		spin_unlock_irqrestore(&mse->lock_tables, flags);
-		mse_err("%s is not registered\n", ops->name);
+		mse_err("%s is not registered\n", name);
 
 		return -EBUSY;
 	}
@@ -2744,6 +2747,7 @@ int mse_open(int index_media, bool tx)
 	struct mse_network_device *network_device;
 	enum MSE_PACKETIZER packetizer_id;
 	char *dev_name;
+	char name[MSE_NAME_LEN_MAX + 1];
 
 	if ((index_media < 0) || (index_media >= MSE_ADAPTER_MEDIA_MAX)) {
 		mse_err("invalid argument. index=%d\n", index_media);
@@ -2801,7 +2805,8 @@ int mse_open(int index_media, bool tx)
 		goto error_network_adapter_not_found;
 	}
 
-	mse_debug("network adapter index=%d name=%s\n", i, network->name);
+	mse_name_strlcpy(name, network->name);
+	mse_debug("network adapter index=%d name=%s\n", i, name);
 
 	/* get packetizer id */
 	packetizer_id = adapter->config.packetizer.packetizer;
