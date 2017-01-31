@@ -294,6 +294,7 @@ static ssize_t mse_network_device_str_show(struct device *dev,
 	int index = mse_dev_to_index(dev);
 	int ret;
 	char *value;
+	char buf2[MSE_NAME_LEN_MAX + 1];
 
 	mse_debug("START %s\n", attr->attr.name);
 
@@ -321,7 +322,8 @@ static ssize_t mse_network_device_str_show(struct device *dev,
 	else
 		return -EPERM;
 
-	ret = sprintf(buf, "%s\n", value);
+	ret = snprintf(buf2, MSE_NAME_LEN_MAX + 1, "%s", value);
+	ret = snprintf(buf, ret + 2, "%s\n", buf2);
 
 	mse_debug("END value=%s ret=%d\n", buf, ret);
 
@@ -336,9 +338,17 @@ static ssize_t mse_network_device_str_store(struct device *dev,
 	struct mse_network_device data;
 	int index = mse_dev_to_index(dev);
 	int ret, cplen;
-	char *value, *value_org;
+	char buf2[MSE_NAME_LEN_MAX + 1];
+	char *name;
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
+
+	if (len > sizeof(buf2))
+		return -EINVAL;
+
+	cplen = mse_sysfs_strncpy_from_user(buf2, buf, sizeof(buf2));
+	if (cplen < 0 || cplen > MSE_NAME_LEN_MAX)
+		return -EINVAL;
 
 	ret = mse_config_get_network_device(index, &data);
 	if (ret)
@@ -346,39 +356,32 @@ static ssize_t mse_network_device_str_store(struct device *dev,
 
 	if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_MODULE_NAME,
 		     strlen(attr->attr.name)))
-		value = data.module_name;
+		name = data.module_name;
 	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_DEVICE_NAME_TX,
 			  strlen(attr->attr.name)))
-		value = data.device_name_tx;
+		name = data.device_name_tx;
 	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_DEVICE_NAME_RX,
 			  strlen(attr->attr.name)))
-		value = data.device_name_rx;
+		name = data.device_name_rx;
 	else if (!strncmp(attr->attr.name,
 			  MSE_SYSFS_NAME_STR_DEVICE_NAME_TX_CRF,
 			  strlen(attr->attr.name)))
-		value = data.device_name_tx_crf;
+		name = data.device_name_tx_crf;
 	else if (!strncmp(attr->attr.name,
 			  MSE_SYSFS_NAME_STR_DEVICE_NAME_RX_CRF,
 			  strlen(attr->attr.name)))
-		value = data.device_name_rx_crf;
+		name = data.device_name_rx_crf;
 	else
 		return -EPERM;
 
-	if (len > MSE_NAME_LEN_MAX)
-		cplen = MSE_NAME_LEN_MAX;
-	else
-		cplen = strlen(buf);
-
-	memset(value, 0, MSE_NAME_LEN_MAX);
-	strncpy(value, buf, cplen);
-	value_org = value;
-	strsep(&value, "\n");
+	memset(name, 0, MSE_NAME_LEN_MAX);
+	strncpy(name, buf2, cplen);
 
 	ret = mse_config_set_network_device(index, &data);
 	if (ret)
 		return ret;
 
-	mse_debug("END value=%s ret=%d\n", value_org, cplen);
+	mse_debug("END value=%s ret=%d\n", buf2, cplen);
 
 	return len;
 }
