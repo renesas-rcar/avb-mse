@@ -81,6 +81,11 @@
 #define mse_compare_param_key(val, key) strncmp(val, key, MSE_NAME_LEN_MAX)
 
 /**
+ * @brief Copy name function for MSE
+ */
+#define mse_name_strlcpy(dst, src) strlcpy(dst, src, MSE_NAME_LEN_MAX + 1)
+
+/**
  * @brief Unresistered device index
  */
 #define MSE_INDEX_UNDEFINED	(-1)
