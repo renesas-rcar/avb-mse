@@ -101,6 +101,7 @@ struct cvf_mjpeg_packetizer {
 	int send_seq_num;
 	int old_seq_num;
 	int seq_num_err;
+	int payload_max;
 
 	enum MJPEG_TYPE type;
 	u8 quant;
@@ -256,6 +257,7 @@ static int mse_packetizer_cvf_mjpeg_set_video_config(
 	struct cvf_mjpeg_packetizer *cvf_mjpeg;
 	struct avtp_cvf_mjpeg_param param;
 	struct mse_network_config *net_config;
+	int bytes_per_frame;
 
 	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
 		return -EPERM;
@@ -265,6 +267,18 @@ static int mse_packetizer_cvf_mjpeg_set_video_config(
 	cvf_mjpeg = &cvf_mjpeg_packetizer_table[index];
 	cvf_mjpeg->video_config = *config;
 	net_config = &cvf_mjpeg->net_config;
+
+	bytes_per_frame = cvf_mjpeg->video_config.bytes_per_frame;
+	if (bytes_per_frame == 0) {
+		cvf_mjpeg->payload_max = ETHFRAMELEN_MAX - AVTP_PAYLOAD_OFFSET;
+	} else {
+		if (AVTP_PAYLOAD_OFFSET + bytes_per_frame > ETHFRAMELEN_MAX) {
+			mse_err("bytes_per_frame too big %d\n",
+				bytes_per_frame);
+			return -EINVAL;
+		}
+		cvf_mjpeg->payload_max = bytes_per_frame;
+	}
 
 	memcpy(param.dest_addr, net_config->dest_addr, MSE_MAC_LEN_MAX);
 	memcpy(param.source_addr, net_config->source_addr, MSE_MAC_LEN_MAX);
@@ -309,7 +323,7 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 	do_div(bandwidth_fraction_numerator, TRANSMIT_RATE_BASE);
 	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
 	do_div(value, bandwidth_fraction_denominator);
-	do_div(value, AVTP_PAYLOAD_MAX);
+	do_div(value, cvf_mjpeg->payload_max);
 	if (value > UINT_MAX) {
 		mse_err("cbs error value=0x%016llx\n", value);
 		return -EPERM;
@@ -319,13 +333,13 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 
 	value = (u64)USHRT_MAX * bandwidth_fraction_numerator;
 	do_div(value, bandwidth_fraction_denominator);
-	do_div(value, AVTP_PAYLOAD_MAX);
+	do_div(value, cvf_mjpeg->payload_max);
 	cbs->send_slope = (u32)value;
 
 	value = (u64)USHRT_MAX * (bandwidth_fraction_denominator *
-		(u64)AVTP_PAYLOAD_MAX - bandwidth_fraction_numerator);
+		(u64)cvf_mjpeg->payload_max - bandwidth_fraction_numerator);
 	do_div(value, bandwidth_fraction_denominator);
-	do_div(value, AVTP_PAYLOAD_MAX);
+	do_div(value, cvf_mjpeg->payload_max);
 	cbs->idle_slope = (u32)value;
 
 	return 0;
@@ -451,8 +465,8 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 		}
 	}
 
-	payload_size = ETH_FRAME_LEN - AVTP_CVF_MJPEG_PAYLOAD_OFFSET;
-	data_len = payload_size;
+	payload_size = cvf_mjpeg->payload_max;
+	data_len = payload_size - AVTP_JPEG_HEADER_SIZE;
 
 	if (cvf_mjpeg->quant >= MJPEG_QUANT_QTABLE_BIT &&
 	    !cvf_mjpeg->jpeg_offset) {
@@ -541,8 +555,7 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 		payload_size -= data_len - end_len;
 		data_len = end_len;
 	}
-	avtp_set_stream_data_length(packet,
-				    payload_size + AVTP_JPEG_HEADER_SIZE);
+	avtp_set_stream_data_length(packet, payload_size);
 
 	/* set jpeg data */
 	memcpy(payload, buf, data_len);
