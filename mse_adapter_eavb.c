@@ -135,19 +135,21 @@ static int mse_adapter_eavb_open(char *name)
 	int err, index;
 	int device_id;
 	struct mse_adapter_eavb *eavb;
+	char avb_devname[MSE_NAME_LEN_MAX + 1];
 	static struct eavb_option option = {
 		.id = EAVB_OPTIONID_BLOCKMODE,
 		.param = EAVB_BLOCK_WAITALL,
 	};
 
+	mse_name_strlcpy(avb_devname, name);
 	/* convert table string->id */
-	device_id = mse_adapter_eavb_set_devname(name);
+	device_id = mse_adapter_eavb_set_devname(avb_devname);
 	if (device_id < 0) {
-		mse_err("error unknown dev=%s\n", name);
+		mse_err("error unknown dev=%s\n", avb_devname);
 		return -EPERM;
 	}
 
-	mse_debug("dev=%s(%d)\n", name, device_id);
+	mse_debug("dev=%s(%d)\n", avb_devname, device_id);
 
 	for (index = 0; index < ARRAY_SIZE(eavb_table) &&
 	     eavb_table[index].used_f; index++)
@@ -160,7 +162,7 @@ static int mse_adapter_eavb_open(char *name)
 
 	err = ravb_streaming_open_stq_kernel(device_id, &eavb->ravb, 0);
 	if (err) {
-		mse_err("error open dev=%s code=%d\n", name, err);
+		mse_err("error open dev=%s code=%d\n", avb_devname, err);
 		return err;
 	}
 
