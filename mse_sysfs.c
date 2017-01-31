@@ -100,6 +100,7 @@
 /* define */
 #define MSE_RADIX_HEXADECIMAL   (16)
 #define MSE_NAME_LEN_MAX        (32)
+#define MSE_MAC_STR_LEN_MAX     (12)
 
 #define MSE_SYSFS_NAME_STR_MODULE_NAME               "module_name"
 #define MSE_SYSFS_NAME_STR_DEVICE_NAME_TX            "device_name_tx"
@@ -209,10 +210,30 @@ static int strtobin(unsigned char *dest, const char *in_str, int len)
 	int err, i, j;
 
 	err = kstrtoll(in_str, MSE_RADIX_HEXADECIMAL, &decode.hex);
+	if (err < 0)
+		return err;
+
 	for (i = 0, j = len - 1; i < len; i++, j--)
 		dest[i] = decode.byte[j];
 
 	return err;
+}
+
+static ssize_t mse_sysfs_strncpy_from_user(char *dst,
+					   const char *src,
+					   ssize_t size)
+{
+	char **value = &dst;
+	char *value2;
+
+	strncpy(dst, src, size);
+	if (*(dst + size - 1) != '\0' &&
+	    *(dst + size - 1) != '\n')
+		return -EINVAL;
+
+	value2 = strsep(value, "\n");
+
+	return strlen(value2);
 }
 
 static ssize_t mse_info_device_show(struct device *dev,
@@ -450,14 +471,24 @@ static ssize_t mse_avtp_tx_dst_mac_store(struct device *dev,
 	struct mse_avtp_tx_param data;
 	int index = mse_dev_to_index(dev);
 	int ret;
+	char buf2[MSE_MAC_STR_LEN_MAX + 1];
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
+
+	if (len > sizeof(buf2))
+		return -EINVAL;
+
+	ret = mse_sysfs_strncpy_from_user(buf2, buf, sizeof(buf2));
+	if (ret != MSE_MAC_STR_LEN_MAX)
+		return -EINVAL;
 
 	ret = mse_config_get_avtp_tx_param(index, &data);
 	if (ret)
 		return ret;
 
-	strtobin(data.dst_mac, buf, MSE_MAC_LEN_MAX);
+	ret = strtobin(data.dst_mac, buf2, MSE_MAC_LEN_MAX);
+	if (ret < 0)
+		return -EINVAL;
 
 	ret =  mse_config_set_avtp_tx_param(index, &data);
 	if (ret)
@@ -501,14 +532,24 @@ static ssize_t mse_avtp_tx_src_mac_store(struct device *dev,
 	struct mse_avtp_tx_param data;
 	int index = mse_dev_to_index(dev);
 	int ret;
+	char buf2[MSE_MAC_STR_LEN_MAX + 1];
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
+
+	if (len > sizeof(buf2))
+		return -EINVAL;
+
+	ret = mse_sysfs_strncpy_from_user(buf2, buf, sizeof(buf2));
+	if (ret != MSE_MAC_STR_LEN_MAX)
+		return -EINVAL;
 
 	ret = mse_config_get_avtp_tx_param(index, &data);
 	if (ret)
 		return ret;
 
-	strtobin(data.src_mac, buf, MSE_MAC_LEN_MAX);
+	ret = strtobin(data.src_mac, buf2, MSE_MAC_LEN_MAX);
+	if (ret < 0)
+		return -EINVAL;
 
 	ret =  mse_config_set_avtp_tx_param(index, &data);
 	if (ret)
@@ -1157,14 +1198,24 @@ static ssize_t mse_avtp_tx_crf_dst_mac_store(struct device *dev,
 	struct mse_avtp_tx_param data;
 	int index = mse_dev_to_index(dev);
 	int ret;
+	char buf2[MSE_MAC_STR_LEN_MAX + 1];
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
+
+	if (len > sizeof(buf2))
+		return -EINVAL;
+
+	ret = mse_sysfs_strncpy_from_user(buf2, buf, sizeof(buf2));
+	if (ret != MSE_MAC_STR_LEN_MAX)
+		return -EINVAL;
 
 	ret = mse_config_get_avtp_tx_param_crf(index, &data);
 	if (ret)
 		return ret;
 
-	strtobin(data.dst_mac, buf, MSE_MAC_LEN_MAX);
+	ret = strtobin(data.dst_mac, buf2, MSE_MAC_LEN_MAX);
+	if (ret < 0)
+		return -EINVAL;
 
 	ret =  mse_config_set_avtp_tx_param_crf(index, &data);
 	if (ret)
@@ -1208,14 +1259,24 @@ static ssize_t mse_avtp_tx_crf_src_mac_store(struct device *dev,
 	struct mse_avtp_tx_param data;
 	int index = mse_dev_to_index(dev);
 	int ret;
+	char buf2[MSE_MAC_STR_LEN_MAX + 1];
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
+
+	if (len > sizeof(buf2))
+		return -EINVAL;
+
+	ret = mse_sysfs_strncpy_from_user(buf2, buf, sizeof(buf2));
+	if (ret != MSE_MAC_STR_LEN_MAX)
+		return -EINVAL;
 
 	ret = mse_config_get_avtp_tx_param_crf(index, &data);
 	if (ret)
 		return ret;
 
-	strtobin(data.src_mac, buf, MSE_MAC_LEN_MAX);
+	ret = strtobin(data.src_mac, buf2, MSE_MAC_LEN_MAX);
+	if (ret < 0)
+		return -EINVAL;
 
 	ret =  mse_config_set_avtp_tx_param_crf(index, &data);
 	if (ret)
