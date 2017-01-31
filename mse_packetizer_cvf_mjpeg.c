@@ -538,19 +538,17 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 			/* M bit */
 			avtp_set_cvf_m(packet, true);
 		}
-		avtp_set_stream_data_length(
-					packet,
-					payload_size - (data_len - end_len));
+		payload_size -= data_len - end_len;
 		data_len = end_len;
-	} else {
-		avtp_set_stream_data_length(packet, payload_size);
 	}
+	avtp_set_stream_data_length(packet,
+				    payload_size + AVTP_JPEG_HEADER_SIZE);
 
 	/* set jpeg data */
 	memcpy(payload, buf, data_len);
 
 	/* set packet length */
-	*packet_size = AVTP_CVF_MJPEG_PAYLOAD_OFFSET +
+	*packet_size = AVTP_CVF_MJPEG_PAYLOAD_OFFSET - AVTP_JPEG_HEADER_SIZE +
 		avtp_get_stream_data_length(packet);
 
 	/* read buffer length */
@@ -629,7 +627,7 @@ static int mse_packetizer_cvf_mjpeg_depacketize(int index,
 				 (AVTP_SEQUENCE_NUM_MAX + 1);
 
 	data = (u8 *)packet + AVTP_CVF_MJPEG_PAYLOAD_OFFSET;
-	data_len = avtp_get_stream_data_length(packet);
+	data_len = avtp_get_stream_data_length(packet) - AVTP_JPEG_HEADER_SIZE;
 	*timestamp = avtp_get_timestamp(packet);
 
 	tspec = avtp_get_cvf_mjpeg_tspec(packet);
