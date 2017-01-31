@@ -1024,25 +1024,35 @@ static ssize_t mse_ptp_config_type_store(struct device *dev,
 					 const char *buf,
 					 size_t len)
 {
+	enum MSE_CRF_TYPE type = -1;
 	struct mse_ptp_config data;
 	int index = mse_dev_to_index(dev);
 	int i, ret;
+	char buf2[MSE_NAME_LEN_MAX + 1];
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
-	ret = mse_config_get_ptp_config(index, &data);
-	if (ret)
-		return ret;
+	if (len > sizeof(buf2))
+		return -EINVAL;
+
+	ret = mse_sysfs_strncpy_from_user(buf2, buf, sizeof(buf2));
+	if (ret < 0 || ret > MSE_NAME_LEN_MAX)
+		return -EINVAL;
 
 	for (i = 0; i < MSE_PTP_TYPE_MAX; i++) {
-		if (!strncmp(buf, ptp_type_table[i].str,
-			     strlen(ptp_type_table[i].str))) {
-			data.type = ptp_type_table[i].id;
+		if (!mse_compare_param_key(buf2, ptp_type_table[i].str)) {
+			type = ptp_type_table[i].id;
 			break;
 		}
 	}
 	if (i == MSE_PTP_TYPE_MAX)
 		return -EINVAL;
+
+	ret = mse_config_get_ptp_config(index, &data);
+	if (ret)
+		return ret;
+
+	data.type = type;
 
 	ret = mse_config_set_ptp_config(index, &data);
 	if (ret)
