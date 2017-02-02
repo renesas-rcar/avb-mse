@@ -1562,6 +1562,7 @@ static void mse_work_stop(struct work_struct *work)
 	struct mse_adapter *adapter;
 	struct mch_ops *m_ops;
 	enum MSE_CRF_TYPE crf_type;
+	struct mse_adapter_network_ops *network;
 	int ret;
 
 	mse_debug("START\n");
@@ -1571,25 +1572,28 @@ static void mse_work_stop(struct work_struct *work)
 	instance->state = MSE_STATE_OPEN;
 	adapter = instance->media;
 	crf_type = instance->crf_type;
-
-	ret = instance->network->cancel(instance->index_network);
-	if (ret)
-		mse_err("failed cancel() ret=%d\n", ret);
-
-	if (crf_type == MSE_CRF_TYPE_RX) {
-		ret = instance->network->cancel(instance->crf_index_network);
-		if (ret)
-			mse_err("failed cancel() ret=%d\n", ret);
-
-		flush_work(&instance->wk_crf_receive);
-	} else if (crf_type == MSE_CRF_TYPE_TX && instance->f_crf_sending) {
-		flush_work(&instance->wk_crf_send);
-	}
+	network = instance->network;
 
 	/* timer stop */
 	ret = hrtimer_try_to_cancel(&instance->timer);
 	if (ret)
 		mse_err("The timer was still in use...\n");
+
+	if (instance->f_work_timestamp)
+		flush_work(&instance->wk_timestamp);
+
+	if (instance->f_streaming) {
+		if (instance->tx) {
+			flush_work(&instance->wk_packetize);
+			flush_work(&instance->wk_stream);
+		} else {
+			ret = network->cancel(instance->index_network);
+			if (ret)
+				mse_err("failed cancel() ret=%d\n", ret);
+			flush_work(&instance->wk_stream);
+			flush_work(&instance->wk_depacketize);
+		}
+	}
 
 	/* timestamp timer, crf timer stop */
 	if (IS_MSE_TYPE_AUDIO(adapter->type)) {
@@ -1608,13 +1612,17 @@ static void mse_work_stop(struct work_struct *work)
 				mse_err("mch close error(%d).\n", ret);
 			}
 		}
+		if (crf_type == MSE_CRF_TYPE_RX) {
+			ret = instance->network->cancel(
+				instance->crf_index_network);
+			if (ret)
+				mse_err("failed cancel() ret=%d\n", ret);
+			flush_work(&instance->wk_crf_receive);
+		} else if (crf_type == MSE_CRF_TYPE_TX &&
+			   instance->f_crf_sending) {
+			flush_work(&instance->wk_crf_send);
+		}
 	}
-
-	if (instance->f_work_timestamp)
-		flush_work(&instance->wk_timestamp);
-
-	if (instance->f_streaming)
-		flush_work(&instance->wk_stream);
 }
 
 static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)

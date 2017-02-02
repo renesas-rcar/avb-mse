@@ -301,6 +301,9 @@ int mse_packet_ctrl_send_packet(int index,
 			  ret, now_write_p, dma->read_p, new_read_p);
 
 		dma->read_p = new_read_p;
+
+		if (ret == 0)
+			break;
 	}
 
 	return 0;
