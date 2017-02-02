@@ -1467,6 +1467,12 @@ static int register_mse_core(struct v4l2_adapter_device *vadp_dev,
 
 static struct v4l2_adapter_device *g_v4l2_adapter;
 
+static void mse_adapter_v4l2_cleanup(struct v4l2_adapter_device *vadp_dev)
+{
+	v4l2_device_unregister(&vadp_dev->v4l2_dev);
+	video_unregister_device(&vadp_dev->vdev);
+}
+
 static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 {
 	int err;
@@ -1545,6 +1551,7 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	err = video_register_device(vdev, VFL_TYPE_GRABBER, -1);
 	if (err) {
 		mse_err("Failed video_register_device() Rtn=%d\n", err);
+		v4l2_device_unregister(&vadp_dev->v4l2_dev);
 		return -EPERM;
 	}
 
@@ -1554,6 +1561,7 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	err = register_mse_core(vadp_dev, type);
 	if (err < 0) {
 		mse_err("Failed register_mse_core() Rtn=%d\n", err);
+		mse_adapter_v4l2_cleanup(vadp_dev);
 		return err;
 	}
 
@@ -1562,12 +1570,6 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 		 vadp_dev->index_mse);
 
 	return 0;
-}
-
-static void mse_adapter_v4l2_cleanup(struct v4l2_adapter_device *vadp_dev)
-{
-	v4l2_device_unregister(&vadp_dev->v4l2_dev);
-	video_unregister_device(&vadp_dev->vdev);
 }
 
 static void unregister_mse_core(struct v4l2_adapter_device *vadp_dev)
@@ -1599,7 +1601,7 @@ static int mse_adapter_v4l2_free(int dev_num)
 
 static int __init mse_adapter_v4l2_init(void)
 {
-	int err, i, type;
+	int err, i, j, type;
 
 	mse_debug("Start v4l2 adapter\n");
 
@@ -1647,8 +1649,8 @@ static int __init mse_adapter_v4l2_init(void)
 	return 0;
 
 init_fail:
-	for (i = 0; i < v4l2_devices; i++)
-		mse_adapter_v4l2_free(i);
+	for (j = 0; j < i; j++)
+		mse_adapter_v4l2_free(j);
 
 	kfree(g_v4l2_adapter);
 
