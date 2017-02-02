@@ -83,6 +83,12 @@
 #include "ravb_mse_kernel.h"
 
 /*********************/
+/* Name of driver    */
+/*********************/
+#define MSE_ADAPTER_V4L2_NAME_BASE   "ravb_mse"
+#define MSE_ADAPTER_V4L2_DRIVER_NAME "ravb_mse.v4l2"
+
+/*********************/
 /* Number of devices */
 /*********************/
 #define MSE_ADAPTER_V4L2_DEVICE_MAX		MSE_ADAPTER_MEDIA_MAX
@@ -229,6 +235,20 @@ static int v4l2_devices;
 /************/
 /* Function */
 /************/
+static inline const char *convert_type_to_str(enum MSE_TYPE type)
+{
+	switch (type) {
+	case MSE_TYPE_ADAPTER_VIDEO:
+		return "video";
+
+	case MSE_TYPE_ADAPTER_MPEG2TS:
+		return "mpeg2ts";
+
+	default:
+		return "";
+	}
+}
+
 static inline struct v4l2_adapter_buffer *to_v4l2_adapter_buffer(
 						struct vb2_v4l2_buffer *vbuf)
 {
@@ -371,7 +391,8 @@ static int mse_adapter_v4l2_querycap(struct file *filp,
 		return -EINVAL;
 	}
 
-	strlcpy(vcap->driver, "renesas-mse", sizeof(vcap->driver));
+	strlcpy(vcap->driver, MSE_ADAPTER_V4L2_DRIVER_NAME,
+		sizeof(vcap->driver));
 	strlcpy(vcap->card, vadp_dev->vdev.name, sizeof(vcap->card));
 	snprintf(vcap->bus_info, sizeof(vcap->bus_info), "platform:%s",
 		 vadp_dev->v4l2_dev.name);
@@ -1462,8 +1483,6 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	vadp_dev->index_instance = MSE_INDEX_UNDEFINED;
 
 	vdev = &vadp_dev->vdev;
-	snprintf(vdev->name, sizeof(vdev->name),
-		 "Renesas MSE Adapter %d", dev_num);
 	vdev->release = video_device_release_empty;
 	vdev->fops = &g_mse_adapter_v4l2_fops;
 	vdev->vfl_type = VFL_TYPE_GRABBER;
@@ -1514,8 +1533,8 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	video_set_drvdata(vdev, vadp_dev);
 
 	v4l2_dev = &vadp_dev->v4l2_dev;
-	snprintf(v4l2_dev->name, sizeof(v4l2_dev->name),
-		 "Renesas MSE Device %d", dev_num);
+	snprintf(v4l2_dev->name, sizeof(v4l2_dev->name), "%s",
+		 MSE_ADAPTER_V4L2_NAME_BASE);
 	err = v4l2_device_register(NULL, v4l2_dev);
 	if (err) {
 		mse_err("Failed v4l2_device_register() Rtn=%d\n", err);
@@ -1537,6 +1556,10 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 		mse_err("Failed register_mse_core() Rtn=%d\n", err);
 		return err;
 	}
+
+	snprintf(vdev->name, sizeof(vdev->name), "%s.v4l2.%s.mse%d",
+		 v4l2_dev->name, convert_type_to_str(type),
+		 vadp_dev->index_mse);
 
 	return 0;
 }
