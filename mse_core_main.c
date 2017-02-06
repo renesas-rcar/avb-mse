@@ -115,6 +115,7 @@
 #define CRF_AUDIO_TIMESTAMPS (6)     /* audio timestamps per CRF packet */
 
 #define AVTP_TIMESTAMPS_MAX  (512)
+#define CREATE_AVTP_TIMESTAMPS_MAX   (4096)
 
 #define MSE_DECODE_BUFFER_NUM (8)
 #define MSE_DECODE_BUFFER_NUM_START_MIN (2)
@@ -296,7 +297,7 @@ struct mse_instance {
 	/** @brief buffer length for packetize */
 	size_t media_buffer_size;
 	/** @brief AVTP timestampes */
-	unsigned int avtp_timestamps[1024];
+	unsigned int avtp_timestamps[CREATE_AVTP_TIMESTAMPS_MAX];
 	int avtp_timestamps_size;
 	int avtp_timestamps_current;
 	/** @brief complete function pointer */
@@ -1170,6 +1171,13 @@ static int create_avtp_timestamps(struct mse_instance *instance)
 		instance->remain -= instance->audio_info.sample_per_packet;
 		num_t++;
 	}
+
+	if (num_t > CREATE_AVTP_TIMESTAMPS_MAX) {
+		mse_err("too much packet, cannot create %d timestamps\n",
+			num_t);
+		return -EPERM;
+	}
+
 	mse_debug("create %d\n", num_t);
 	d_t = instance->audio_info.frame_interval_time;
 	spin_lock_irqsave(&instance->lock_ques, flags);
@@ -2043,6 +2051,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 	size_t buffer_size;
 	int (*mse_completion)(void *priv, int size);
 	unsigned long flags;
+	int ret;
 
 	instance = container_of(work, struct mse_instance, wk_start_trans);
 
@@ -2147,8 +2156,13 @@ static void mse_work_start_transmission(struct work_struct *work)
 		/* start workqueue for packetize */
 		instance->f_continue = false;
 
-		if (IS_MSE_TYPE_AUDIO(adapter->type))
-			create_avtp_timestamps(instance);
+		if (IS_MSE_TYPE_AUDIO(adapter->type)) {
+			ret = create_avtp_timestamps(instance);
+			if (ret < 0) {
+				mse_completion(instance->private_data, ret);
+				return;
+			}
+		}
 
 		queue_work(instance->wq_packet, &instance->wk_packetize);
 	} else {
