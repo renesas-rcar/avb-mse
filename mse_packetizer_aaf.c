@@ -138,7 +138,7 @@ static enum AVTP_AAF_FORMAT get_aaf_format(enum MSE_AUDIO_BIT bit_depth)
 	case MSE_AUDIO_BIT_32:
 		return AVTP_AAF_FORMAT_INT_32BIT;
 	default:
-		return -1;
+		return AVTP_AAF_FORMAT_RESERVED;
 	}
 }
 
@@ -200,12 +200,14 @@ static int check_receive_packet(int index, int channels,
 static int check_packet_format(int index)
 {
 	struct aaf_packetizer *aaf;
+	enum AVTP_AAF_FORMAT avtp_format;
 
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
 	aaf = &aaf_packetizer_table[index];
 
-	if (get_aaf_format(aaf->audio_config.sample_bit_depth) < 0) {
+	avtp_format = get_aaf_format(aaf->audio_config.sample_bit_depth);
+	if (avtp_format == AVTP_AAF_FORMAT_RESERVED) {
 		mse_err("invalid sample format bit_depth %d\n",
 			mse_get_bit_depth(aaf->audio_config.sample_bit_depth));
 
