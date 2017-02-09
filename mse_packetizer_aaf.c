@@ -199,68 +199,76 @@ static int check_receive_packet(int index, int channels,
 
 static int check_packet_format(int index)
 {
+	int err;
 	struct aaf_packetizer *aaf;
+	struct mse_audio_config *audio_config;
 	enum AVTP_AAF_FORMAT avtp_format;
+	enum MSE_AUDIO_BIT sample_bit_depth;
+	int bytes_per_sample, bit_depth, sample_rate, channels;
 
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
-	aaf = &aaf_packetizer_table[index];
 
-	avtp_format = get_aaf_format(aaf->audio_config.sample_bit_depth);
+	aaf = &aaf_packetizer_table[index];
+	audio_config = &aaf->audio_config;
+
+	sample_bit_depth = audio_config->sample_bit_depth;
+	bytes_per_sample = audio_config->bytes_per_sample;
+	bit_depth = mse_get_bit_depth(sample_bit_depth);
+	sample_rate = audio_config->sample_rate;
+	channels = audio_config->channels;
+
+	avtp_format = get_aaf_format(sample_bit_depth);
 	if (avtp_format == AVTP_AAF_FORMAT_RESERVED) {
-		mse_err("invalid sample format bit_depth %d\n",
-			mse_get_bit_depth(aaf->audio_config.sample_bit_depth));
+		mse_err("invalid aaf format by bit_depth %d\n", bit_depth);
 
 		return -EINVAL;
 	}
 
-	switch (aaf->audio_config.sample_bit_depth) {
+	err = 0;
+	switch (sample_bit_depth) {
 	case MSE_AUDIO_BIT_16:
-		if (aaf->audio_config.bytes_per_sample != 2)
-			goto format_err;
+		if (bytes_per_sample != 2)
+			err = 1;
 		break;
 	case MSE_AUDIO_BIT_18:
 	case MSE_AUDIO_BIT_20:
-		if (aaf->audio_config.bytes_per_sample != 3)
-			goto format_err;
+		if (bytes_per_sample != 3)
+			err = 1;
 		break;
 	case MSE_AUDIO_BIT_24:
-		if (aaf->audio_config.bytes_per_sample != 3 &&
-		    aaf->audio_config.bytes_per_sample != 4)
-			goto format_err;
+		if (bytes_per_sample != 3 &&
+		    bytes_per_sample != 4)
+			err = 1;
 		break;
 	case MSE_AUDIO_BIT_32:
-		if (aaf->audio_config.bytes_per_sample != 4)
-			goto format_err;
+		if (bytes_per_sample != 4)
+			err = 1;
 		break;
 	default:
-		goto format_err;
+		err = 1;
+		break;
 	}
-
-	if (avtp_sample_rate_to_nsr(aaf->audio_config.sample_rate) ==
-	    AVTP_AAF_NSR_USER) {
-		mse_err("invalid sample rata %d\n",
-			aaf->audio_config.sample_rate);
+	if (err) {
+		mse_err("invalid format bit_depth=%d bytes_per_sample=%d\n",
+			bit_depth, bytes_per_sample);
 
 		return -EINVAL;
 	}
 
-	if (aaf->audio_config.channels < 1 ||
-	    aaf->audio_config.channels > 24) {
-		mse_err("invalid channel number %d\n",
-			aaf->audio_config.channels);
+	if (avtp_sample_rate_to_nsr(sample_rate) == AVTP_AAF_NSR_USER) {
+		mse_err("invalid sample rate %d\n", sample_rate);
+
+		return -EINVAL;
+	}
+
+	if (channels < 1 || channels > 24) {
+		mse_err("invalid channel number %d\n", channels);
 
 		return -EINVAL;
 	}
 
 	return 0;
-
-format_err:
-	mse_err("invalid format bit_depth %d bytes_per_sample=%d\n",
-		mse_get_bit_depth(aaf->audio_config.sample_bit_depth),
-		aaf->audio_config.bytes_per_sample);
-
-	return -EINVAL;
 }
 
 static int mse_packetizer_aaf_open(void)
