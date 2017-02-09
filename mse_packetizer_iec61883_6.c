@@ -765,6 +765,12 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 		return -EINVAL;
 	}
 
+	if (avtp_get_iec61883_fmt(packet) != AVTP_IEC61883_FMT_AUDIO) {
+		mse_err("error iec61883_fmt=%d\n",
+			avtp_get_iec61883_fmt(packet));
+		return -EINVAL;
+	}
+
 	if (iec61883_6->piece_f) {
 		iec61883_6->piece_f = false;
 		memcpy(buffer, iec61883_6->packet_piece,
