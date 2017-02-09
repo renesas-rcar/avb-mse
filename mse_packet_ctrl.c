@@ -446,7 +446,7 @@ int mse_packet_ctrl_take_out_packet(int index,
 		dma->read_p = (dma->read_p + 1) % dma->size;
 
 		if (ret < 0)
-			return ret;
+			return -EIO;
 
 		pcount++;
 		if (ret >= 0 && *t_stored < t_size) {
@@ -461,7 +461,7 @@ int mse_packet_ctrl_take_out_packet(int index,
 	if (ret == MSE_PACKETIZE_STATUS_CONTINUE && pcount > 0) {
 		mse_debug("depacketize not enough. processed packet=%d(processed=%zu, ret=%d)\n",
 			  pcount, *processed, ret);
-		return -1;
+		return -EAGAIN;
 	}
 
 	return *processed;
