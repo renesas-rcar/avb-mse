@@ -473,6 +473,12 @@ static int mse_packetizer_iec61883_4_depacketize(int index,
 		return -EINVAL;
 	}
 
+	if (avtp_get_iec61883_fmt(packet) != AVTP_IEC61883_FMT_MPEG2TS) {
+		mse_err("error iec61883_fmt=%d\n",
+			avtp_get_iec61883_fmt(packet));
+		return -EINVAL;
+	}
+
 	/* seq_num check */
 	seq_num = avtp_get_sequence_num(packet);
 	if (iec61883_4->old_seq_num != seq_num &&
