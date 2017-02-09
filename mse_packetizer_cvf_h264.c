@@ -594,6 +594,17 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 		return -EINVAL;
 	}
 
+	if (avtp_get_cvf_format(packet) != AVTP_CVF_FORMAT_RFC) {
+		mse_err("error cvf_format=%d\n", avtp_get_cvf_format(packet));
+		return -EINVAL;
+	}
+
+	if (avtp_get_cvf_format_subtype(packet) != AVTP_CVF_RFC_FORMAT_H264) {
+		mse_err("error cvf_format_subtype=%d\n",
+			avtp_get_cvf_format_subtype(packet));
+		return -EINVAL;
+	}
+
 	/* seq_num check */
 	seq_num = avtp_get_sequence_num(packet);
 	if (h264->old_seq_num != seq_num && h264->old_seq_num != SEQNUM_INIT) {
