@@ -381,6 +381,11 @@ DEF_AVTP_ACCESSER_UINT8(iec61883_dbc, 27)
 DEF_AVTP_ACCESSER_UINT8(iec61883_fdf, 29)
 DEF_AVTP_ACCESSER_UINT16(iec61883_syt, 30)
 
+static inline u8 avtp_get_iec61883_fmt(void *data)
+{
+	return *((u8 *)(data + 28 + AVTP_OFFSET)) & 0x3F;
+}
+
 static inline u8 avtp_get_iec61883_sid(void *data)
 {
 	return *((u8 *)(data + 24 + AVTP_OFFSET)) & 0xc0;
