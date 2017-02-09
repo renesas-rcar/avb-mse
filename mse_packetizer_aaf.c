@@ -773,6 +773,10 @@ static int mse_packetizer_aaf_depacketize(int index,
 	aaf_sample_rate = avtp_aaf_nsr_to_sample_rate(
 		avtp_get_aaf_nsr(packet));
 	aaf_byte_per_ch = get_aaf_format_size(aaf_format);
+	if (!aaf_byte_per_ch) {
+		mse_err("packet's format=%d can not accecpted\n", aaf_format);
+		return -EINVAL;
+	}
 	count = payload_size / aaf_byte_per_ch;
 
 	/* buffer over check */
