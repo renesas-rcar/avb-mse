@@ -151,56 +151,66 @@ static int check_receive_packet(int index, int channels, void *packet)
 
 static int check_packet_format(int index)
 {
+	int err;
 	struct iec61883_6_packetizer *iec61883_6;
+	struct mse_audio_config *audio_config;
+	enum MSE_AUDIO_BIT sample_bit_depth;
+	int bytes_per_sample, bit_depth, sample_rate, channels;
 
 	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
 		return -EPERM;
-	iec61883_6 = &iec61883_6_packetizer_table[index];
 
-	switch (iec61883_6->audio_config.sample_bit_depth) {
+	iec61883_6 = &iec61883_6_packetizer_table[index];
+	audio_config = &iec61883_6->audio_config;
+
+	sample_bit_depth = audio_config->sample_bit_depth;
+	bytes_per_sample = audio_config->bytes_per_sample;
+	bit_depth = mse_get_bit_depth(sample_bit_depth);
+	sample_rate = audio_config->sample_rate;
+	channels = audio_config->channels;
+
+	err = 0;
+	switch (sample_bit_depth) {
 	case MSE_AUDIO_BIT_16:
-		if (iec61883_6->audio_config.bytes_per_sample != 2)
-			goto format_err;
+		if (bytes_per_sample != 2)
+			err = 1;
 		break;
 	case MSE_AUDIO_BIT_18:
 	case MSE_AUDIO_BIT_20:
-		if (iec61883_6->audio_config.bytes_per_sample != 3)
-			goto format_err;
+		if (bytes_per_sample != 3)
+			err = 1;
 		break;
 	case MSE_AUDIO_BIT_24:
-		if (iec61883_6->audio_config.bytes_per_sample != 3 &&
-		    iec61883_6->audio_config.bytes_per_sample != 4)
-			goto format_err;
+		if (bytes_per_sample != 3 &&
+		    bytes_per_sample != 4)
+			err = 1;
 		break;
 	default:
-		goto format_err;
+		err = 1;
+		break;
 	}
-
-	if (avtp_sample_rate_to_fdf(iec61883_6->audio_config.sample_rate) ==
-	    (AVTP_IEC61883_6_FDF_EVT_AM824 |
-	     AVTP_IEC61883_6_FDF_SFC_RESERVED)) {
-		mse_err("invalid sample rata %d\n",
-			iec61883_6->audio_config.sample_rate);
+	if (err) {
+		mse_err("invalid format bit_depth=%d bytes_per_sample=%d\n",
+			bit_depth, bytes_per_sample);
 
 		return -EINVAL;
 	}
 
-	if (iec61883_6->audio_config.channels < 1 ||
-	    iec61883_6->audio_config.channels > 24) {
-		mse_err("invalid channel number %d\n",
-			iec61883_6->audio_config.channels);
+	if (avtp_sample_rate_to_fdf(sample_rate) ==
+	    (AVTP_IEC61883_6_FDF_EVT_AM824 |
+	     AVTP_IEC61883_6_FDF_SFC_RESERVED)) {
+		mse_err("invalid sample rate %d\n", sample_rate);
+
+		return -EINVAL;
+	}
+
+	if (channels < 1 || channels > 24) {
+		mse_err("invalid channel number %d\n", channels);
 
 		return -EINVAL;
 	}
 
 	return 0;
-
-format_err:
-	mse_err("invalid format bit_depth %d bytes_per_sample=%d\n",
-		mse_get_bit_depth(iec61883_6->audio_config.sample_bit_depth),
-		iec61883_6->audio_config.bytes_per_sample);
-
-	return -EINVAL;
 }
 
 static int mse_packetizer_iec61883_6_open(void)
