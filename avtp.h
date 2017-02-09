@@ -230,6 +230,7 @@ enum AVTP_AAF_FORMAT {
 	AVTP_AAF_FORMAT_INT_16BIT   = 0x04, /* 16 bit integer */
 	AVTP_AAF_FORMAT_AES3_32BIT  = 0x05, /* 32 bit AES3 format. See 8.4 and Annex K. */
 	/* 0x06-0xFF Reserved */
+	AVTP_AAF_FORMAT_RESERVED    = 0xFF,
 };
 
 /* P1722/D16 Table 11 - nsr field values */
