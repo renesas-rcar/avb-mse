@@ -364,11 +364,6 @@ static int mse_packetizer_iec61883_6_set_audio_config(
 		iec61883_6->frame_interval_time = NSEC / CLASS_INTERVAL_FRAMES;
 	} else {
 		iec61883_6->sample_per_packet = audio_config->samples_per_frame;
-		if (iec61883_6->sample_per_packet < 2)
-			iec61883_6->sample_per_packet = 2;
-		else if (iec61883_6->sample_per_packet > 128)
-			iec61883_6->sample_per_packet = 128;
-
 		iec61883_6->class_interval_frames = DIV_ROUND_UP(
 			audio_config->sample_rate,
 			iec61883_6->sample_per_packet);
