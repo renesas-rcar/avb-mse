@@ -772,7 +772,7 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 	err = try_mse_open(vadp_dev, i);
 	if (err) {
 		mse_err("Failed mse_open()\n");
-		return err;
+		goto error_failed_mse_open;
 	}
 
 	if (vadp_dev->format.pixelformat == V4L2_PIX_FMT_MPEG) {
@@ -780,7 +780,7 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 					     &config_ts);
 		if (err < 0) {
 			mse_err("Failed mse_get_mpeg2ts_config()\n");
-			return err;
+			goto error_after_mse_opened;
 		}
 
 		/* nothing to set at current version */
@@ -788,14 +788,14 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 					     &config_ts);
 		if (err < 0) {
 			mse_err("Failed mse_set_mpeg2ts_config()\n");
-			return err;
+			goto error_after_mse_opened;
 		}
 	} else {
 		/* video config */
 		err = mse_get_video_config(vadp_dev->index_instance, &config);
 		if (err < 0) {
 			mse_err("Failed mse_get_video_config()\n");
-			return err;
+			goto error_after_mse_opened;
 		}
 
 		switch (vadp_dev->format.pixelformat) {
@@ -814,7 +814,7 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 				vadp_dev->format.pixelformat >> 8,
 				vadp_dev->format.pixelformat >> 16,
 				vadp_dev->format.pixelformat >> 24);
-			return -EINVAL;
+			goto error_after_mse_opened;
 		}
 
 		if (vadp_dev->frameintervals.numerator > 0 &&
@@ -826,12 +826,18 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 		err = mse_set_video_config(vadp_dev->index_instance, &config);
 		if (err < 0) {
 			mse_err("Failed mse_set_video_config()\n");
-			return err;
+			goto error_after_mse_opened;
 		}
 	}
 
 	mse_debug("END\n");
 	return vb2_ioctl_streamon(filp, priv, i);
+
+error_after_mse_opened:
+	try_mse_close(vadp_dev);
+
+error_failed_mse_open:
+	return vb2_ioctl_streamoff(filp, priv, i);
 }
 
 static int mse_adapter_v4l2_g_parm(struct file *filp,
