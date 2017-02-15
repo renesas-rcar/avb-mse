@@ -333,9 +333,8 @@ struct mse_instance {
 	int ptp_clock_ch;
 	int ptp_capture_freq;
 	int media_clock_recovery;
-	int media_clock_type;
 	int media_capture_freq;
-	int send_clock;
+	enum MSE_CRF_TYPE crf_type;
 	int max_transit_time;
 	int talker_delay_time;
 	int listener_delay_time;
@@ -545,8 +544,6 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 			ret = -EPERM;
 		}
 		audio->samples_per_frame = audio_config.samples_per_frame;
-		instance->send_clock =
-				(audio_config.crf_type == MSE_CRF_TYPE_TX);
 
 		err = mse_config_get_ptp_config(index,
 						&ptp_config);
@@ -558,8 +555,7 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 		err = mse_config_get_mch_config(index,
 						&mch_config);
 		instance->media_clock_recovery = mch_config.enable;
-		instance->media_clock_type =
-			(audio_config.crf_type == MSE_CRF_TYPE_RX);
+		instance->crf_type = audio_config.crf_type;
 		instance->media_capture_freq =
 			(ptp_config.recovery_capture_freq ==
 			 MSE_RECOVERY_CAPTURE_FREQ_NOT_FIXED);
@@ -924,7 +920,7 @@ static int media_clock_recovery(struct mse_instance *instance)
 	out = 0;
 	d_t = 0;
 
-	if (instance->media_clock_type == 0) {
+	if (instance->crf_type != MSE_CRF_TYPE_RX) {
 		/* avtp */
 		d_t = instance->audio_info.frame_interval_time;
 		if (!instance->f_present)
@@ -1250,7 +1246,7 @@ static int mse_initialize_crf_packetizer(struct mse_instance *instance)
 	if (ret < 0)
 		goto error_set_audio_config_fail;
 
-	if (instance->send_clock) {
+	if (instance->crf_type == MSE_CRF_TYPE_TX) {
 		ret = crf->calc_cbs(instance->crf_index, &cbs);
 		if (ret < 0)
 			goto error_calc_cbs_fail;
@@ -1580,8 +1576,7 @@ static void mse_work_stop(struct work_struct *work)
 	if (ret)
 		mse_err("failed cancel() ret=%d\n", ret);
 
-	if (instance->media_clock_recovery == 1 &&
-	    instance->media_clock_type == 1) {
+	if (instance->crf_type == MSE_CRF_TYPE_RX) {
 		ret = instance->network->cancel(instance->crf_index_network);
 		if (ret)
 			mse_err("failed cancel() ret=%d\n", ret);
@@ -1921,7 +1916,7 @@ static void mse_work_start_streaming(struct work_struct *work)
 		}
 
 		/* send clock using CRF */
-		if (instance->send_clock) {
+		if (instance->crf_type == MSE_CRF_TYPE_TX) {
 			ktime_crf = ktime_set(0, instance->crf_timer_delay);
 			hrtimer_start(&instance->crf_timer,
 				      ktime_crf,
@@ -1929,8 +1924,7 @@ static void mse_work_start_streaming(struct work_struct *work)
 		}
 
 		/* receive clcok using CRF */
-		if (instance->media_clock_recovery == 1 &&
-		    instance->media_clock_type == 1) {
+		if (instance->crf_type == MSE_CRF_TYPE_RX) {
 			queue_work(instance->wq_crf_packet,
 				   &instance->wk_crf_receive);
 		}
@@ -2524,8 +2518,7 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	memcpy(&instance->media_config.audio, config, sizeof(*config));
 
 	/* use CRF packet */
-	if (instance->send_clock || (instance->media_clock_recovery == 1 &&
-				     instance->media_clock_type == 1)) {
+	if (instance->crf_type != MSE_CRF_TYPE_NOT_USE) {
 		ret = mse_initialize_crf_packetizer(instance);
 		if (ret < 0)
 			return ret;
@@ -2776,6 +2769,25 @@ int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 }
 EXPORT_SYMBOL(mse_set_mpeg2ts_config);
 
+static int check_mch_config(struct mse_instance *instance)
+{
+	bool mch_enable = instance->media_clock_recovery;
+	bool tx = instance->tx;
+	enum MSE_CRF_TYPE crf_type = instance->crf_type;
+
+	if (!mch_enable) {
+		if (crf_type == MSE_CRF_TYPE_RX)
+			return 1;
+	} else {
+		if (tx && crf_type != MSE_CRF_TYPE_RX)
+			return 1;
+		else if (!tx && crf_type == MSE_CRF_TYPE_TX)
+			return 1;
+	}
+
+	return 0; /* Valid */
+}
+
 int mse_open(int index_media, bool tx)
 {
 	struct mse_instance *instance;
@@ -2985,6 +2997,12 @@ int mse_open(int index_media, bool tx)
 	if (ret < 0)
 		mse_err("cannot get configurations\n");
 
+	if (check_mch_config(instance)) {
+		mse_err("media clock recovery config is invalid mch_config.enable=%d media_audio_config.crf_type=%d\n",
+			instance->media_clock_recovery, instance->crf_type);
+		goto error_mch_config_invalid;
+	}
+
 	if (instance->media_clock_recovery == 1) {
 		for (i = 0; i < MSE_MCH_MAX; i++) {
 			m_ops = mse->mch_table[i];
@@ -3028,7 +3046,7 @@ int mse_open(int index_media, bool tx)
 						instance->network);
 
 	/* send clock using CRF */
-	if (instance->send_clock) {
+	if (instance->crf_type == MSE_CRF_TYPE_TX) {
 		int ret;
 
 		dev_name = network_device->device_name_tx_crf;
@@ -3074,6 +3092,7 @@ error_cannot_open_network_device_for_crf:
 
 error_mch_cannot_open:
 error_mch_not_found:
+error_mch_config_invalid:
 	if (instance->wq_crf_packet)
 		destroy_workqueue(instance->wq_crf_packet);
 
@@ -3141,7 +3160,7 @@ int mse_close(int index)
 
 	/* release network adapter */
 	instance->network->release(instance->index_network);
-	if (instance->send_clock)
+	if (instance->crf_type == MSE_CRF_TYPE_TX)
 		instance->network->release(instance->crf_index_network);
 
 	/* release packetizer */
