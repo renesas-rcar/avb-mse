@@ -1270,7 +1270,6 @@ static int mse_adapter_v4l2_capture_callback(void *priv, int size)
 	unsigned long flags;
 	struct v4l2_adapter_buffer *buf = NULL;
 	struct v4l2_adapter_device *vadp_dev = priv;
-	enum vb2_buffer_state buf_state = VB2_BUF_STATE_DONE;
 
 	if (!vadp_dev) {
 		mse_err("Private data is NULL\n");
@@ -1293,14 +1292,20 @@ static int mse_adapter_v4l2_capture_callback(void *priv, int size)
 		return 0;
 	}
 
-	if (size == 0)
-		buf_state = VB2_BUF_STATE_ERROR;
+	if (size < 0) {
+		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
+		vb2_queue_error(&vadp_dev->q_cap);
+		return -EINVAL;
+	}
 
 	vb2_set_plane_payload(&buf->vb.vb2_buf, 0, size);
 	buf->vb.vb2_buf.timestamp = ktime_get_ns();
 	buf->vb.sequence = vadp_dev->sequence++;
 	buf->vb.field = vadp_dev->format.field;
-	vb2_buffer_done(&buf->vb.vb2_buf, buf_state);
+	if (size == 0)
+		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
+	else
+		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 
 	err = capture_send_first_buffer(vadp_dev);
 	if (err < 0)
