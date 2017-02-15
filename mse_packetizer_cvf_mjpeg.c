@@ -364,9 +364,6 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	memset(qtable, 0, sizeof(qtable));
 	memset(comp, 0, sizeof(comp));
 
-	if (*buffer_processed == 0)
-		cvf_mjpeg->header_f = true;
-
 	while (offset < data_len && cvf_mjpeg->header_f &&
 	       !cvf_mjpeg->eoi_f && !cvf_mjpeg->sos_f) {
 		u8 mk;
@@ -455,7 +452,7 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	data_len = payload_size - AVTP_JPEG_HEADER_SIZE;
 
 	if (cvf_mjpeg->quant >= MJPEG_QUANT_QTABLE_BIT &&
-	    !cvf_mjpeg->jpeg_offset) {
+	    !cvf_mjpeg->jpeg_offset && cvf_mjpeg->header_f) {
 		memset(&qheader, 0, sizeof(qheader));
 
 		for (i = 0; i <= cvf_mjpeg->max_comp; i++) {
@@ -517,7 +514,13 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 
 			payload += qlen;
 		}
-		data_len -= quant_len;
+
+		if (data_len > quant_len) {
+			data_len -= quant_len;
+		} else {
+			payload_size += quant_len - data_len;
+			data_len = 0;
+		}
 	}
 
 	buf += header_len;
@@ -553,11 +556,13 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	/* read buffer length */
 	*buffer_processed += data_len;
 
-	if (cvf_mjpeg->eoi_f && !(cvf_mjpeg->eoi_offset - *buffer_processed))
+	if (cvf_mjpeg->eoi_f && !(cvf_mjpeg->eoi_offset - *buffer_processed)) {
 		/* jpeg data end */
 		mse_packetizer_cvf_mjpeg_flag_init(cvf_mjpeg);
-	else
+	} else {
 		cvf_mjpeg->jpeg_offset += data_len;
+		cvf_mjpeg->header_f = false;
+	}
 
 	/* buffer end */
 	if (*buffer_processed == buffer_size)
