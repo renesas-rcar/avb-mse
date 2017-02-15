@@ -141,7 +141,7 @@ struct mse_avtp_rx_param {
 	uint8_t streamid[8];
 };
 
-#define MSE_CONFIG_SAMPLE_PER_FRAME_MAX (740)
+#define MSE_CONFIG_SAMPLE_PER_FRAME_MAX (738)
 
 enum MSE_CRF_TYPE {
 	MSE_CRF_TYPE_NOT_USE,
