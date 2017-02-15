@@ -119,6 +119,33 @@ static inline bool avb_device_is_tx(enum AVB_DEVNAME device_id)
 	return device_id <= AVB_DEVNAME_TX1;
 }
 
+static void avb_print_entrynum(struct mse_adapter_eavb *eavb)
+{
+#ifdef DEBUG
+	long ret;
+	struct eavb_entrynum en = {0, 0, 0};
+
+	ret = eavb->ravb.get_entrynum(eavb->ravb.handle, &en);
+	mse_debug("ret=%ld entry=%d wait=%d log=%d\n",
+		  ret, en.accepted, en.processed, en.completed);
+#endif
+}
+
+static int avb_check_completed(struct mse_adapter_eavb *eavb)
+{
+	long ret;
+	struct eavb_entrynum en = {0, 0, 0};
+
+	ret = eavb->ravb.get_entrynum(eavb->ravb.handle, &en);
+	if (ret < 0)
+		return ret;
+
+	mse_debug("ret=%ld entry=%d wait=%d log=%d\n",
+		  ret, en.accepted, en.processed, en.completed);
+
+	return en.completed;
+}
+
 static enum AVB_DEVNAME mse_adapter_eavb_set_devname(const char *val)
 {
 	int i;
@@ -321,8 +348,6 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 
 static int mse_adapter_eavb_check_receive(int index)
 {
-	long err;
-	struct eavb_entrynum en = {0, 0, 0};
 	struct mse_adapter_eavb *eavb;
 
 	if (index >= ARRAY_SIZE(eavb_table))
@@ -336,11 +361,9 @@ static int mse_adapter_eavb_check_receive(int index)
 	if (avb_device_is_tx(eavb->device_id))
 		return -EPERM;
 
-	err = eavb->ravb.get_entrynum(eavb->ravb.handle, &en);
-	mse_debug("index=%d ret=%ld entry=%d wait=%d log=%d\n",
-		  index, err, en.accepted, en.processed, en.completed);
+	mse_debug("index=%d", index);
 
-	return en.completed;
+	return avb_check_completed(eavb);
 }
 
 static int mse_adapter_eavb_send_prepare(int index,
@@ -431,14 +454,14 @@ static int mse_adapter_eavb_send(int index,
 		rret = eavb->ravb.read(eavb->ravb.handle, eavb->read_entry,
 				       num_dequeue);
 		if (rret != num_dequeue) {
-			/* TODO: Error recover */
-			mse_adapter_eavb_check_receive(index);
+			avb_print_entrynum(eavb);
+
 			if (rret < 0) {
-				mse_err("read error %d\n", (int)rret);
+				mse_err("read error %zd\n", rret);
 				return rret;
 			}
-			mse_err("read is short %d/%d\n",
-				(int)rret, num_dequeue);
+			mse_err("read is short %zd/%d\n",
+				rret, num_dequeue);
 		}
 		eavb->entried = (eavb->entried + rret) % eavb->num_entry;
 		eavb->num_send -= rret;
@@ -455,7 +478,7 @@ static int mse_adapter_eavb_send(int index,
 					eavb->entry + eavb->unentry,
 					num_packets);
 		if (wret < 0) {
-			mse_err("write error %d\n", (int)wret);
+			mse_err("write error %zd\n", wret);
 			return wret;
 		}
 	} else {
@@ -463,7 +486,7 @@ static int mse_adapter_eavb_send(int index,
 					eavb->entry + eavb->unentry,
 					eavb->num_entry - eavb->unentry);
 		if (wret < 0) {
-			mse_err("write error %d\n", (int)wret);
+			mse_err("write error %zd\n", wret);
 			return wret;
 		}
 		wret2 = eavb->ravb.write(
@@ -471,22 +494,22 @@ static int mse_adapter_eavb_send(int index,
 				eavb->entry,
 				num_packets - eavb->num_entry + eavb->unentry);
 		if (wret2 < 0) {
-			mse_err("write error %d\n", (int)wret);
+			mse_err("write error %zd\n", wret);
 			return wret2;
 		}
 		wret += wret2;
 	}
 
 	if (wret != num_packets) {
-		/* TODO: Error recover */
-		mse_adapter_eavb_check_receive(index);
-		mse_err("write is short %d/%d\n", (int)wret, num_packets);
+		avb_print_entrynum(eavb);
+
+		mse_err("write is short %zd/%d\n", wret, num_packets);
 	}
 	eavb->unentry = (eavb->unentry + wret) % eavb->num_entry;
 	eavb->num_send += wret;
 	mse_debug("read %zd write %zd\n", rret, wret);
 
-	return (int)wret;
+	return wret;
 }
 
 static int mse_adapter_eavb_receive_prepare(int index,
@@ -538,12 +561,13 @@ static int mse_adapter_eavb_receive_prepare(int index,
 		mse_err("cannot entry packet %zu/%d\n",
 			ret, MSE_EAVB_ADAPTER_ENTRY_MAX);
 
-		mse_adapter_eavb_check_receive(index);
+		avb_print_entrynum(eavb);
 		if (ret < 0)
-			mse_err("write error %d\n", (int)ret);
+			mse_err("write error %zd\n", ret);
 		else
-			mse_err("write is short %d/%d\n",
-				(int)ret, MSE_EAVB_ADAPTER_ENTRY_MAX);
+			mse_err("write is short %zd/%d\n",
+				ret, MSE_EAVB_ADAPTER_ENTRY_MAX);
+
 		return -EPERM;
 	}
 	eavb->unentry = MSE_EAVB_ADAPTER_ENTRY_MAX;
@@ -579,7 +603,7 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 		return -EPERM;
 	}
 
-	read_packets = mse_adapter_eavb_check_receive(index);
+	read_packets = avb_check_completed(eavb);
 	if (read_packets == 0)
 		read_packets = 1;
 	if (read_packets > num_packets)
