@@ -147,7 +147,7 @@ struct cvf_h264_packetizer {
 	int seq_num_err;
 	int header_size;             /* whole header size defined IEEE1722 */
 	int additional_header_size;  /* additional .. defined IEEE1722 H.264 */
-	int payload_max;
+	int data_len_max;
 
 	unsigned char *vcl_start;
 	unsigned char *next_nal;
@@ -320,15 +320,15 @@ static int mse_packetizer_cvf_h264_set_video_config(
 	data_offset = h264->header_size + FU_HEADER_LEN;
 	bytes_per_frame = h264->video_config.bytes_per_frame;
 	if (bytes_per_frame == 0) {
-		h264->payload_max = ETHFRAMELEN_MAX - data_offset;
+		h264->data_len_max = ETHFRAMELEN_MAX - data_offset;
 	} else {
-		if (data_offset + bytes_per_frame > ETHFRAMELEN_MAX) {
+		if (bytes_per_frame > ETHFRAMELEN_MAX - AVTP_PAYLOAD_OFFSET) {
 			mse_err("bytes_per_frame too big %d\n",
 				bytes_per_frame);
 			return -EINVAL;
 		}
-		h264->payload_max = bytes_per_frame - FU_HEADER_LEN -
-			h264->additional_header_size;
+		h264->data_len_max = bytes_per_frame - FU_HEADER_LEN -
+				     h264->additional_header_size;
 	}
 
 	memcpy(param.dest_addr, h264->net_config.dest_addr, MSE_MAC_LEN_MAX);
@@ -351,17 +351,20 @@ static int mse_packetizer_cvf_h264_calc_cbs(int index,
 	struct mse_network_config *net_config;
 	int ret;
 	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
+	int payload_size;
 
 	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
 		return -EPERM;
 
 	mse_debug("index=%d\n", index);
 	h264 = &cvf_h264_packetizer_table[index];
+	payload_size = h264->additional_header_size + FU_HEADER_LEN +
+		       h264->data_len_max;
 	net_config = &h264->net_config;
 
 	bandwidth_fraction_denominator =
 		((u64)net_config->port_transmit_rate / TRANSMIT_RATE_BASE) *
-		(u64)h264->payload_max;
+		(u64)payload_size;
 	if (!bandwidth_fraction_denominator) {
 		mse_err("Link speed %lu bps is not support\n",
 			net_config->port_transmit_rate);
@@ -464,7 +467,7 @@ static int mse_packetizer_cvf_h264_packetize(int index,
 		h264->fu_header = FU_H_S_BIT | (*cur_nal & NALU_TYPE_MASK);
 
 #if defined(CONFIG_MSE_PACKETIZER_CVF_H264_SINGLE_NAL)
-		if (h264->next_nal - cur_nal < h264->payload_max) {
+		if (h264->next_nal - cur_nal < h264->data_len_max) {
 			h264->fu_indicator =
 				*cur_nal & (FU_I_F_NRI_MASK | NALU_TYPE_MASK);
 		}
@@ -477,8 +480,8 @@ static int mse_packetizer_cvf_h264_packetize(int index,
 	}
 
 	data_len = h264->next_nal - cur_nal;
-	if (data_len > h264->payload_max) {
-		data_len = h264->payload_max;
+	if (data_len > h264->data_len_max) {
+		data_len = h264->data_len_max;
 		((unsigned char *)packet)[MBIT_ADDR] &= ~MBIT_SET;
 	} else {
 		h264->fu_header |= FU_H_E_BIT; /* end bit*/
