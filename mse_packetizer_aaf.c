@@ -418,10 +418,6 @@ static int mse_packetizer_aaf_set_audio_config(int index,
 		aaf->frame_interval_time = NSEC / aaf->class_interval_frames;
 	} else {
 		aaf->sample_per_packet = aaf->audio_config.samples_per_frame;
-		if (aaf->sample_per_packet < 2)
-			aaf->sample_per_packet = 2;
-		else if (aaf->sample_per_packet > 128)
-			aaf->sample_per_packet = 128;
 		aaf->class_interval_frames = DIV_ROUND_UP(
 			aaf->audio_config.sample_rate,
 			aaf->sample_per_packet);
