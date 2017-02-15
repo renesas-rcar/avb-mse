@@ -1424,7 +1424,7 @@ static void mse_work_depacketize(struct work_struct *work)
 				instance->packetizer,
 				&instance->work_length);
 
-			if (ret < -1) {
+			if (ret != -EAGAIN && ret < 0) {
 				instance->f_trans_start = false;
 				instance->mse_completion(
 						instance->private_data, ret);
@@ -1487,7 +1487,7 @@ static void mse_work_depacketize(struct work_struct *work)
 			instance->f_trans_start = false;
 			instance->mse_completion(instance->private_data, ret);
 			instance->work_length = 0;
-		} else {
+		} else if (ret == -EAGAIN) {
 			spin_lock_irqsave(&instance->lock_timer, flags);
 			instance->timer_cnt++;
 			spin_unlock_irqrestore(&instance->lock_timer, flags);
@@ -1496,6 +1496,11 @@ static void mse_work_depacketize(struct work_struct *work)
 				queue_work(instance->wq_stream,
 					   &instance->wk_stream);
 			}
+		} else {
+			instance->f_trans_start = false;
+			instance->mse_completion(
+					instance->private_data, ret);
+			instance->work_length = 0;
 		}
 		break;
 
@@ -2590,6 +2595,29 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 
 	if (!instance->used_f) {
 		mse_err("index=%d is not opened", index);
+		return -EINVAL;
+	}
+
+	switch (config->format) {
+	case MSE_VIDEO_FORMAT_H264_BYTE_STREAM:
+	case MSE_VIDEO_FORMAT_H264_AVC:
+		if ((instance->media->config.packetizer.packetizer !=
+		     MSE_PACKETIZER_CVF_H264) &&
+		    (instance->media->config.packetizer.packetizer !=
+		     MSE_PACKETIZER_CVF_H264_D13)) {
+			mse_err("invalid format.\n");
+			return -EINVAL;
+		}
+		break;
+	case MSE_VIDEO_FORMAT_MJPEG:
+		if (instance->media->config.packetizer.packetizer !=
+		    MSE_PACKETIZER_CVF_MJPEG) {
+			mse_err("invalid format.\n");
+			return -EINVAL;
+		}
+		break;
+	default:
+		mse_err("invalid format.\n");
 		return -EINVAL;
 	}
 
