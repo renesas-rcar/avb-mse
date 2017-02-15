@@ -394,6 +394,10 @@ int mse_config_set_media_video_config(int index,
 
 	mse_debug("START\n");
 
+	if (data->bytes_per_frame != 0 &&
+	    data->bytes_per_frame < MSE_CONFIG_BYTES_PER_FRAME_MIN)
+		goto wrong_value;
+
 	if (data->bytes_per_frame > MSE_CONFIG_BYTES_PER_FRAME_MAX)
 		goto wrong_value;
 
