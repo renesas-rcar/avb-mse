@@ -332,12 +332,6 @@ int mse_config_set_media_audio_config(int index,
 	if ((data->crf_type < 0) || (data->crf_type >= MSE_CRF_TYPE_MAX))
 		goto wrong_value;
 
-	if ((data->crf_type == MSE_CRF_TYPE_TX) && config->mch_config.enable) {
-		mse_err("invalid combination. mch=%d, crf_type=%d\n",
-			config->mch_config.enable, data->crf_type);
-		return -EINVAL;
-	}
-
 	spin_lock_irqsave(&config->lock, flags);
 	config->media_audio_config = *data;
 	spin_unlock_irqrestore(&config->lock, flags);
@@ -618,13 +612,6 @@ int mse_config_set_mch_config(int index, struct mse_mch_config *data)
 	}
 
 	mse_debug("START\n");
-
-	if (data->enable &&
-	    (config->media_audio_config.crf_type == MSE_CRF_TYPE_TX)) {
-		mse_err("invalid combination. enable=%d PTP type=%d\n",
-			data->enable, config->ptp_config.type);
-		return -EINVAL;
-	}
 
 	spin_lock_irqsave(&config->lock, flags);
 	config->mch_config = *data;
