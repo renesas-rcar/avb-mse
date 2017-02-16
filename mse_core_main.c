@@ -1563,6 +1563,7 @@ static void mse_work_stop(struct work_struct *work)
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
 	struct mch_ops *m_ops;
+	enum MSE_CRF_TYPE crf_type;
 	int ret;
 
 	mse_debug("START\n");
@@ -1571,16 +1572,20 @@ static void mse_work_stop(struct work_struct *work)
 
 	instance->state = MSE_STATE_OPEN;
 	adapter = instance->media;
+	crf_type = instance->crf_type;
 
 	ret = instance->network->cancel(instance->index_network);
 	if (ret)
 		mse_err("failed cancel() ret=%d\n", ret);
 
-	if (instance->crf_type == MSE_CRF_TYPE_RX) {
+	if (crf_type == MSE_CRF_TYPE_RX) {
 		ret = instance->network->cancel(instance->crf_index_network);
 		if (ret)
 			mse_err("failed cancel() ret=%d\n", ret);
+
 		flush_work(&instance->wk_crf_receive);
+	} else if (crf_type == MSE_CRF_TYPE_TX && instance->f_crf_sending) {
+		flush_work(&instance->wk_crf_send);
 	}
 
 	/* timer stop */
@@ -1668,12 +1673,17 @@ static void mse_work_crf_send(struct work_struct *work)
 
 	instance = container_of(work, struct mse_instance, wk_crf_send);
 
+	if (instance->f_stopping) {
+		instance->f_crf_sending = false;
+		return;
+	}
+
 	tsize = instance->ptp_clock == 0 ?
 		CRF_PTP_TIMESTAMPS : CRF_AUDIO_TIMESTAMPS;
 	spin_lock_irqsave(&instance->lock_ques, flags);
 	size = tstamps_get_tstamps_size(&instance->tstamp_que);
 	spin_unlock_irqrestore(&instance->lock_ques, flags);
-	while (size >= tsize) {
+	while (!instance->f_stopping && size >= tsize) {
 		/* get Timestamps */
 		mse_debug("size %d tsize %d\n", size, tsize);
 		spin_lock_irqsave(&instance->lock_ques, flags);
