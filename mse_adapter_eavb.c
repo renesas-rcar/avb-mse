@@ -141,6 +141,11 @@ static int mse_adapter_eavb_open(char *name)
 		.param = EAVB_BLOCK_WAITALL,
 	};
 
+	if (!name) {
+		mse_err("invalid argument. name\n");
+		return -EINVAL;
+	}
+
 	mse_name_strlcpy(avb_devname, name);
 	/* convert table string->id */
 	device_id = mse_adapter_eavb_set_devname(avb_devname);
@@ -283,6 +288,11 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 
 	if (index >= ARRAY_SIZE(eavb_table))
 		return -EPERM;
+
+	if (!streamid) {
+		mse_err("invalid argument. streamid\n");
+		return -EINVAL;
+	}
 
 	eavb = &eavb_table[index];
 
