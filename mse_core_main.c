@@ -2061,6 +2061,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 	int (*mse_completion)(void *priv, int size);
 	unsigned long flags;
 	int ret;
+	struct ptp_clock_time now;
 
 	instance = container_of(work, struct mse_instance, wk_start_trans);
 
@@ -2069,6 +2070,11 @@ static void mse_work_start_transmission(struct work_struct *work)
 	buffer = instance->start_buffer;
 	buffer_size = instance->start_buffer_size;
 	mse_completion = instance->start_mse_completion;
+
+	/* update timestamp(nsec) */
+	mse_ptp_get_time(instance->ptp_index,
+			 instance->ptp_dev_id, &now);
+	instance->timestamp = (unsigned long)now.sec * NSEC_SCALE + now.nsec;
 
 	/* TODO: to be move v4l2 adapter */
 	if (instance->use_temp_video_buffer_mjpeg) {
