@@ -301,12 +301,14 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 	struct mse_network_config *net_config;
 	int ret;
 	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
+	int ether_size;
 
 	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
 		return -EPERM;
 
 	mse_debug("index=%d\n", index);
 	cvf_mjpeg = &cvf_mjpeg_packetizer_table[index];
+	ether_size = cvf_mjpeg->payload_max + AVTP_PAYLOAD_OFFSET;
 	net_config = &cvf_mjpeg->net_config;
 
 	bandwidth_fraction_denominator =
@@ -319,7 +321,7 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 	}
 
 	bandwidth_fraction_numerator = (u64)cvf_mjpeg->video_config.bitrate *
-				       (u64)ETHFRAMELEN_MAX;
+				       (u64)ether_size;
 	bandwidth_fraction_numerator = div64_u64(bandwidth_fraction_numerator,
 						 TRANSMIT_RATE_BASE);
 
