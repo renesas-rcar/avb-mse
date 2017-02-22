@@ -1120,19 +1120,15 @@ static int get_timestamps(struct timestamp_queue *que,
 	return 0;
 }
 
-static int tstamps_store_ptp_timestamp(struct mse_instance *instance)
+static int tstamps_store_ptp_timestamp(struct mse_instance *instance,
+				       struct ptp_clock_time *now)
 {
-	struct ptp_clock_time now;
 	unsigned long flags;
-
-	/* get now time form ptp and save */
-	mse_ptp_get_time(instance->ptp_index,
-			 instance->ptp_dev_id, &now);
 
 	spin_lock_irqsave(&instance->lock_ques, flags);
 
 	tstamps_enq_tstamps(&instance->tstamp_que,
-			    instance->std_time_counter, &now);
+			    instance->std_time_counter, now);
 
 	spin_unlock_irqrestore(&instance->lock_ques, flags);
 
@@ -1525,9 +1521,6 @@ static void mse_work_callback(struct work_struct *work)
 		return;
 
 	adapter = instance->media;
-
-	if (instance->ptp_clock == 0)
-		tstamps_store_ptp_timestamp(instance);
 
 	if (instance->use_temp_video_buffer_mpeg2ts) {
 		mse_debug("mpeg2ts_clock_90k time=%llu pcr=%llu\n",
@@ -2095,6 +2088,9 @@ static void mse_work_start_transmission(struct work_struct *work)
 	mse_ptp_get_time(instance->ptp_index,
 			 instance->ptp_dev_id, &now);
 	instance->timestamp = (unsigned long)now.sec * NSEC_SCALE + now.nsec;
+
+	if (instance->ptp_clock == 0)
+		tstamps_store_ptp_timestamp(instance, &now);
 
 	/* TODO: to be move v4l2 adapter */
 	if (instance->use_temp_video_buffer_mjpeg) {
