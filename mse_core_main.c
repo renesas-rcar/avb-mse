@@ -521,6 +521,9 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 		video->fps.denominator = video_config.fps_denominator;
 		video->bitrate = video_config.bitrate;
 		video->bytes_per_frame = video_config.bytes_per_frame;
+		err = mse_config_get_delay_time(index,
+						&delay_time);
+		instance->max_transit_time = delay_time.max_transit_time_ns;
 		break;
 
 	case MSE_TYPE_ADAPTER_MPEG2TS:
@@ -534,6 +537,9 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 			mpeg2ts_config.tspackets_per_frame;
 		mpeg2ts->bitrate = mpeg2ts_config.bitrate;
 		mpeg2ts->pcr_pid = mpeg2ts_config.pcr_pid;
+		err = mse_config_get_delay_time(index,
+						&delay_time);
+		instance->max_transit_time = delay_time.max_transit_time_ns;
 		break;
 
 	case MSE_TYPE_ADAPTER_AUDIO:
@@ -1302,7 +1308,9 @@ static void mse_work_packetize(struct work_struct *work)
 			instance->packetizer,
 			&instance->work_length);
 	} else {
-		/* make AVTP packet with one timesamp */
+		/* make AVTP packet with one timestamp */
+		unsigned int timestamp_avtp = instance->timestamp +
+			instance->max_transit_time;
 		ret = mse_packet_ctrl_make_packet(
 			instance->index_packetizer,
 			instance->media_buffer,
@@ -1310,7 +1318,7 @@ static void mse_work_packetize(struct work_struct *work)
 			-1,
 			NULL,
 			1,
-			&instance->timestamp,
+			&timestamp_avtp,
 			instance->packet_buffer,
 			instance->packetizer,
 			&instance->work_length);
