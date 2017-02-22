@@ -171,6 +171,7 @@ static int mse_packetizer_iec61883_4_packet_init(int index)
 	iec61883_4->old_seq_num = SEQNUM_INIT;
 	iec61883_4->seq_num_err = SEQNUM_INIT;
 	iec61883_4->dbc = 0;
+	iec61883_4->diff_timestamp = 0;
 
 	return 0;
 }
@@ -302,11 +303,11 @@ static int mse_packetizer_iec61883_4_calc_cbs(int index,
 	return 0;
 }
 
-static u64 m2ts_timestamp_to_nsec(u32 host_header)
+static u32 m2ts_timestamp_to_nsec(u32 host_header)
 {
-	u64 ts_nsec = (host_header & 0x3fffffff) * NSEC;
+	u64 ts_nsec = (u64)(host_header & 0x3fffffff) * NSEC;
 
-	return div64_u64(ts_nsec, M2TS_FREQ);
+	return (u32)div64_u64(ts_nsec, M2TS_FREQ);
 }
 
 static int mse_packetizer_iec61883_4_packetize(int index,
@@ -325,7 +326,7 @@ static int mse_packetizer_iec61883_4_packetize(int index,
 	int src_packet_size;
 	int payloads;
 	int i;
-	u64 timestamp_ns;
+	u32 timestamp_m2ts;
 	unsigned int avtp_timestamp;
 	unsigned int num = 0, diff;
 	bool is_top_on_buffer;
@@ -407,12 +408,14 @@ static int mse_packetizer_iec61883_4_packetize(int index,
 		} else {                        /* M2TS */
 			avtp_timestamp = iec61883_4->curr_timestamp;
 
-			timestamp_ns = m2ts_timestamp_to_nsec(ntohl(*(unsigned long *)data));
-			if (is_top_on_buffer) {
-				iec61883_4->m2ts_start = (u32)timestamp_ns;
+			timestamp_m2ts = ntohl(*(unsigned long *)data);
+			if (is_top_on_buffer && i == 0) {
+				iec61883_4->m2ts_start = timestamp_m2ts;
 			} else {
 				/* timestamp adjust by m2ts timestamp */
-				avtp_timestamp += ((u32)timestamp_ns - iec61883_4->m2ts_start);
+				u32 t = timestamp_m2ts - iec61883_4->m2ts_start;
+
+				avtp_timestamp += m2ts_timestamp_to_nsec(t);
 			}
 
 			/* offset adjust by m2ts host_header size */
