@@ -1156,12 +1156,9 @@ static int create_avtp_timestamps(struct mse_instance *instance)
 
 	instance->avtp_timestamps_current = 0;
 
-	if (instance->ptp_clock == 0) {
-		offset = instance->max_transit_time;
-	} else {
-		offset = instance->max_transit_time +
-			instance->max_transit_time;
-	}
+	offset = instance->max_transit_time;
+	if (instance->ptp_clock)
+		offset += instance->talker_delay_time;
 
 	num_t = audio->period_size / instance->audio_info.sample_per_packet;
 
@@ -1673,7 +1670,7 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 static void mse_work_crf_send(struct work_struct *work)
 {
 	struct mse_instance *instance;
-	int err, tsize, size;
+	int err, tsize, size, i;
 	struct ptp_clock_time timestamps[6];
 	unsigned long flags;
 
@@ -1697,6 +1694,21 @@ static void mse_work_crf_send(struct work_struct *work)
 		spin_lock_irqsave(&instance->lock_ques, flags);
 		get_timestamps(&instance->tstamp_que, tsize, timestamps);
 		spin_unlock_irqrestore(&instance->lock_ques, flags);
+		for (i = 0; i < tsize; i++) {
+			u64 t;
+
+			t = timestamps[i].sec * NSEC_SCALE + timestamps[i].nsec;
+			if (instance->tx)
+				t += instance->max_transit_time;
+			if (instance->ptp_clock) {
+				if (instance->tx)
+					t += instance->talker_delay_time;
+				else
+					t -= instance->listener_delay_time;
+			}
+			timestamps[i].sec = div_s64_rem(t, NSEC_SCALE,
+							&timestamps[i].nsec);
+		}
 
 		/* create CRF packets */
 		err = mse_packet_ctrl_make_packet_crf(
