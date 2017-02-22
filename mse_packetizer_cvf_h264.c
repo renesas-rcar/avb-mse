@@ -351,7 +351,7 @@ static int mse_packetizer_cvf_h264_calc_cbs(int index,
 	struct mse_network_config *net_config;
 	int ret;
 	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
-	int payload_size;
+	int payload_size, ether_size;
 
 	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
 		return -EPERM;
@@ -360,6 +360,7 @@ static int mse_packetizer_cvf_h264_calc_cbs(int index,
 	h264 = &cvf_h264_packetizer_table[index];
 	payload_size = h264->additional_header_size + FU_HEADER_LEN +
 		       h264->data_len_max;
+	ether_size = payload_size + AVTP_PAYLOAD_OFFSET;
 	net_config = &h264->net_config;
 
 	bandwidth_fraction_denominator =
@@ -372,7 +373,7 @@ static int mse_packetizer_cvf_h264_calc_cbs(int index,
 	}
 
 	bandwidth_fraction_numerator = (u64)h264->video_config.bitrate *
-				       (u64)ETHFRAMELEN_MAX;
+				       (u64)ether_size;
 	bandwidth_fraction_numerator = div64_u64(bandwidth_fraction_numerator,
 						 TRANSMIT_RATE_BASE);
 
