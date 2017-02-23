@@ -404,7 +404,12 @@ static int mse_packetizer_iec61883_6_get_audio_info(
 {
 	struct iec61883_6_packetizer *iec61883_6;
 
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+		return -EPERM;
+
+	mse_debug("index=%d\n", index);
 	iec61883_6 = &iec61883_6_packetizer_table[index];
+
 	info->avtp_packet_size = iec61883_6->avtp_packet_size;
 	info->sample_per_packet = iec61883_6->sample_per_packet;
 	info->frame_interval_time = iec61883_6->frame_interval_time;
