@@ -454,7 +454,12 @@ static int mse_packetizer_aaf_get_audio_info(int index,
 {
 	struct aaf_packetizer *aaf;
 
+	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+		return -EPERM;
+
+	mse_debug("index=%d\n", index);
 	aaf = &aaf_packetizer_table[index];
+
 	info->avtp_packet_size = aaf->avtp_packet_size;
 	info->sample_per_packet = aaf->sample_per_packet;
 	info->frame_interval_time = aaf->frame_interval_time;
