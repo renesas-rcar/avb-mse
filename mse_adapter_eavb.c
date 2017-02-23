@@ -77,7 +77,7 @@
 #define MSE_EAVB_PACKET_LENGTH (1526)
 
 struct mse_adapter_eavb {
-	bool used_f;
+	int index;
 	struct eavb_entry *entry;
 	int num_entry;
 	int entried, unentry;
@@ -88,7 +88,10 @@ struct mse_adapter_eavb {
 	struct eavb_entry read_entry[MSE_EAVB_ADAPTER_ENTRY_MAX];
 };
 
+static int adapter_index;
 static struct mse_adapter_eavb eavb_table[MSE_EAVB_ADAPTER_MAX];
+DECLARE_BITMAP(eavb_table_map, MSE_EAVB_ADAPTER_MAX);
+DEFINE_SPINLOCK(eavb_lock);
 
 static struct {
 	const char *key;
@@ -157,9 +160,64 @@ static enum AVB_DEVNAME mse_adapter_eavb_set_devname(const char *val)
 	return -EINVAL;
 }
 
+static struct mse_adapter_eavb *mse_adapter_eavb_alloc_priv(int device_id)
+{
+	int index;
+	struct mse_adapter_eavb *eavb = NULL;
+	unsigned long flags;
+
+	spin_lock_irqsave(&eavb_lock, flags);
+
+	index = find_first_zero_bit(eavb_table_map, MSE_EAVB_ADAPTER_MAX);
+	if (index < MSE_EAVB_ADAPTER_MAX) {
+		/* found free slot */
+		eavb = &eavb_table[index];
+		eavb->index = index;
+		eavb->device_id = device_id;
+		set_bit(index, eavb_table_map);
+	}
+
+	spin_unlock_irqrestore(&eavb_lock, flags);
+
+	return eavb;
+}
+
+static void mse_adapter_eavb_free_priv(int index)
+{
+	struct mse_adapter_eavb *eavb;
+	unsigned long flags;
+
+	spin_lock_irqsave(&eavb_lock, flags);
+
+	if (test_and_clear_bit(index, eavb_table_map)) {
+		eavb = &eavb_table[index];
+		memset(eavb, 0, sizeof(*eavb));
+	}
+
+	spin_unlock_irqrestore(&eavb_lock, flags);
+}
+
+static struct mse_adapter_eavb *mse_adapter_eavb_get_priv(int index)
+{
+	struct mse_adapter_eavb *eavb = NULL;
+	unsigned long flags;
+
+	if (index >= ARRAY_SIZE(eavb_table))
+		return NULL;
+
+	spin_lock_irqsave(&eavb_lock, flags);
+
+	if (test_bit(index, eavb_table_map))
+		eavb = &eavb_table[index];
+
+	spin_unlock_irqrestore(&eavb_lock, flags);
+
+	return eavb;
+}
+
 static int mse_adapter_eavb_open(char *name)
 {
-	int err, index;
+	int err;
 	int device_id;
 	struct mse_adapter_eavb *eavb;
 	char avb_devname[MSE_NAME_LEN_MAX + 1];
@@ -183,34 +241,27 @@ static int mse_adapter_eavb_open(char *name)
 
 	mse_debug("dev=%s(%d)\n", avb_devname, device_id);
 
-	for (index = 0; index < ARRAY_SIZE(eavb_table) &&
-	     eavb_table[index].used_f; index++)
-		;
-
-	if (index >= ARRAY_SIZE(eavb_table))
+	eavb = mse_adapter_eavb_alloc_priv(device_id);
+	if (!eavb)
 		return -EPERM;
-
-	eavb = &eavb_table[index];
 
 	err = ravb_streaming_open_stq_kernel(device_id, &eavb->ravb, 0);
 	if (err) {
 		mse_err("error open dev=%s code=%d\n", avb_devname, err);
-		return err;
+		goto error_allocated_eavb;
 	}
 
 	err = eavb->ravb.set_option(eavb->ravb.handle, &option);
 	if (err) {
 		mse_err("error set_option code=%d\n", err);
-		ravb_streaming_release_stq_kernel(eavb->ravb.handle);
-		return err;
+		goto error_eavb_opened;
 	}
 
 	if (!avb_device_is_tx(device_id)) {
 		err = eavb->ravb.get_rxparam(eavb->ravb.handle, &eavb->rxparam);
 		if (err) {
 			mse_err("error get_rxparam code=%d\n", err);
-			ravb_streaming_release_stq_kernel(eavb->ravb.handle);
-			return err;
+			goto error_eavb_opened;
 		}
 	}
 
@@ -218,15 +269,19 @@ static int mse_adapter_eavb_open(char *name)
 			      sizeof(struct eavb_entry),
 			      GFP_KERNEL);
 	if (!eavb->entry) {
-		ravb_streaming_release_stq_kernel(eavb->ravb.handle);
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto error_eavb_opened;
 	}
 
-	eavb->num_entry = 0;
-	eavb->device_id = device_id;
-	eavb->used_f = true;
+	return eavb->index;
 
-	return index;
+error_eavb_opened:
+	ravb_streaming_release_stq_kernel(eavb->ravb.handle);
+
+error_allocated_eavb:
+	mse_adapter_eavb_free_priv(eavb->index);
+
+	return err;
 }
 
 static int mse_adapter_eavb_release(int index)
@@ -234,15 +289,11 @@ static int mse_adapter_eavb_release(int index)
 	int err;
 	struct mse_adapter_eavb *eavb;
 
-	if (index >= ARRAY_SIZE(eavb_table))
-		return -EPERM;
-
-	eavb = &eavb_table[index];
-
-	if (!eavb->used_f)
-		return -EPERM;
-
 	mse_debug("index=%d\n", index);
+
+	eavb = mse_adapter_eavb_get_priv(index);
+	if (!eavb)
+		return -EPERM;
 
 	if (!avb_device_is_tx(eavb->device_id)) {
 		err = eavb->ravb.set_rxparam(eavb->ravb.handle, &eavb->rxparam);
@@ -257,7 +308,7 @@ static int mse_adapter_eavb_release(int index)
 		mse_err("error release code=%d\n", err);
 	} else {
 		kfree(eavb->entry);
-		memset(eavb, 0, sizeof(*eavb));
+		mse_adapter_eavb_free_priv(eavb->index);
 	}
 
 	return err;
@@ -269,23 +320,19 @@ static int mse_adapter_eavb_set_cbs_param(int index, struct mse_cbsparam *cbs)
 	struct eavb_txparam txparam;
 	struct mse_adapter_eavb *eavb;
 
-	if (index >= ARRAY_SIZE(eavb_table))
+	mse_debug("index=%d\n", index);
+
+	eavb = mse_adapter_eavb_get_priv(index);
+	if (!eavb)
+		return -EPERM;
+
+	if (!avb_device_is_tx(eavb->device_id))
 		return -EPERM;
 
 	if (!cbs) {
 		mse_err("invalid argument. cbs\n");
 		return -EINVAL;
 	}
-
-	eavb = &eavb_table[index];
-
-	if (!eavb->used_f)
-		return -EPERM;
-
-	if (!avb_device_is_tx(eavb->device_id))
-		return -EPERM;
-
-	mse_debug("index=%d\n", index);
 
 	txparam.cbs.bandwidthFraction	= cbs->bandwidth_fraction;
 	txparam.cbs.idleSlope		= cbs->idle_slope;
@@ -304,6 +351,7 @@ static int mse_adapter_eavb_set_cbs_param(int index, struct mse_cbsparam *cbs)
 		mse_err("error %ld\n", err);
 		return err;
 	}
+
 	return 0;
 }
 
@@ -313,23 +361,19 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 	struct eavb_rxparam rxparam;
 	struct mse_adapter_eavb *eavb;
 
-	if (index >= ARRAY_SIZE(eavb_table))
+	mse_debug("index=%d\n", index);
+
+	eavb = mse_adapter_eavb_get_priv(index);
+	if (!eavb)
+		return -EPERM;
+
+	if (avb_device_is_tx(eavb->device_id))
 		return -EPERM;
 
 	if (!streamid) {
 		mse_err("invalid argument. streamid\n");
 		return -EINVAL;
 	}
-
-	eavb = &eavb_table[index];
-
-	if (!eavb->used_f)
-		return -EPERM;
-
-	if (avb_device_is_tx(eavb->device_id))
-		return -EPERM;
-
-	mse_debug("index=%d\n", index);
 
 	memcpy(rxparam.streamid, streamid, sizeof(rxparam.streamid));
 	mse_debug(" streamid=%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -343,6 +387,7 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 		mse_err("error %ld\n", err);
 		return err;
 	}
+
 	return 0;
 }
 
@@ -350,18 +395,14 @@ static int mse_adapter_eavb_check_receive(int index)
 {
 	struct mse_adapter_eavb *eavb;
 
-	if (index >= ARRAY_SIZE(eavb_table))
-		return -EPERM;
+	mse_debug("index=%d", index);
 
-	eavb = &eavb_table[index];
-
-	if (!eavb->used_f)
+	eavb = mse_adapter_eavb_get_priv(index);
+	if (!eavb)
 		return -EPERM;
 
 	if (avb_device_is_tx(eavb->device_id))
 		return -EPERM;
-
-	mse_debug("index=%d", index);
 
 	return avb_check_completed(eavb);
 }
@@ -375,21 +416,17 @@ static int mse_adapter_eavb_send_prepare(int index,
 
 	mse_debug("index=%d addr=%p num=%d\n", index, packets, num_packets);
 
-	if (index >= ARRAY_SIZE(eavb_table))
+	eavb = mse_adapter_eavb_get_priv(index);
+	if (!eavb)
+		return -EPERM;
+
+	if (!avb_device_is_tx(eavb->device_id))
 		return -EPERM;
 
 	if (!packets) {
 		mse_err("invalid argument. packets\n");
 		return -EINVAL;
 	}
-
-	eavb = &eavb_table[index];
-
-	if (!eavb->used_f)
-		return -EPERM;
-
-	if (!avb_device_is_tx(eavb->device_id))
-		return -EPERM;
 
 	if (num_packets <= 0)
 		return -EPERM;
@@ -421,7 +458,13 @@ static int mse_adapter_eavb_send(int index,
 	ssize_t wret, rret = 0, wret2;
 	struct mse_adapter_eavb *eavb;
 
-	if (index >= ARRAY_SIZE(eavb_table))
+	mse_debug("index=%d num=%d\n", index, num_packets);
+
+	eavb = mse_adapter_eavb_get_priv(index);
+	if (!eavb)
+		return -EPERM;
+
+	if (!avb_device_is_tx(eavb->device_id))
 		return -EPERM;
 
 	if (!packets) {
@@ -429,18 +472,8 @@ static int mse_adapter_eavb_send(int index,
 		return -EINVAL;
 	}
 
-	eavb = &eavb_table[index];
-
-	if (!eavb->used_f)
-		return -EPERM;
-
-	if (!avb_device_is_tx(eavb->device_id))
-		return -EPERM;
-
 	if (num_packets <= 0)
 		return -EPERM;
-
-	mse_debug("index=%d num=%d\n", index, num_packets);
 
 	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
 		mse_err("too much packets\n");
@@ -472,6 +505,7 @@ static int mse_adapter_eavb_send(int index,
 		ofs = (eavb->unentry + i) % eavb->num_entry;
 		(eavb->entry + ofs)->vec[0].len = packets[ofs].len;
 	}
+
 	/* enqueue */
 	if (eavb->unentry + num_packets <= eavb->num_entry) {
 		wret = eavb->ravb.write(eavb->ravb.handle,
@@ -505,6 +539,7 @@ static int mse_adapter_eavb_send(int index,
 
 		mse_err("write is short %zd/%d\n", wret, num_packets);
 	}
+
 	eavb->unentry = (eavb->unentry + wret) % eavb->num_entry;
 	eavb->num_send += wret;
 	mse_debug("read %zd write %zd\n", rret, wret);
@@ -520,7 +555,13 @@ static int mse_adapter_eavb_receive_prepare(int index,
 	int i;
 	ssize_t ret;
 
-	if (index >= ARRAY_SIZE(eavb_table))
+	mse_debug("index=%d addr=%p num=%d\n", index, packets, num_packets);
+
+	eavb = mse_adapter_eavb_get_priv(index);
+	if (!eavb)
+		return -EPERM;
+
+	if (avb_device_is_tx(eavb->device_id))
 		return -EPERM;
 
 	if (!packets) {
@@ -528,18 +569,8 @@ static int mse_adapter_eavb_receive_prepare(int index,
 		return -EINVAL;
 	}
 
-	eavb = &eavb_table[index];
-
-	if (!eavb->used_f)
-		return -EPERM;
-
-	if (avb_device_is_tx(eavb->device_id))
-		return -EPERM;
-
 	if (num_packets <= 0)
 		return -EPERM;
-
-	mse_debug("index=%d addr=%p num=%d\n", index, packets, num_packets);
 
 	if (num_packets > MSE_EAVB_ADAPTER_PACKET_MAX) {
 		mse_err("too much packets\n");
@@ -583,12 +614,10 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 	struct mse_adapter_eavb *eavb;
 	int read_packets;
 
-	if (index >= ARRAY_SIZE(eavb_table))
-		return -EPERM;
+	mse_debug("index=%d num=%d\n", index, num_packets);
 
-	eavb = &eavb_table[index];
-
-	if (!eavb->used_f)
+	eavb = mse_adapter_eavb_get_priv(index);
+	if (!eavb)
 		return -EPERM;
 
 	if (avb_device_is_tx(eavb->device_id))
@@ -597,7 +626,6 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 	if (num_packets <= 0)
 		return -EPERM;
 
-	mse_debug("index=%d num=%d\n", index, num_packets);
 	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
 		mse_err("too much packets\n");
 		return -EPERM;
@@ -632,6 +660,7 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 		ofs = (eavb->unentry + i) % eavb->num_entry;
 		(eavb->entry + ofs)->vec[0].len = MSE_EAVB_PACKET_LENGTH;
 	}
+
 	/* enqueue */
 	if (eavb->unentry + receive <= eavb->num_entry) {
 		ret = eavb->ravb.write(eavb->ravb.handle,
@@ -654,18 +683,14 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 
 static int mse_adapter_eavb_set_option(int index)
 {
+	struct mse_adapter_eavb *eavb;
 	static struct eavb_option option = {
 		.id = EAVB_OPTIONID_BLOCKMODE,
 		.param = EAVB_BLOCK_WAITALL,
 	};
-	struct mse_adapter_eavb *eavb;
 
-	if (index >= ARRAY_SIZE(eavb_table))
-		return -EPERM;
-
-	eavb = &eavb_table[index];
-
-	if (!eavb->used_f)
+	eavb = mse_adapter_eavb_get_priv(index);
+	if (!eavb)
 		return -EPERM;
 
 	return eavb->ravb.set_option(eavb->ravb.handle, &option);
@@ -675,12 +700,8 @@ static int mse_adapter_eavb_cancel(int index)
 {
 	struct mse_adapter_eavb *eavb;
 
-	if (index >= ARRAY_SIZE(eavb_table))
-		return -EPERM;
-
-	eavb = &eavb_table[index];
-
-	if (!eavb->used_f)
+	eavb = mse_adapter_eavb_get_priv(index);
+	if (!eavb)
 		return -EPERM;
 
 	return eavb->ravb.blocking_cancel(eavb->ravb.handle);
@@ -691,15 +712,11 @@ static int mse_adapter_eavb_get_link_speed(int index)
 	long link_speed;
 	struct mse_adapter_eavb *eavb;
 
-	if (index >= ARRAY_SIZE(eavb_table))
-		return -EPERM;
-
-	eavb = &eavb_table[index];
-
-	if (!eavb->used_f)
-		return -EPERM;
-
 	mse_debug("index=%d\n", index);
+
+	eavb = mse_adapter_eavb_get_priv(index);
+	if (!eavb)
+		return -EPERM;
 
 	link_speed = eavb->ravb.get_linkspeed(eavb->ravb.handle);
 	if (link_speed < 0)
@@ -725,8 +742,6 @@ static struct mse_adapter_network_ops mse_adapter_eavb_ops = {
 	.cancel = mse_adapter_eavb_cancel,
 	.get_link_speed = mse_adapter_eavb_get_link_speed,
 };
-
-static int adapter_index;
 
 static int __init mse_adapter_eavb_init(void)
 {
