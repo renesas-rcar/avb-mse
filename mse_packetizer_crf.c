@@ -252,9 +252,13 @@ static int mse_packetizer_crf_audio_get_audio_info(
 {
 	struct crf_packetizer *crf;
 
+	if (index >= ARRAY_SIZE(crf_packetizer_table))
+		return -EPERM;
+
 	crf = &crf_packetizer_table[index];
 
 	info->frame_interval_time = crf->frame_interval_time;
+
 	return 0;
 }
 
