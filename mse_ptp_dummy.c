@@ -130,7 +130,8 @@ static enum hrtimer_restart ptp_timestamp_callback(struct hrtimer *arg)
 
 	dev = container_of(arg, struct ptp_device, timer);
 
-	spin_lock_irqsave(&dev->qlock, flags);
+	if (!dev->timer_delay)
+		return HRTIMER_NORESTART;
 
 	hrtimer_forward(&dev->timer,
 			hrtimer_get_expires(&dev->timer),
@@ -140,6 +141,8 @@ static enum hrtimer_restart ptp_timestamp_callback(struct hrtimer *arg)
 	getnstimeofday64(&time);
 	clock_time.sec = time.tv_sec;
 	clock_time.nsec = time.tv_nsec;
+
+	spin_lock_irqsave(&dev->qlock, flags);
 
 	/* add to queue */
 	enqueue(&dev->que, &clock_time);
@@ -196,7 +199,6 @@ int mse_ptp_open_dummy(int *dev_id)
 
 int mse_ptp_close_dummy(int dev_id)
 {
-	int ret;
 	struct ptp_device *dev;
 	unsigned long flags;
 
@@ -216,9 +218,8 @@ int mse_ptp_close_dummy(int dev_id)
 	spin_unlock_irqrestore(&ptp_dummy_lock, flags);
 
 	/* timer stop */
-	ret = hrtimer_try_to_cancel(&dev->timer);
-	if (ret)
-		mse_err("The timer was still in use...\n");
+	dev->timer_delay = 0;
+	hrtimer_cancel(&dev->timer);
 
 	kfree(dev);
 
