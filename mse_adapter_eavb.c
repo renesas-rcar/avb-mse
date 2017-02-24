@@ -429,11 +429,11 @@ static int mse_adapter_eavb_send_prepare(int index,
 	}
 
 	if (num_packets <= 0)
-		return -EPERM;
+		return -EINVAL;
 
 	if (num_packets > MSE_EAVB_ADAPTER_PACKET_MAX) {
 		mse_err("too much packets %d\n", num_packets);
-		return -EPERM;
+		return -EINVAL;
 	}
 
 	for (i = 0; i < num_packets; i++) {
@@ -473,11 +473,11 @@ static int mse_adapter_eavb_send(int index,
 	}
 
 	if (num_packets <= 0)
-		return -EPERM;
+		return -EINVAL;
 
 	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
 		mse_err("too much packets\n");
-		return -EPERM;
+		return -EINVAL;
 	}
 
 	num_dequeue = eavb->num_send + num_packets -
@@ -570,11 +570,11 @@ static int mse_adapter_eavb_receive_prepare(int index,
 	}
 
 	if (num_packets <= 0)
-		return -EPERM;
+		return -EINVAL;
 
 	if (num_packets > MSE_EAVB_ADAPTER_PACKET_MAX) {
 		mse_err("too much packets\n");
-		return -EPERM;
+		return -EINVAL;
 	}
 
 	for (i = 0; i < num_packets; i++) {
@@ -599,8 +599,9 @@ static int mse_adapter_eavb_receive_prepare(int index,
 			mse_err("write is short %zd/%d\n",
 				ret, MSE_EAVB_ADAPTER_ENTRY_MAX);
 
-		return -EPERM;
+		return -EAGAIN;
 	}
+
 	eavb->unentry = MSE_EAVB_ADAPTER_ENTRY_MAX;
 	eavb->num_entry = num_packets;
 
@@ -624,11 +625,11 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 		return -EPERM;
 
 	if (num_packets <= 0)
-		return -EPERM;
+		return -EINVAL;
 
 	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
 		mse_err("too much packets\n");
-		return -EPERM;
+		return -EINVAL;
 	}
 
 	read_packets = avb_check_completed(eavb);
