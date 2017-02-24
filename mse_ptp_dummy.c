@@ -99,20 +99,13 @@ DEFINE_SPINLOCK(ptp_dummy_lock);
 
 static int enqueue(struct ptp_queue *que, struct ptp_clock_time *clock_time)
 {
-	int is_tail_equal_head = 0;
-
 	mse_debug("START head=%d, tail=%d\n", que->head, que->tail);
 
 	if (q_next(que->tail) == que->head)
-		is_tail_equal_head = 1;
+		que->head = q_next(que->head);
 
 	que->timestamps[que->tail] = *clock_time;
 	que->tail = q_next(que->tail);
-
-	if (is_tail_equal_head) {
-		que->head = q_next(que->head);
-		is_tail_equal_head = 0;
-	}
 
 	return 0;
 }
@@ -282,23 +275,15 @@ int mse_ptp_get_timestamps_dummy(int dev_id,
 
 	queue = &dev->que;
 
-	if (queue->tail > queue->head)
-		*count = queue->tail - queue->head;
-	else
-		*count = (queue->tail + MAX_TIMESTAMPS) - queue->head;
-
-	if (*count == 0) {
-		spin_unlock_irqrestore(&dev->qlock, flags);
-		return 0;
-	}
-
-	mse_debug("total=%d\n", *count);
-	for (i = 0; i < *count; i++) {
-		dequeue(queue, &clock_time);
+	for (i = 0; i < MAX_TIMESTAMPS; i++) {
+		if (dequeue(queue, &clock_time) < 0)
+			break;
 		timestamps[i] = clock_time;
 	}
 
 	spin_unlock_irqrestore(&dev->qlock, flags);
+
+	*count = i;
 
 	mse_debug("END\n");
 
