@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2016 Renesas Electronics Corporation
+ Copyright (C) 2016-2017 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -504,101 +504,150 @@ static long mse_ioctl_get_delay_time(struct file *file, unsigned long param)
 	return 0;
 }
 
-static long mse_ioctl_unlocked_ioctl(struct file *file,
-				     unsigned int cmd,
-				     unsigned long param)
+static long mse_ioctl_common(struct file *file,
+			     unsigned int cmd,
+			     unsigned long param)
 {
-	long ret;
-
-	mse_debug("cmd=0x%08x\n", cmd);
-
-	if (iminor(file->f_inode) > ioctl_max) {
-		mse_err("illegal minor=0x%08x\n", iminor(file->f_inode));
-		return -EINVAL;
-	}
-
 	switch (cmd) {
 	case MSE_G_INFO:
-		ret = mse_ioctl_get_info(file, param);
-		break;
+		return mse_ioctl_get_info(file, param);
 	case MSE_S_NETWORK_DEVICE:
-		ret = mse_ioctl_set_network_device(file, param);
-		break;
+		return mse_ioctl_set_network_device(file, param);
 	case MSE_G_NETWORK_DEVICE:
-		ret = mse_ioctl_get_network_device(file, param);
-		break;
+		return mse_ioctl_get_network_device(file, param);
 	case MSE_S_PACKETIZER:
-		ret = mse_ioctl_set_packetizer(file, param);
-		break;
+		return mse_ioctl_set_packetizer(file, param);
 	case MSE_G_PACKETIZER:
-		ret = mse_ioctl_get_packetizer(file, param);
-		break;
+		return mse_ioctl_get_packetizer(file, param);
 	case MSE_S_AVTP_TX_PARAM:
-		ret = mse_ioctl_set_avtp_tx_param(file, param);
-		break;
+		return mse_ioctl_set_avtp_tx_param(file, param);
 	case MSE_G_AVTP_TX_PARAM:
-		ret = mse_ioctl_get_avtp_tx_param(file, param);
-		break;
+		return mse_ioctl_get_avtp_tx_param(file, param);
 	case MSE_S_AVTP_RX_PARAM:
-		ret = mse_ioctl_set_avtp_rx_param(file, param);
-		break;
+		return mse_ioctl_set_avtp_rx_param(file, param);
 	case MSE_G_AVTP_RX_PARAM:
-		ret = mse_ioctl_get_avtp_rx_param(file, param);
-		break;
+		return mse_ioctl_get_avtp_rx_param(file, param);
 	case MSE_S_MEDIA_AUDIO_CONFIG:
-		ret = mse_ioctl_set_audio_config(file, param);
-		break;
+		return mse_ioctl_set_audio_config(file, param);
 	case MSE_G_MEDIA_AUDIO_CONFIG:
-		ret = mse_ioctl_get_audio_config(file, param);
-		break;
+		return mse_ioctl_get_audio_config(file, param);
 	case MSE_S_MEDIA_VIDEO_CONFIG:
-		ret = mse_ioctl_set_video_config(file, param);
-		break;
+		return mse_ioctl_set_video_config(file, param);
 	case MSE_G_MEDIA_VIDEO_CONFIG:
-		ret = mse_ioctl_get_video_config(file, param);
-		break;
+		return mse_ioctl_get_video_config(file, param);
 	case MSE_S_MEDIA_MPEG2TS_CONFIG:
-		ret = mse_ioctl_set_mpeg2ts_config(file, param);
-		break;
+		return mse_ioctl_set_mpeg2ts_config(file, param);
 	case MSE_G_MEDIA_MPEG2TS_CONFIG:
-		ret = mse_ioctl_get_mpeg2ts_config(file, param);
-		break;
+		return mse_ioctl_get_mpeg2ts_config(file, param);
 	case MSE_S_PTP_CONFIG:
-		ret = mse_ioctl_set_ptp_config(file, param);
-		break;
+		return mse_ioctl_set_ptp_config(file, param);
 	case MSE_G_PTP_CONFIG:
-		ret = mse_ioctl_get_ptp_config(file, param);
-		break;
+		return mse_ioctl_get_ptp_config(file, param);
 	case MSE_S_MCH_CONFIG:
-		ret = mse_ioctl_set_mch_config(file, param);
-		break;
+		return mse_ioctl_set_mch_config(file, param);
 	case MSE_G_MCH_CONFIG:
-		ret = mse_ioctl_get_mch_config(file, param);
-		break;
+		return mse_ioctl_get_mch_config(file, param);
 	case MSE_S_AVTP_TX_PARAM_CRF:
-		ret = mse_ioctl_set_avtp_tx_param_crf(file, param);
-		break;
+		return mse_ioctl_set_avtp_tx_param_crf(file, param);
 	case MSE_G_AVTP_TX_PARAM_CRF:
-		ret = mse_ioctl_get_avtp_tx_param_crf(file, param);
-		break;
+		return mse_ioctl_get_avtp_tx_param_crf(file, param);
 	case MSE_S_AVTP_RX_PARAM_CRF:
-		ret = mse_ioctl_set_avtp_rx_param_crf(file, param);
-		break;
+		return mse_ioctl_set_avtp_rx_param_crf(file, param);
 	case MSE_G_AVTP_RX_PARAM_CRF:
-		ret = mse_ioctl_get_avtp_rx_param_crf(file, param);
-		break;
+		return mse_ioctl_get_avtp_rx_param_crf(file, param);
 	case MSE_S_DELAY_TIME:
-		ret = mse_ioctl_set_delay_time(file, param);
-		break;
+		return mse_ioctl_set_delay_time(file, param);
 	case MSE_G_DELAY_TIME:
-		ret = mse_ioctl_get_delay_time(file, param);
-		break;
+		return mse_ioctl_get_delay_time(file, param);
 	default:
 		mse_err("illegal cmd=0x%08x\n", cmd);
 		return -EINVAL;
 	}
+}
 
-	return ret;
+static long mse_ioctl_audio(struct file *file,
+			    unsigned int cmd,
+			    unsigned long param)
+{
+	switch (cmd) {
+	case MSE_S_MEDIA_VIDEO_CONFIG:
+	case MSE_G_MEDIA_VIDEO_CONFIG:
+	case MSE_S_MEDIA_MPEG2TS_CONFIG:
+	case MSE_G_MEDIA_MPEG2TS_CONFIG:
+		return -EPERM;
+	default:
+		return mse_ioctl_common(file, cmd, param);
+	}
+}
+
+static long mse_ioctl_video(struct file *file,
+			    unsigned int cmd,
+			    unsigned long param)
+{
+	switch (cmd) {
+	case MSE_S_MEDIA_AUDIO_CONFIG:
+	case MSE_G_MEDIA_AUDIO_CONFIG:
+	case MSE_S_MEDIA_MPEG2TS_CONFIG:
+	case MSE_G_MEDIA_MPEG2TS_CONFIG:
+	case MSE_S_MCH_CONFIG:
+	case MSE_G_MCH_CONFIG:
+	case MSE_S_AVTP_TX_PARAM_CRF:
+	case MSE_G_AVTP_TX_PARAM_CRF:
+	case MSE_S_AVTP_RX_PARAM_CRF:
+	case MSE_G_AVTP_RX_PARAM_CRF:
+		return -EPERM;
+	default:
+		return mse_ioctl_common(file, cmd, param);
+	}
+}
+
+static long mse_ioctl_mpeg2ts(struct file *file,
+			      unsigned int cmd,
+			      unsigned long param)
+{
+	switch (cmd) {
+	case MSE_S_MEDIA_AUDIO_CONFIG:
+	case MSE_G_MEDIA_AUDIO_CONFIG:
+	case MSE_S_MEDIA_VIDEO_CONFIG:
+	case MSE_G_MEDIA_VIDEO_CONFIG:
+	case MSE_S_MCH_CONFIG:
+	case MSE_G_MCH_CONFIG:
+	case MSE_S_AVTP_TX_PARAM_CRF:
+	case MSE_G_AVTP_TX_PARAM_CRF:
+	case MSE_S_AVTP_RX_PARAM_CRF:
+	case MSE_G_AVTP_RX_PARAM_CRF:
+		return -EPERM;
+	default:
+		return mse_ioctl_common(file, cmd, param);
+	}
+}
+
+static long mse_ioctl_unlocked_ioctl(struct file *file,
+				     unsigned int cmd,
+				     unsigned long param)
+{
+	int index;
+	struct mse_config *config;
+
+	mse_debug("cmd=0x%08x\n", cmd);
+
+	index = iminor(file->f_inode);
+	if (index > ioctl_max) {
+		mse_err("illegal minor=0x%08x\n", index);
+		return -EINVAL;
+	}
+
+	config = mse_get_dev_config(index);
+	switch (config->info.type) {
+	case MSE_STREAM_TYPE_AUDIO:
+		return mse_ioctl_audio(file, cmd, param);
+	case MSE_STREAM_TYPE_VIDEO:
+		return mse_ioctl_video(file, cmd, param);
+	case MSE_STREAM_TYPE_MPEG2TS:
+		return mse_ioctl_mpeg2ts(file, cmd, param);
+	default:
+		return -EINVAL;
+	}
 }
 
 #ifdef CONFIG_COMPAT
