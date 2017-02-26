@@ -282,6 +282,7 @@ struct mse_instance {
 	/* @brief timestamp ptp|capture */
 	spinlock_t lock_ques;
 	struct timestamp_queue tstamp_que;
+	struct timestamp_queue tstamp_que_crf;
 	struct crf_queue crf_que;
 	struct avtp_queue avtp_que;
 
@@ -1087,6 +1088,9 @@ static void mse_work_timestamp(struct work_struct *work)
 			tstamps_enq_tstamps(&instance->tstamp_que,
 					    instance->std_time_counter,
 					    &instance->timestamps[i]);
+			tstamps_enq_tstamps(&instance->tstamp_que_crf,
+					    instance->std_time_counter,
+					    &instance->timestamps[i]);
 			instance->std_time_counter += instance->add_std_time;
 		}
 		spin_unlock_irqrestore(&instance->lock_ques, flags);
@@ -1129,6 +1133,8 @@ static int tstamps_store_ptp_timestamp(struct mse_instance *instance,
 	spin_lock_irqsave(&instance->lock_ques, flags);
 
 	tstamps_enq_tstamps(&instance->tstamp_que,
+			    instance->std_time_counter, now);
+	tstamps_enq_tstamps(&instance->tstamp_que_crf,
 			    instance->std_time_counter, now);
 
 	spin_unlock_irqrestore(&instance->lock_ques, flags);
@@ -1697,13 +1703,13 @@ static void mse_work_crf_send(struct work_struct *work)
 	tsize = instance->ptp_clock == 0 ?
 		CRF_PTP_TIMESTAMPS : CRF_AUDIO_TIMESTAMPS;
 	spin_lock_irqsave(&instance->lock_ques, flags);
-	size = tstamps_get_tstamps_size(&instance->tstamp_que);
+	size = tstamps_get_tstamps_size(&instance->tstamp_que_crf);
 	spin_unlock_irqrestore(&instance->lock_ques, flags);
 	while (!instance->f_stopping && size >= tsize) {
 		/* get Timestamps */
 		mse_debug("size %d tsize %d\n", size, tsize);
 		spin_lock_irqsave(&instance->lock_ques, flags);
-		get_timestamps(&instance->tstamp_que, tsize, timestamps);
+		get_timestamps(&instance->tstamp_que_crf, tsize, timestamps);
 		spin_unlock_irqrestore(&instance->lock_ques, flags);
 		for (i = 0; i < tsize; i++) {
 			u64 t;
@@ -1735,7 +1741,7 @@ static void mse_work_crf_send(struct work_struct *work)
 			instance->network);
 
 		spin_lock_irqsave(&instance->lock_ques, flags);
-		size = tstamps_get_tstamps_size(&instance->tstamp_que);
+		size = tstamps_get_tstamps_size(&instance->tstamp_que_crf);
 		spin_unlock_irqrestore(&instance->lock_ques, flags);
 	}
 
@@ -1940,6 +1946,9 @@ static void mse_work_start_streaming(struct work_struct *work)
 			spin_lock_irqsave(&instance->lock_ques, flags);
 			for (i = 0; i < count; i++) {
 				tstamps_enq_tstamps(&instance->tstamp_que,
+						    instance->std_time_counter,
+						    &instance->timestamps[i]);
+				tstamps_enq_tstamps(&instance->tstamp_que_crf,
 						    instance->std_time_counter,
 						    &instance->timestamps[i]);
 				instance->std_time_counter +=
@@ -3024,6 +3033,7 @@ int mse_open(int index_media, bool tx)
 	if (IS_MSE_TYPE_AUDIO(adapter->type)) {
 		spin_lock_irqsave(&instance->lock_ques, flags);
 		tstamps_clear_tstamps(&instance->tstamp_que);
+		tstamps_clear_tstamps(&instance->tstamp_que_crf);
 		spin_unlock_irqrestore(&instance->lock_ques, flags);
 
 		hrtimer_init(&instance->tstamp_timer,
