@@ -164,5 +164,7 @@ bool mse_packetizer_is_valid(enum MSE_PACKETIZER id);
 int mse_packetizer_calc_cbs(u64 bandwidth_fraction_denominator,
 			    u64 bandwidth_fraction_numerator,
 			    struct mse_cbsparam *cbs);
+int mse_packetizer_open(enum MSE_PACKETIZER id);
+int mse_packetizer_release(enum MSE_PACKETIZER id, int index);
 
 #endif /* __MSE_PACKETIZER_H__ */

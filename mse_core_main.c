@@ -209,6 +209,7 @@ struct mse_instance {
 	struct mse_adapter_network_ops *network;
 	/** @brief packetizer ops */
 	struct mse_packetizer_ops *packetizer;
+	enum MSE_PACKETIZER packetizer_id;
 
 	/** @brief streaming queue */
 	struct work_struct wk_stream;
@@ -2902,9 +2903,11 @@ int mse_open(int index_media, bool tx)
 	mse_name_strlcpy(name, network->name);
 	mse_debug("network adapter index=%d name=%s\n", i, name);
 
-	/* get packetizer id */
+	/* Get packetizer */
 	packetizer_id = adapter->config.packetizer.packetizer;
-	if (!mse_packetizer_is_valid(packetizer_id)) {
+	mse_debug("packetizer id=%d\n", packetizer_id);
+	packetizer = mse_packetizer_get_ops(packetizer_id);
+	if (!packetizer) {
 		mse_err("packetizer is not valid\n");
 		err = -EINVAL;
 
@@ -2925,11 +2928,6 @@ int mse_open(int index_media, bool tx)
 		instance->f_first_vframe = true;
 	}
 	instance->f_force_flush = false;
-
-	/* packetizer for configuration value */
-	packetizer = mse_packetizer_get_ops(packetizer_id);
-
-	mse_debug("packetizer id=%d\n", packetizer_id);
 
 	/* ptp open */
 	instance->ptp_index = mse_ptp_get_first_index();
@@ -2975,7 +2973,7 @@ int mse_open(int index_media, bool tx)
 	instance->crf_net_config.port_transmit_rate = mbit_to_bit(link_speed);
 
 	/* open paketizer */
-	ret = packetizer->open();
+	ret = mse_packetizer_open(packetizer_id);
 	if (ret < 0) {
 		mse_err("cannot open packetizer ret=%d\n", ret);
 		err = ret;
@@ -2989,6 +2987,7 @@ int mse_open(int index_media, bool tx)
 	instance->state = MSE_STATE_OPEN;
 	instance->media = adapter;
 	instance->packetizer = packetizer;
+	instance->packetizer_id = packetizer_id;
 	instance->network = network;
 	instance->index_media = index_media;
 	instance->crf_index = MSE_INDEX_UNDEFINED;
@@ -3140,7 +3139,7 @@ error_mch_config_invalid:
 	destroy_workqueue(instance->wq_packet);
 	destroy_workqueue(instance->wq_stream);
 
-	packetizer->release(instance->index_packetizer);
+	mse_packetizer_release(packetizer_id, instance->index_packetizer);
 
 error_cannot_open_packetizer:
 error_network_interface_is_link_down:
@@ -3204,7 +3203,8 @@ int mse_close(int index)
 		instance->network->release(instance->crf_index_network);
 
 	/* release packetizer */
-	instance->packetizer->release(instance->index_packetizer);
+	mse_packetizer_release(instance->packetizer_id,
+			       instance->index_packetizer);
 	mse_release_crf_packetizer(instance);
 
 	ret = mse_ptp_close(instance->ptp_index, instance->ptp_dev_id);

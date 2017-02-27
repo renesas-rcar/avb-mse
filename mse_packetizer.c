@@ -73,6 +73,8 @@ struct mse_packetizer_ops_table {
 	struct mse_packetizer_ops *ops;
 };
 
+DEFINE_SPINLOCK(packetizer_lock);
+
 static const struct mse_packetizer_ops_table
 packetizer_table[MSE_PACKETIZER_MAX] = {
 #if defined(CONFIG_MSE_PACKETIZER_AAF)
@@ -152,4 +154,38 @@ int mse_packetizer_calc_cbs(u64 bandwidth_fraction_denominator,
 	cbs->send_slope = value >> 16;
 	cbs->idle_slope = USHRT_MAX - cbs->send_slope;
 	return 0;
+}
+
+int mse_packetizer_open(enum MSE_PACKETIZER id)
+{
+	struct mse_packetizer_ops *ops;
+	int ret;
+	unsigned long flags;
+
+	ops = mse_packetizer_get_ops(id);
+	if (!ops)
+		return -EPERM;
+
+	spin_lock_irqsave(&packetizer_lock, flags);
+	ret = ops->open();
+	spin_unlock_irqrestore(&packetizer_lock, flags);
+
+	return ret;
+}
+
+int mse_packetizer_release(enum MSE_PACKETIZER id, int index)
+{
+	struct mse_packetizer_ops *ops;
+	int ret;
+	unsigned long flags;
+
+	ops = mse_packetizer_get_ops(id);
+	if (!ops)
+		return -EPERM;
+
+	spin_lock_irqsave(&packetizer_lock, flags);
+	ret = ops->release(index);
+	spin_unlock_irqrestore(&packetizer_lock, flags);
+
+	return ret;
 }
