@@ -73,12 +73,10 @@
 #include "avtp.h"
 #include "jpeg.h"
 
-#define NSEC                    (1000000000L)
-#define SEQNUM_INIT             (-1)
-
-#define AVTP_PAYLOAD_MAX        (ETHFRAMELEN_MAX - AVTP_PAYLOAD_OFFSET)
-
-#define TRANSMIT_RATE_BASE      (1000000)
+#define SEQNUM_INIT        (-1)
+#define TRANSMIT_RATE_BASE (1000000)
+#define AVTP_PAYLOAD_MAX   (ETHFRAMELEN_MAX - AVTP_PAYLOAD_OFFSET)
+#define JPEG_PAYLOAD_MAX   (ETHFRAMELEN_MAX - AVTP_CVF_MJPEG_PAYLOAD_OFFSET)
 
 struct avtp_cvf_mjpeg_param {
 	char dest_addr[MSE_MAC_LEN_MAX];
@@ -269,15 +267,16 @@ static int mse_packetizer_cvf_mjpeg_set_video_config(
 	net_config = &cvf_mjpeg->net_config;
 
 	bytes_per_frame = cvf_mjpeg->video_config.bytes_per_frame;
-	if (bytes_per_frame == 0) {
-		cvf_mjpeg->payload_max = ETHFRAMELEN_MAX - AVTP_PAYLOAD_OFFSET;
+	if (bytes_per_frame > AVTP_PAYLOAD_MAX) {
+		mse_err("bytes_per_frame too big %d\n", bytes_per_frame);
+		return -EINVAL;
+	}
+
+	if (bytes_per_frame == 0 || bytes_per_frame >= JPEG_PAYLOAD_MAX) {
+		cvf_mjpeg->payload_max = AVTP_PAYLOAD_MAX;
 	} else {
-		if (AVTP_PAYLOAD_OFFSET + bytes_per_frame > ETHFRAMELEN_MAX) {
-			mse_err("bytes_per_frame too big %d\n",
-				bytes_per_frame);
-			return -EINVAL;
-		}
-		cvf_mjpeg->payload_max = bytes_per_frame;
+		cvf_mjpeg->payload_max = bytes_per_frame +
+					 AVTP_JPEG_HEADER_SIZE;
 	}
 
 	memcpy(param.dest_addr, net_config->dest_addr, MSE_MAC_LEN_MAX);
@@ -496,14 +495,14 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	if (cvf_mjpeg->dri_f) {
 		memcpy(payload, &rheader, sizeof(rheader));
 		payload += sizeof(rheader);
-		data_len -= sizeof(rheader);
 	}
 
 	/* only first packet */
 	if (quant_len > 0) {
+		int qlen;
+
 		memcpy(payload, &qheader, sizeof(qheader));
 		payload += sizeof(qheader);
-		data_len -= sizeof(qheader);
 
 		for (i = 0; i <= cvf_mjpeg->max_comp; i++) {
 			u8 qlen, qid;
@@ -517,11 +516,12 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 			payload += qlen;
 		}
 
-		if (data_len > quant_len) {
-			data_len -= quant_len;
+		qlen = sizeof(qheader) + quant_len;
+		if (qlen + data_len > JPEG_PAYLOAD_MAX) {
+			payload_size = AVTP_PAYLOAD_MAX;
+			data_len = JPEG_PAYLOAD_MAX - qlen;
 		} else {
-			payload_size += quant_len - data_len;
-			data_len = 0;
+			payload_size += qlen;
 		}
 	}
 
