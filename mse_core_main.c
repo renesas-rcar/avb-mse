@@ -374,6 +374,7 @@ struct mse_instance {
 };
 
 static int mse_instance_max = MSE_INSTANCE_MAX;
+DEFINE_SPINLOCK(packetizer_crf_lock);
 
 struct mse_device {
 	/** @brief device */
@@ -1221,8 +1222,11 @@ static int mse_initialize_crf_packetizer(struct mse_instance *instance)
 	struct mse_audio_config config;
 	struct mse_cbsparam cbs;
 	int ret;
+	unsigned long flags;
 
+	spin_lock_irqsave(&packetizer_crf_lock, flags);
 	ret = instance->crf_index = crf->open();
+	spin_unlock_irqrestore(&packetizer_crf_lock, flags);
 	if (instance->crf_index < 0) {
 		mse_err("cannot open packetizer ret=%d\n", ret);
 		return instance->crf_index;
@@ -1262,8 +1266,10 @@ static int mse_initialize_crf_packetizer(struct mse_instance *instance)
 error_set_cbs_param_fail:
 error_calc_cbs_fail:
 error_set_audio_config_fail:
+	spin_lock_irqsave(&packetizer_crf_lock, flags);
 	crf->release(instance->crf_index);
 	instance->crf_index = MSE_INDEX_UNDEFINED;
+	spin_unlock_irqrestore(&packetizer_crf_lock, flags);
 
 	return ret;
 }
@@ -1271,9 +1277,13 @@ error_set_audio_config_fail:
 static void mse_release_crf_packetizer(struct mse_instance *instance)
 {
 	struct mse_packetizer_ops *crf = &mse_packetizer_crf_tstamp_audio_ops;
+	unsigned long flags;
 
-	if (instance->crf_index >= 0)
+	if (instance->crf_index >= 0) {
+		spin_lock_irqsave(&packetizer_crf_lock, flags);
 		crf->release(instance->crf_index);
+		spin_unlock_irqrestore(&packetizer_crf_lock, flags);
+	}
 }
 
 static void mse_work_packetize(struct work_struct *work)
