@@ -3322,6 +3322,11 @@ int mse_start_transmission(int index,
 		return -EINVAL;
 	}
 
+	if (!buffer) {
+		mse_err("invalid argument. buffer\n");
+		return -EINVAL;
+	}
+
 	mse_debug("index=%d buffer=%p size=%zu\n", index, buffer, buffer_size);
 
 	instance = &mse->instance_table[index];
