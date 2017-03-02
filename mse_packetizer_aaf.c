@@ -73,18 +73,7 @@
 #include "mse_packetizer.h"
 #include "avtp.h"
 
-#define NSEC            (1000000000L)
-#define SEQNUM_INIT     (-1)
-#define BYTE_TO_BIT     (8)
-
-#define CBS_ADJUSTMENT_NUMERATOR        (103)
-#define CBS_ADJUSTMENT_DENOMINATOR      (100)
-
-/* preamble + FCS */
-#define ETHERNET_SPECIAL        (8 + 4)
-
-#define CLASS_INTERVAL_FRAMES   (8000) /* class A */
-#define INTERVAL_FRAMES         (1)
+#define CBS_ADJUSTMENT_FACTOR   (103) /* percent */
 
 struct avtp_aaf_param {
 	char dest_addr[MSE_MAC_LEN_MAX];
@@ -411,18 +400,17 @@ static int mse_packetizer_aaf_set_audio_config(int index,
 
 	/* when samples_per_frame is not set */
 	if (!aaf->audio_config.samples_per_frame) {
-		aaf->class_interval_frames = CLASS_INTERVAL_FRAMES;
+		aaf->class_interval_frames = DEFAULT_INTERVAL_FRAMES;
 		aaf->sample_per_packet = DIV_ROUND_UP(
 			aaf->audio_config.sample_rate,
-			aaf->class_interval_frames * INTERVAL_FRAMES);
-		aaf->frame_interval_time = NSEC / aaf->class_interval_frames;
+			aaf->class_interval_frames);
 	} else {
 		aaf->sample_per_packet = aaf->audio_config.samples_per_frame;
 		aaf->class_interval_frames = DIV_ROUND_UP(
 			aaf->audio_config.sample_rate,
 			aaf->sample_per_packet);
-		aaf->frame_interval_time = NSEC / aaf->class_interval_frames;
 	}
+	aaf->frame_interval_time = NSEC_SCALE / aaf->class_interval_frames;
 
 	payload_size = aaf->sample_per_packet * aaf->audio_config.channels *
 						aaf->avtp_bytes_per_ch;
@@ -471,8 +459,6 @@ static int mse_packetizer_aaf_calc_cbs(int index,
 				       struct mse_cbsparam *cbs)
 {
 	struct aaf_packetizer *aaf;
-	int ret;
-	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
 
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
@@ -480,28 +466,12 @@ static int mse_packetizer_aaf_calc_cbs(int index,
 	mse_debug("index=%d\n", index);
 	aaf = &aaf_packetizer_table[index];
 
-	bandwidth_fraction_denominator =
-				(u64)aaf->net_config.port_transmit_rate;
-	if (!bandwidth_fraction_denominator) {
-		mse_err("cbs error(null)\n");
-		return -EPERM;
-	}
-
-	bandwidth_fraction_numerator =
-		(ETHERNET_SPECIAL + (u64)aaf->avtp_packet_size) * BYTE_TO_BIT *
-		(u64)aaf->class_interval_frames * INTERVAL_FRAMES *
-		CBS_ADJUSTMENT_NUMERATOR / CBS_ADJUSTMENT_DENOMINATOR;
-	if (bandwidth_fraction_numerator > UINT_MAX) {
-		mse_err("cbs error(numerator too big)\n");
-		return -EPERM;
-	}
-
-	ret = mse_packetizer_calc_cbs(bandwidth_fraction_denominator,
-				      bandwidth_fraction_numerator, cbs);
-	if (ret < 0)
-		return ret;
-
-	return 0;
+	return mse_packetizer_calc_cbs_by_frames(
+			aaf->net_config.port_transmit_rate,
+			aaf->avtp_packet_size,
+			aaf->class_interval_frames,
+			CBS_ADJUSTMENT_FACTOR,
+			cbs);
 }
 
 static int copy_bit_to_paload(unsigned char *dest, int dest_type,
@@ -845,7 +815,7 @@ static int mse_packetizer_aaf_depacketize(int index,
 		avtp_get_stream_data_length(packet) /
 		(avtp_get_aaf_channels_per_frame(packet) *
 		 avtp_aaf_format_to_bytes(avtp_get_aaf_format(packet)));
-	value = NSEC * aaf->sample_per_packet;
+	value = NSEC_SCALE * aaf->sample_per_packet;
 	do_div(value, avtp_aaf_nsr_to_sample_rate(avtp_get_aaf_nsr(packet)));
 	aaf->frame_interval_time = value;
 
