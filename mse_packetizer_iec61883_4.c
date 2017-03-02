@@ -73,19 +73,13 @@
 #include "mse_packetizer.h"
 #include "avtp.h"
 
-#define SEQNUM_INIT             (-1)
-
 #define AVTP_PAYLOAD_MIN        (AVTP_FRAME_SIZE_MIN - AVTP_IEC61883_4_PAYLOAD_OFFSET)
-
 #define AVTP_SOURCE_PACKET_SIZE (4 + 188) /* timestamp + TSP */
-#define TRANSMIT_RATE_BASE      (1000)
-
 #define MSE_TS_PACKET_SIZE      (188)
 #define MSE_TIMESTAMP_SIZE      (4)
 #define MSE_M2TS_PACKET_SIZE    (MSE_TIMESTAMP_SIZE + MSE_TS_PACKET_SIZE)
 #define M2TS_FREQ               (27000000)    /* 27MHz */
-#define NSEC                    (1000000000L)
-#define DEFAULT_DIFF_TIMESTAMP  (NSEC / 8000)
+#define DEFAULT_DIFF_TIMESTAMP  (NSEC_SCALE / DEFAULT_INTERVAL_FRAMES)
 
 struct avtp_iec61883_4_param {
 	char dest_addr[MSE_MAC_LEN_MAX];
@@ -102,6 +96,8 @@ struct iec61883_4_packetizer {
 	int send_seq_num;
 	int old_seq_num;
 	int seq_num_err;
+	int payload_max;
+	int packet_size;
 
 	u8 dbc;
 
@@ -236,6 +232,7 @@ static int mse_packetizer_iec61883_4_set_mpeg2ts_config(
 	struct iec61883_4_packetizer *iec61883_4;
 	struct avtp_iec61883_4_param param;
 	struct mse_network_config *net_config;
+	int tspackets_per_frame;
 
 	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
@@ -244,6 +241,11 @@ static int mse_packetizer_iec61883_4_set_mpeg2ts_config(
 	iec61883_4 = &iec61883_4_packetizer_table[index];
 	iec61883_4->mpeg2ts_config = *config;
 	net_config = &iec61883_4->net_config;
+
+	tspackets_per_frame = iec61883_4->mpeg2ts_config.tspackets_per_frame;
+	iec61883_4->payload_max = tspackets_per_frame * MSE_TS_PACKET_SIZE;
+	iec61883_4->packet_size = AVTP_IEC61883_4_PAYLOAD_OFFSET +
+		tspackets_per_frame * AVTP_SOURCE_PACKET_SIZE;
 
 	memcpy(param.dest_addr, net_config->dest_addr, MSE_MAC_LEN_MAX);
 	memcpy(param.source_addr, net_config->source_addr,
@@ -263,49 +265,24 @@ static int mse_packetizer_iec61883_4_calc_cbs(int index,
 					      struct mse_cbsparam *cbs)
 {
 	struct iec61883_4_packetizer *iec61883_4;
-	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
-	int payload_size, packet_size, ret;
-	struct mse_network_config *net_config;
 
 	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
 
 	mse_debug("index=%d\n", index);
 	iec61883_4 = &iec61883_4_packetizer_table[index];
-	payload_size = iec61883_4->mpeg2ts_config.tspackets_per_frame *
-		MSE_TS_PACKET_SIZE;
-	packet_size =
-		AVTP_IEC61883_4_PAYLOAD_OFFSET +
-		iec61883_4->mpeg2ts_config.tspackets_per_frame *
-		AVTP_SOURCE_PACKET_SIZE;
-	mse_debug("payload_size=%d packet_size=%d\n",
-		  payload_size, packet_size);
 
-	net_config = &iec61883_4->net_config;
-	bandwidth_fraction_denominator =
-		(u64)(net_config->port_transmit_rate / TRANSMIT_RATE_BASE) *
-		(u64)payload_size;
-
-	if (!bandwidth_fraction_denominator) {
-		mse_err("Link speed %lu bps is not support\n",
-			net_config->port_transmit_rate);
-		return -EPERM;
-	}
-
-	bandwidth_fraction_numerator =
-		(u64)(iec61883_4->mpeg2ts_config.bitrate / TRANSMIT_RATE_BASE) *
-		(u64)packet_size;
-
-	ret = mse_packetizer_calc_cbs(bandwidth_fraction_denominator,
-				      bandwidth_fraction_numerator, cbs);
-	if (ret < 0)
-		return ret;
-	return 0;
+	return mse_packetizer_calc_cbs_by_bitrate(
+			iec61883_4->net_config.port_transmit_rate,
+			iec61883_4->packet_size,
+			iec61883_4->mpeg2ts_config.bitrate,
+			iec61883_4->payload_max,
+			cbs);
 }
 
 static u32 m2ts_timestamp_to_nsec(u32 host_header)
 {
-	u64 ts_nsec = (u64)(host_header & 0x3fffffff) * NSEC;
+	u64 ts_nsec = (u64)(host_header & 0x3fffffff) * NSEC_SCALE;
 
 	return (u32)div64_u64(ts_nsec, M2TS_FREQ);
 }
