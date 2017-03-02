@@ -72,11 +72,6 @@
 #include "mse_packetizer.h"
 #include "avtp.h"
 
-#define NSEC                   (1000000000L)
-#define SEQNUM_INIT            (-1)
-
-#define TRANSMIT_RATE_BASE     (1000000)
-
 #define MBIT_ADDR (0x28)
 #define MBIT_SET  (0x10)
 
@@ -148,6 +143,7 @@ struct cvf_h264_packetizer {
 	int header_size;             /* whole header size defined IEEE1722 */
 	int additional_header_size;  /* additional .. defined IEEE1722 H.264 */
 	int data_len_max;
+	int payload_max;
 
 	unsigned char *vcl_start;
 	unsigned char *next_nal;
@@ -296,7 +292,6 @@ static int mse_packetizer_cvf_h264_set_video_config(
 	struct cvf_h264_packetizer *h264;
 	struct avtp_cvf_h264_param param;
 	int bytes_per_frame;
-	int data_offset;
 
 	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
 		return -EPERM;
@@ -317,19 +312,20 @@ static int mse_packetizer_cvf_h264_set_video_config(
 		return -EPERM;
 	}
 
-	data_offset = h264->header_size + FU_HEADER_LEN;
 	bytes_per_frame = h264->video_config.bytes_per_frame;
-	if (bytes_per_frame == 0) {
-		h264->data_len_max = ETHFRAMELEN_MAX - data_offset;
-	} else {
-		if (bytes_per_frame > ETHFRAMELEN_MAX - AVTP_PAYLOAD_OFFSET) {
-			mse_err("bytes_per_frame too big %d\n",
-				bytes_per_frame);
-			return -EINVAL;
-		}
-		h264->data_len_max = bytes_per_frame - FU_HEADER_LEN -
-				     h264->additional_header_size;
+	if (bytes_per_frame > AVTP_PAYLOAD_MAX) {
+		mse_err("bytes_per_frame too big %d\n", bytes_per_frame);
+		return -EINVAL;
 	}
+
+	if (bytes_per_frame == 0) {
+		h264->payload_max = AVTP_PAYLOAD_MAX;
+	} else {
+		h264->payload_max = bytes_per_frame;
+	}
+
+	h264->data_len_max = AVTP_PAYLOAD_MAX - FU_HEADER_LEN -
+		h264->additional_header_size;
 
 	memcpy(param.dest_addr, h264->net_config.dest_addr, MSE_MAC_LEN_MAX);
 	memcpy(param.source_addr, h264->net_config.source_addr,
@@ -348,41 +344,19 @@ static int mse_packetizer_cvf_h264_calc_cbs(int index,
 					    struct mse_cbsparam *cbs)
 {
 	struct cvf_h264_packetizer *h264;
-	struct mse_network_config *net_config;
-	int ret;
-	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
-	int payload_size, ether_size;
 
 	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
 		return -EPERM;
 
 	mse_debug("index=%d\n", index);
 	h264 = &cvf_h264_packetizer_table[index];
-	payload_size = h264->additional_header_size + FU_HEADER_LEN +
-		       h264->data_len_max;
-	ether_size = payload_size + AVTP_PAYLOAD_OFFSET;
-	net_config = &h264->net_config;
 
-	bandwidth_fraction_denominator =
-		((u64)net_config->port_transmit_rate / TRANSMIT_RATE_BASE) *
-		(u64)payload_size;
-	if (!bandwidth_fraction_denominator) {
-		mse_err("Link speed %lu bps is not support\n",
-			net_config->port_transmit_rate);
-		return -EPERM;
-	}
-
-	bandwidth_fraction_numerator = (u64)h264->video_config.bitrate *
-				       (u64)ether_size;
-	bandwidth_fraction_numerator = div64_u64(bandwidth_fraction_numerator,
-						 TRANSMIT_RATE_BASE);
-
-	ret = mse_packetizer_calc_cbs(bandwidth_fraction_denominator,
-				      bandwidth_fraction_numerator, cbs);
-	if (ret < 0)
-		return ret;
-
-	return 0;
+	return mse_packetizer_calc_cbs_by_bitrate(
+			h264->net_config.port_transmit_rate,
+			h264->payload_max + AVTP_PAYLOAD_OFFSET,
+			h264->video_config.bitrate,
+			h264->payload_max,
+			cbs);
 }
 
 static inline bool is_single_nal(u8 fu_indicator)
