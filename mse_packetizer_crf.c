@@ -73,19 +73,7 @@
 #include "mse_packetizer.h"
 #include "avtp.h"
 
-#define SEQNUM_INIT             (-1)
-
-#define NSEC_SCALE              (1000000000ul)
-#define BYTE_TO_BIT             (8)
-
-#define CBS_ADJUSTMENT_NUMERATOR        (103)
-#define CBS_ADJUSTMENT_DENOMINATOR      (100)
-/* preamble + FCS */
-#define ETHERNET_SPECIAL        (8 + 4)
-
-#define CLASS_INTERVAL_FRAMES   (50) /* CRF AVTPDUs per Second */
-#define INTERVAL_FRAMES         (1)
-
+#define CBS_ADJUSTMENT_FACTOR   (103) /* percent */
 #define MSE_CRFDATA_MAX         (6)
 
 struct avtp_crf_param {
@@ -266,8 +254,6 @@ static int mse_packetizer_crf_audio_calc_cbs(int index,
 					     struct mse_cbsparam *cbs)
 {
 	struct crf_packetizer *crf;
-	int ret;
-	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
 
 	if (index >= ARRAY_SIZE(crf_packetizer_table))
 		return -EPERM;
@@ -275,28 +261,12 @@ static int mse_packetizer_crf_audio_calc_cbs(int index,
 	mse_debug("index=%d\n", index);
 	crf = &crf_packetizer_table[index];
 
-	bandwidth_fraction_denominator =
-				(u64)crf->net_config.port_transmit_rate;
-	if (!bandwidth_fraction_denominator) {
-		mse_err("cbs error(null)\n");
-		return -EPERM;
-	}
-
-	bandwidth_fraction_numerator =
-		(ETHERNET_SPECIAL + (u64)crf->crf_packet_size) * BYTE_TO_BIT *
-		CLASS_INTERVAL_FRAMES * INTERVAL_FRAMES *
-		CBS_ADJUSTMENT_NUMERATOR / CBS_ADJUSTMENT_DENOMINATOR;
-	if (bandwidth_fraction_numerator > UINT_MAX) {
-		mse_err("cbs error(numerator too big)\n");
-		return -EPERM;
-	}
-
-	ret = mse_packetizer_calc_cbs(bandwidth_fraction_denominator,
-				      bandwidth_fraction_numerator, cbs);
-	if (ret < 0)
-		return ret;
-
-	return 0;
+	return mse_packetizer_calc_cbs_by_frames(
+			crf->net_config.port_transmit_rate,
+			crf->crf_packet_size,
+			CRF_INTERVAL_FRAMES,
+			CBS_ADJUSTMENT_FACTOR,
+			cbs);
 }
 
 static int mse_packetizer_crf_audio_packetize(int index,
