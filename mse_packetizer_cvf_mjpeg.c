@@ -73,11 +73,6 @@
 #include "avtp.h"
 #include "jpeg.h"
 
-#define SEQNUM_INIT        (-1)
-#define TRANSMIT_RATE_BASE (1000000)
-#define AVTP_PAYLOAD_MAX   (ETHFRAMELEN_MAX - AVTP_PAYLOAD_OFFSET)
-#define JPEG_PAYLOAD_MAX   (ETHFRAMELEN_MAX - AVTP_CVF_MJPEG_PAYLOAD_OFFSET)
-
 struct avtp_cvf_mjpeg_param {
 	char dest_addr[MSE_MAC_LEN_MAX];
 	char source_addr[MSE_MAC_LEN_MAX];
@@ -297,39 +292,19 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 					     struct mse_cbsparam *cbs)
 {
 	struct cvf_mjpeg_packetizer *cvf_mjpeg;
-	struct mse_network_config *net_config;
-	int ret;
-	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
-	int ether_size;
 
 	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
 		return -EPERM;
 
 	mse_debug("index=%d\n", index);
 	cvf_mjpeg = &cvf_mjpeg_packetizer_table[index];
-	ether_size = cvf_mjpeg->payload_max + AVTP_PAYLOAD_OFFSET;
-	net_config = &cvf_mjpeg->net_config;
 
-	bandwidth_fraction_denominator =
-		((u64)net_config->port_transmit_rate / TRANSMIT_RATE_BASE) *
-		(u64)cvf_mjpeg->payload_max;
-	if (!bandwidth_fraction_denominator) {
-		mse_err("Link speed %lu bps is not support\n",
-			net_config->port_transmit_rate);
-		return -EPERM;
-	}
-
-	bandwidth_fraction_numerator = (u64)cvf_mjpeg->video_config.bitrate *
-				       (u64)ether_size;
-	bandwidth_fraction_numerator = div64_u64(bandwidth_fraction_numerator,
-						 TRANSMIT_RATE_BASE);
-
-	ret = mse_packetizer_calc_cbs(bandwidth_fraction_denominator,
-				      bandwidth_fraction_numerator, cbs);
-	if (ret < 0)
-		return ret;
-
-	return 0;
+	return mse_packetizer_calc_cbs_by_bitrate(
+			cvf_mjpeg->net_config.port_transmit_rate,
+			cvf_mjpeg->payload_max + AVTP_PAYLOAD_OFFSET,
+			cvf_mjpeg->video_config.bitrate,
+			cvf_mjpeg->payload_max,
+			cbs);
 }
 
 static int mse_packetizer_cvf_mjpeg_packetize(int index,
