@@ -72,18 +72,7 @@
 #include "mse_packetizer.h"
 #include "avtp.h"
 
-#define NSEC            (1000000000L)
-#define SEQNUM_INIT     (-1)
-#define BYTE_TO_BIT     (8)
-
-#define CBS_ADJUSTMENT_NUMERATOR        (103)
-#define CBS_ADJUSTMENT_DENOMINATOR      (100)
-
-/* preamble + FCS */
-#define ETHERNET_SPECIAL        (8 + 4)
-
-#define CLASS_INTERVAL_FRAMES   (8000) /* class A */
-#define INTERVAL_FRAMES         (1)
+#define CBS_ADJUSTMENT_FACTOR   (103) /* percent */
 #define AM824_DATA_SIZE         (sizeof(u32))
 
 struct avtp_iec61883_6_param {
@@ -357,19 +346,19 @@ static int mse_packetizer_iec61883_6_set_audio_config(
 	audio_config = &iec61883_6->audio_config;
 	/* when samples_per_frame is not set */
 	if (!audio_config->samples_per_frame) {
-		iec61883_6->class_interval_frames = CLASS_INTERVAL_FRAMES;
+		iec61883_6->class_interval_frames = DEFAULT_INTERVAL_FRAMES;
 		iec61883_6->sample_per_packet = DIV_ROUND_UP(
 			audio_config->sample_rate,
-			iec61883_6->class_interval_frames * INTERVAL_FRAMES);
-		iec61883_6->frame_interval_time = NSEC / CLASS_INTERVAL_FRAMES;
+			iec61883_6->class_interval_frames);
 	} else {
 		iec61883_6->sample_per_packet = audio_config->samples_per_frame;
 		iec61883_6->class_interval_frames = DIV_ROUND_UP(
 			audio_config->sample_rate,
 			iec61883_6->sample_per_packet);
-		iec61883_6->frame_interval_time =
-				NSEC / iec61883_6->class_interval_frames;
 	}
+
+	iec61883_6->frame_interval_time =
+			NSEC_SCALE / iec61883_6->class_interval_frames;
 
 	payload_size = iec61883_6->sample_per_packet * audio_config->channels *
 		       AM824_DATA_SIZE;
@@ -421,8 +410,6 @@ static int mse_packetizer_iec61883_6_calc_cbs(int index,
 					      struct mse_cbsparam *cbs)
 {
 	struct iec61883_6_packetizer *iec61883_6;
-	int ret;
-	u64 bandwidth_fraction_denominator, bandwidth_fraction_numerator;
 
 	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
 		return -EPERM;
@@ -430,29 +417,12 @@ static int mse_packetizer_iec61883_6_calc_cbs(int index,
 	mse_debug("index=%d\n", index);
 	iec61883_6 = &iec61883_6_packetizer_table[index];
 
-	bandwidth_fraction_denominator =
-				(u64)iec61883_6->net_config.port_transmit_rate;
-	if (!bandwidth_fraction_denominator) {
-		mse_err("cbs error(null)\n");
-		return -EPERM;
-	}
-
-	bandwidth_fraction_numerator =
-		(ETHERNET_SPECIAL + (u64)iec61883_6->avtp_packet_size) *
-		BYTE_TO_BIT * (u64)iec61883_6->class_interval_frames *
-		INTERVAL_FRAMES * CBS_ADJUSTMENT_NUMERATOR /
-		CBS_ADJUSTMENT_DENOMINATOR;
-	if (bandwidth_fraction_numerator > UINT_MAX) {
-		mse_err("cbs error(numerator too big)\n");
-		return -EPERM;
-	}
-
-	ret = mse_packetizer_calc_cbs(bandwidth_fraction_denominator,
-				      bandwidth_fraction_numerator, cbs);
-	if (ret < 0)
-		return ret;
-
-	return 0;
+	return mse_packetizer_calc_cbs_by_frames(
+			iec61883_6->net_config.port_transmit_rate,
+			iec61883_6->avtp_packet_size,
+			iec61883_6->class_interval_frames,
+			CBS_ADJUSTMENT_FACTOR,
+			cbs);
 }
 
 #define SET_AM824_MBLA_24BIT(_data) \
@@ -842,7 +812,7 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 
 	iec61883_6->sample_per_packet =
 				payload_size / (AM824_DATA_SIZE * channels);
-	value = NSEC * iec61883_6->sample_per_packet;
+	value = NSEC_SCALE * iec61883_6->sample_per_packet;
 	do_div(value,
 	       avtp_fdf_to_sample_rate(avtp_get_iec61883_fdf(packet)));
 	iec61883_6->frame_interval_time = value;
