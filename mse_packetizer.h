@@ -62,6 +62,13 @@
 #ifndef __MSE_PACKETIZER_H__
 #define __MSE_PACKETIZER_H__
 
+#define NSEC_SCALE              (1000000000UL)
+#define SEQNUM_INIT             (-1)
+#define DEFAULT_INTERVAL_FRAMES (8000) /* class A */
+#define CRF_INTERVAL_FRAMES     (50) /* CRF AVTPDUs per Second */
+#define AVTP_PAYLOAD_MAX (ETHFRAMELEN_MAX - AVTP_PAYLOAD_OFFSET)
+#define JPEG_PAYLOAD_MAX (ETHFRAMELEN_MAX - AVTP_CVF_MJPEG_PAYLOAD_OFFSET)
+
 /**
  * @brief packetizer status
  */
@@ -164,6 +171,16 @@ bool mse_packetizer_is_valid(enum MSE_PACKETIZER id);
 int mse_packetizer_calc_cbs(u64 bandwidth_fraction_denominator,
 			    u64 bandwidth_fraction_numerator,
 			    struct mse_cbsparam *cbs);
+int mse_packetizer_calc_cbs_by_frames(u32 port_transmit_rate,
+				      u32 avtp_packet_size,
+				      u32 class_interval_frames,
+				      u32 cbs_adjust_ratio_percent,
+				      struct mse_cbsparam *cbs);
+int mse_packetizer_calc_cbs_by_bitrate(u32 port_transmit_rate,
+				       u32 ether_size,
+				       u32 payload_bitrate,
+				       u32 payload_size,
+				       struct mse_cbsparam *cbs);
 int mse_packetizer_open(enum MSE_PACKETIZER id);
 int mse_packetizer_release(enum MSE_PACKETIZER id, int index);
 

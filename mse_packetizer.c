@@ -65,6 +65,12 @@
 #include "ravb_mse_kernel.h"
 #include "mse_packetizer.h"
 
+/* preamble (8) + FCS (4) */
+#define ETHERNET_OVERHEAD             (8 + 4)
+#define CBS_ADJUST_RATIO_BASE_PERCENT (100)
+#define BIT_TO_BYTE                   (8)
+#define TRANSMIT_RATE_BASE            (1000)
+
 /* MSE packetizer function table */
 struct mse_packetizer_ops_table {
 	/** @brief stream type of packetizer */
@@ -142,18 +148,129 @@ int mse_packetizer_calc_cbs(u64 bandwidth_fraction_denominator,
 			    u64 bandwidth_fraction_numerator,
 			    struct mse_cbsparam *cbs)
 {
-	u64 value;
+	u64 bw_frac, bw_num, bw_denom;
 
-	value = (u64)UINT_MAX * bandwidth_fraction_numerator;
-	value = div64_u64(value, bandwidth_fraction_denominator);
-	if (value > UINT_MAX) {
-		mse_err("cbs error value=0x%016llx\n", value);
+	bw_num = bandwidth_fraction_numerator;
+	bw_denom = bandwidth_fraction_denominator;
+
+	mse_debug("bw_frac = %llu/%llu (0x%016llx/0x%016llx)\n",
+		  bw_num, bw_denom, bw_num, bw_denom);
+
+	if (!bw_denom) {
+		mse_err("error zero divide\n");
+		return -EINVAL;
+	}
+
+	if (bw_num > UINT_MAX) {
+		mse_err("error bw numerator overflow\n");
 		return -EPERM;
 	}
-	cbs->bandwidth_fraction = (u32)value;
-	cbs->send_slope = value >> 16;
-	cbs->idle_slope = USHRT_MAX - cbs->send_slope;
+
+	if (bw_num >= bw_denom) {
+		mse_err("error insufficient bandwidth, (bw_num >= bw_denom)\n");
+		return -ENOSPC;
+	}
+
+	bw_frac = div64_u64((u64)UINT_MAX * bw_num, bw_denom);
+	if (bw_frac > UINT_MAX) {
+		mse_err("error insufficient bandwidth, (bw_frac > 1.0)\n");
+		return -ENOSPC;
+	}
+
+	if (!bw_frac) {
+		/* For avoid that bw_frac is prohibited to set 0 */
+		mse_debug("bw_frac is 0, set to 1\n");
+		bw_frac = 1;
+	}
+
+	cbs->bandwidth_fraction = (u32)bw_frac;
+	cbs->idle_slope = bw_frac >> 16;
+	cbs->send_slope = (USHRT_MAX - cbs->idle_slope) * -1;
+
+	mse_debug("bw_frac = %llu (0x%016llx)\n", bw_frac, bw_frac);
+
 	return 0;
+}
+
+int mse_packetizer_calc_cbs_by_frames(u32 port_transmit_rate,
+				      u32 avtp_packet_size,
+				      u32 class_interval_frames,
+				      u32 cbs_adjust_ratio_percent,
+				      struct mse_cbsparam *cbs)
+{
+	u32 ether_size;
+	u64 bw_num, bw_denom;
+
+	/*
+	 * (1)
+	 *                           bandwidth
+	 * bandwidth_fraction = --------------------
+	 *                       port_transmit_rate
+	 *
+	 * (2)
+	 * ether_size = ether_overhead + avtp_packet_size
+	 *
+	 * (3)
+	 * bandwidth = ether_size x 8 x class_interval_frames
+	 *
+	 * (4)
+	 *                     cbs_adjust_ratio_percent
+	 * cbs_adjust_ratio = --------------------------
+	 *                               100
+	 *
+	 * (1')
+	 *                            bandwidth
+	 * bandwidth fraction = -------------------- x cbs_adjust_ratio
+	 *                       port_transmit_rate
+	 */
+	ether_size = ETHERNET_OVERHEAD + avtp_packet_size;
+	bw_num = (u64)ether_size * (u64)class_interval_frames *
+		(u64)cbs_adjust_ratio_percent;
+	bw_denom = (u64)(port_transmit_rate / BIT_TO_BYTE) *
+		CBS_ADJUST_RATIO_BASE_PERCENT;
+
+	mse_debug("%u %u %u %u\n",
+		  port_transmit_rate, avtp_packet_size,
+		  class_interval_frames, cbs_adjust_ratio_percent);
+
+	return mse_packetizer_calc_cbs(bw_denom, bw_num, cbs);
+}
+
+int mse_packetizer_calc_cbs_by_bitrate(u32 port_transmit_rate,
+				       u32 ether_size,
+				       u32 payload_bitrate,
+				       u32 payload_size,
+				       struct mse_cbsparam *cbs)
+{
+	u64 bw_num, bw_denom;
+
+	/*
+	 * (1)
+	 *                           bandwidth
+	 * bandwidth_fraction = --------------------
+	 *                       port_transmit_rate
+	 *
+	 * (2)
+	 *   ether_size         bandwidth
+	 * -------------- = -----------------
+	 *  payload_size     payload_bitrate
+	 *
+	 * (2')
+	 *                        payload_bitrate        ether_size
+	 * bandwidth_fraction = -------------------- x --------------
+	 *                       port_transmit_rate     payload_size
+	 *
+	 */
+	bw_num = (u64)(payload_bitrate / TRANSMIT_RATE_BASE) *
+		(u64)ether_size;
+	bw_denom = (u64)(port_transmit_rate / TRANSMIT_RATE_BASE) *
+		(u64)payload_size;
+
+	mse_debug("%u %u %u %u\n",
+		  payload_bitrate, port_transmit_rate,
+		  payload_size, ether_size);
+
+	return mse_packetizer_calc_cbs(bw_denom, bw_num, cbs);
 }
 
 int mse_packetizer_open(enum MSE_PACKETIZER id)

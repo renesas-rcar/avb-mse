@@ -84,7 +84,6 @@
 #include "mse_ptp.h"
 #include "mse_ioctl_local.h"
 
-#define NSEC_SCALE              (1000000000ul)
 #define BUF_SIZE                (32)
 
 #define NANO_SCALE              (1000000000ul)
