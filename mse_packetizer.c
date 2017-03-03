@@ -144,14 +144,11 @@ bool mse_packetizer_is_valid(enum MSE_PACKETIZER id)
 	return mse_packetizer_get_ops(id) ? true : false;
 }
 
-int mse_packetizer_calc_cbs(u64 bandwidth_fraction_denominator,
-			    u64 bandwidth_fraction_numerator,
+int mse_packetizer_calc_cbs(u64 bw_num,
+			    u64 bw_denom,
 			    struct mse_cbsparam *cbs)
 {
-	u64 bw_frac, bw_num, bw_denom;
-
-	bw_num = bandwidth_fraction_numerator;
-	bw_denom = bandwidth_fraction_denominator;
+	u64 bw_frac;
 
 	mse_debug("bw_frac = %llu/%llu (0x%016llx/0x%016llx)\n",
 		  bw_num, bw_denom, bw_num, bw_denom);
@@ -233,7 +230,7 @@ int mse_packetizer_calc_cbs_by_frames(u32 port_transmit_rate,
 		  port_transmit_rate, avtp_packet_size,
 		  class_interval_frames, cbs_adjust_ratio_percent);
 
-	return mse_packetizer_calc_cbs(bw_denom, bw_num, cbs);
+	return mse_packetizer_calc_cbs(bw_num, bw_denom, cbs);
 }
 
 int mse_packetizer_calc_cbs_by_bitrate(u32 port_transmit_rate,
@@ -270,7 +267,7 @@ int mse_packetizer_calc_cbs_by_bitrate(u32 port_transmit_rate,
 		  payload_bitrate, port_transmit_rate,
 		  payload_size, ether_size);
 
-	return mse_packetizer_calc_cbs(bw_denom, bw_num, cbs);
+	return mse_packetizer_calc_cbs(bw_num, bw_denom, cbs);
 }
 
 int mse_packetizer_open(enum MSE_PACKETIZER id)

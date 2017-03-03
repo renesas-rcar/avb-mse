@@ -168,8 +168,8 @@ extern struct mse_packetizer_ops mse_packetizer_iec61883_4_ops;
 enum MSE_STREAM_TYPE mse_packetizer_get_type(enum MSE_PACKETIZER id);
 struct mse_packetizer_ops *mse_packetizer_get_ops(enum MSE_PACKETIZER id);
 bool mse_packetizer_is_valid(enum MSE_PACKETIZER id);
-int mse_packetizer_calc_cbs(u64 bandwidth_fraction_denominator,
-			    u64 bandwidth_fraction_numerator,
+int mse_packetizer_calc_cbs(u64 bw_num,
+			    u64 bw_denom,
 			    struct mse_cbsparam *cbs);
 int mse_packetizer_calc_cbs_by_frames(u32 port_transmit_rate,
 				      u32 avtp_packet_size,
