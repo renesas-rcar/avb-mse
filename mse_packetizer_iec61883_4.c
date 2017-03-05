@@ -355,10 +355,11 @@ static int mse_packetizer_iec61883_4_packetize(int index,
 	data = buffer + *buffer_processed;
 
 	data_len = buffer_size - *buffer_processed;
+
 	/* check data length */
-	if (data_len % src_packet_size != 0) {
-		mse_err("invalid data length %d\n", data_len);
-		return -EINVAL;
+	if (data_len < src_packet_size) {
+		mse_debug("invalid data length %d\n", data_len);
+		return -EAGAIN;
 	}
 	payloads = data_len / src_packet_size;
 	if (payloads > iec61883_4->mpeg2ts_config.tspackets_per_frame)
