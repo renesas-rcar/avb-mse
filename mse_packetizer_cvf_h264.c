@@ -388,7 +388,7 @@ static int mse_packetizer_cvf_h264_packetize(int index,
 		return -EPERM;
 
 	h264 = &cvf_h264_packetizer_table[index];
-	mse_debug("index=%d seqnum=%d process=%zu/%zu t=%d\n",
+	mse_debug("index=%d seqnum=%d process=%zu/%zu t=%u\n",
 		  index, h264->send_seq_num, *buffer_processed,
 		  buffer_size, *timestamp);
 
@@ -485,9 +485,13 @@ static int mse_packetizer_cvf_h264_packetize(int index,
 	payload[FU_ADDR_INDICATOR] = h264->fu_indicator;
 	if (data_offset == FU_HEADER_LEN)
 		payload[FU_ADDR_HEADER] = h264->fu_header;
-	if (data_len > 0)
-		memcpy(payload + data_offset, cur_nal, data_len);
 
+	if (data_len < 0) {
+		mse_err("invalid data length %d\n\n", data_len);
+		return -EIO;
+	}
+
+	memcpy(payload + data_offset, cur_nal, data_len);
 	*packet_size = h264->header_size + data_offset + data_len;
 	(*buffer_processed) += data_len;
 
