@@ -71,10 +71,12 @@
 #include <linux/of_device.h>
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
+#include <linux/completion.h>
 #include <linux/time.h>
 #include <linux/hrtimer.h>
 #include <linux/delay.h>
 #include <linux/ptp_clock.h>
+#include <linux/list.h>
 #include "avtp.h"
 #include "ravb_mse_kernel.h"
 #include "mse_packetizer.h"
@@ -188,10 +190,21 @@ struct avtp_queue {
 	unsigned int times[AVTP_TIMESTAMPS_MAX];
 };
 
+struct trans_buffer {
+	void *buffer;
+	size_t buffer_size;
+	void *private_data;
+	int (*mse_completion)(void *priv, int size);
+	struct list_head list;
+};
+
 /** @brief instance by related adapter */
 struct mse_instance {
 	/** @brief instance used flag */
 	bool used_f;
+
+	/** @brief wait for streaming stop */
+	struct completion completion_stop;
 
 	/** @brief instance direction */
 	bool tx;
@@ -240,14 +253,17 @@ struct mse_instance {
 	/** @brief crf packet workqueue */
 	struct workqueue_struct *wq_crf_packet;
 
-	void *start_buffer;
-	size_t start_buffer_size;
-	int (*start_mse_completion)(void *priv, int size);
+	/** @brief wait queue for streaming */
+	wait_queue_head_t wait_wk_stream;
+
+	/** @brief transmission buffer list */
+	struct list_head trans_buf_list;
+	/** @brief transmission done buffer list */
+	struct list_head done_buf_list;
 
 	/** @brief timer handler */
 	struct hrtimer timer;
 	int timer_delay;
-	int timer_cnt;
 
 	/** @brief spin lock for timer count */
 	spinlock_t lock_timer;
@@ -255,12 +271,11 @@ struct mse_instance {
 	/** @brief timestamp timer handler */
 	struct hrtimer tstamp_timer;
 	int tstamp_timer_delay;
-	int tstamp_timer_cnt;
 
 	/** @brief crf timer handler */
 	struct hrtimer crf_timer;
 	int crf_timer_delay;
-	int crf_timer_cnt;
+
 	/* @brief crf packetizer index */
 	int crf_index;
 	struct mse_audio_info crf_audio_info;
@@ -303,6 +318,10 @@ struct mse_instance {
 	int avtp_timestamps_current;
 	/** @brief complete function pointer */
 	int (*mse_completion)(void *priv, int size);
+	/** brief count of buffers does not completed */
+	atomic_t trans_buf_cnt;
+	/** brief count of buffers does completed */
+	atomic_t done_buf_cnt;
 	/** @brief work length for media buffer */
 	size_t work_length;
 	/** @brief streaming flag */
@@ -355,9 +374,9 @@ struct mse_instance {
 
 	/** @brief video buffer  */
 	bool f_first_vframe;
-	bool use_temp_video_buffer_mjpeg;
-	bool use_temp_video_buffer_mpeg2ts;
+	bool f_use_temp_video_buffer;
 	bool f_temp_video_buffer_rewind;
+	bool f_mjpeg_valid;
 	int parsed;
 	int stored;
 	u64 mpeg2ts_pcr_90k;
@@ -664,62 +683,122 @@ static int mse_ptp_get_timestamps(int index,
 				     timestamps);
 }
 
+static int mse_trans_complete(struct mse_instance *instance, int size)
+{
+	int done_buf_cnt = atomic_read(&instance->done_buf_cnt);
+
+	mse_debug("trans_buf_cnt=%d done_buf_cnt=%d\n",
+		  atomic_read(&instance->trans_buf_cnt), done_buf_cnt);
+
+	if (done_buf_cnt > 0 && !list_empty(&instance->done_buf_list)) {
+		struct trans_buffer *done_buf;
+
+		done_buf = list_first_entry(&instance->done_buf_list,
+					    struct trans_buffer, list);
+
+		mse_debug("buffer=%p buffer_size=%zu\n",
+			  done_buf->buffer, done_buf->buffer_size);
+
+		if (done_buf->mse_completion)
+			done_buf->mse_completion(done_buf->private_data, size);
+
+		list_del(&done_buf->list);
+		kfree(done_buf);
+		atomic_dec(&instance->done_buf_cnt);
+	}
+
+	return atomic_read(&instance->done_buf_cnt);
+}
+
+static void mse_free_all_trans_buffers(struct mse_instance *instance, int size)
+{
+	int trans_buf_cnt;
+
+	while (mse_trans_complete(instance, size))
+		;
+
+	trans_buf_cnt = atomic_read(&instance->trans_buf_cnt);
+	mse_debug("trans_buf_cnt=%d done_buf_cnt=%d\n",
+		  trans_buf_cnt, atomic_read(&instance->done_buf_cnt));
+
+	while (trans_buf_cnt > 0 && !list_empty(&instance->trans_buf_list)) {
+		struct trans_buffer *trans_buf;
+
+		trans_buf = list_first_entry(&instance->trans_buf_list,
+					     struct trans_buffer, list);
+
+		mse_debug("buffer=%p buffer_size=%zu\n",
+			  trans_buf->buffer, trans_buf->buffer_size);
+
+		if (trans_buf->mse_completion)
+			trans_buf->mse_completion(trans_buf->private_data,
+						  size);
+
+		list_del(&trans_buf->list);
+		kfree(trans_buf);
+		atomic_dec(&instance->trans_buf_cnt);
+	}
+}
+
 static void mse_work_stream(struct work_struct *work)
 {
 	struct mse_instance *instance;
+	int index_network;
+	struct mse_packet_ctrl *packet_buffer;
+	struct mse_adapter_network_ops *network;
 	int err = 0;
 
 	mse_debug("START\n");
 
 	instance = container_of(work, struct mse_instance, wk_stream);
-	if (instance->f_stopping) {
-		instance->f_streaming = false;
-		return;
-	}
+
+	index_network = instance->index_network;
+	packet_buffer = instance->packet_buffer;
+	network = instance->network;
+
+	instance->f_streaming = true;
 
 	if (instance->tx) {
 		/* request send packet */
-		err = mse_packet_ctrl_send_packet(
-			instance->index_network,
-			instance->packet_buffer,
-			instance->network);
-		/* continue packetize workqueue */
-		if (err >= 0 && instance->f_continue) {
-			queue_work(instance->wq_packet,
-				   &instance->wk_packetize);
+		err = mse_packet_ctrl_send_packet(index_network,
+						  packet_buffer,
+						  network);
+
+		if (err >= 0) {
+			wake_up_interruptible(&instance->wait_wk_stream);
+
+			/* continue stream work */
+			if (instance->f_continue ||
+			    mse_packet_ctrl_check_packet_remain(packet_buffer))
+				queue_work(instance->wq_stream,
+					   &instance->wk_stream);
 		} else {
-			instance->f_completion = true;
-			mse_debug("f_completion = true\n");
-			if (instance->timer_delay == 0 ||
-			    instance->f_force_flush) {
-				instance->f_force_flush = false;
-				instance->f_trans_start = false;
-				instance->mse_completion(
-						instance->private_data, 0);
-			}
+			mse_err("send error %d\n", err);
 		}
 	} else {
 		/* request receive packet */
 		while (err >= 0 && !instance->f_stopping) {
 			err = mse_packet_ctrl_receive_packet(
-				instance->index_network,
+				index_network,
 				MSE_DMA_MAX_RECEIVE_PACKET,
-				instance->packet_buffer,
-				instance->network);
-			if (instance->f_stopping)
-				break;
+				packet_buffer,
+				network);
+
 			if (err < 0) {
 				mse_err("receive error %d\n", err);
 				break;
 			}
+
 			if (!instance->f_depacketizing) {
 				instance->f_depacketizing = true;
 				queue_work(instance->wq_packet,
 					   &instance->wk_depacketize);
 			}
 		}
-		mse_err("stop streaming %d\n", err);
+
+		mse_debug("stop streaming %d\n", err);
 	}
+
 	instance->f_streaming = false;
 }
 
@@ -1291,67 +1370,153 @@ static void mse_release_crf_packetizer(struct mse_instance *instance)
 	}
 }
 
+static bool check_packet_remain(struct mse_instance *instance)
+{
+	int wait_count = MSE_DMA_MAX_PACKET / 2;
+	int rem = mse_packet_ctrl_check_packet_remain(instance->packet_buffer);
+
+	return wait_count > rem;
+}
+
 static void mse_work_packetize(struct work_struct *work)
 {
 	struct mse_instance *instance;
-	int ret;
+	int ret = 0;
+	int trans_size;
 
 	instance = container_of(work, struct mse_instance, wk_packetize);
 
-	mse_debug("trans size=%zu\n", instance->media_buffer_size);
-
-	if (instance->f_stopping)
+	if (instance->f_completion)
 		return;
 
-	if (instance->media->type == MSE_TYPE_ADAPTER_AUDIO) {
-		/* make AVTP packet with timestamps */
-		ret = mse_packet_ctrl_make_packet(
-			instance->index_packetizer,
-			instance->media_buffer,
-			instance->media_buffer_size,
-			instance->ptp_clock,
-			&instance->avtp_timestamps_current,
-			instance->avtp_timestamps_size,
-			instance->avtp_timestamps,
-			instance->packet_buffer,
-			instance->packetizer,
-			&instance->work_length);
-	} else {
-		/* make AVTP packet with one timestamp */
-		unsigned int timestamp_avtp = instance->timestamp +
-			instance->max_transit_time;
-		ret = mse_packet_ctrl_make_packet(
-			instance->index_packetizer,
-			instance->media_buffer,
-			instance->media_buffer_size,
-			-1,
-			NULL,
-			1,
-			&timestamp_avtp,
-			instance->packet_buffer,
-			instance->packetizer,
-			&instance->work_length);
+	trans_size = instance->media_buffer_size - instance->work_length;
+	mse_debug("trans size=%d buffer=%p buffer_size=%zu\n",
+		  trans_size, instance->media_buffer,
+		  instance->media_buffer_size);
+
+	if (instance->media_buffer && trans_size > 0) {
+		/* wait for packet buffer processed */
+		wait_event_interruptible(instance->wait_wk_stream,
+					 check_packet_remain(instance));
+
+		if (instance->media->type == MSE_TYPE_ADAPTER_AUDIO) {
+			/* make AVTP packet with timestamps */
+			ret = mse_packet_ctrl_make_packet(
+				instance->index_packetizer,
+				instance->media_buffer,
+				instance->media_buffer_size,
+				instance->ptp_clock,
+				&instance->avtp_timestamps_current,
+				instance->avtp_timestamps_size,
+				instance->avtp_timestamps,
+				instance->packet_buffer,
+				instance->packetizer,
+				&instance->work_length);
+		} else {
+			/* make AVTP packet with one timestamp */
+			unsigned int timestamp_avtp = instance->timestamp +
+				instance->max_transit_time;
+			ret = mse_packet_ctrl_make_packet(
+				instance->index_packetizer,
+				instance->media_buffer,
+				instance->media_buffer_size,
+				-1,
+				NULL,
+				1,
+				&timestamp_avtp,
+				instance->packet_buffer,
+				instance->packetizer,
+				&instance->work_length);
+		}
 	}
 
-	if (ret < 0) {
-		mse_err("error=%d\n", ret);
-		return;
-	}
-	mse_debug("packetized=%d len=%zu\n",
-		  ret, instance->work_length);
-	/* start workqueue for streaming */
+	mse_debug("packetized(ret)=%d len=%zu\n", ret, instance->work_length);
+
 	instance->f_continue =
-		(instance->work_length < instance->media_buffer_size);
+		instance->work_length < instance->media_buffer_size;
 
-	if (!instance->f_continue &&
-	    (instance->use_temp_video_buffer_mjpeg ||
-	     instance->use_temp_video_buffer_mpeg2ts))
-		instance->f_temp_video_buffer_rewind = true;
+	if (ret == -EAGAIN) {
+		instance->f_continue = false;
+		if (instance->work_length < instance->stored)
+			instance->parsed = instance->work_length;
+
+		if (list_empty(&instance->trans_buf_list)) {
+			mse_err("short of data\n");
+			return;
+		}
+
+		if (instance->f_stopping &&
+		    list_empty(&instance->trans_buf_list)) {
+			mse_debug("discard %zu byte before stopping\n",
+				  instance->media_buffer_size -
+				  instance->work_length);
+
+			instance->f_continue = false;
+			instance->f_trans_start = false;
+			instance->f_force_flush = false;
+			instance->f_completion = true;
+			queue_work(instance->wq_packet, &instance->wk_stop);
+
+			return;
+		}
+	} else if (ret < 0) {
+		mse_err("error=%d buffer may be corrupted\n", ret);
+		instance->f_trans_start = false;
+		instance->f_continue = false;
+		instance->f_force_flush = false;
+		instance->f_completion = true;
+		mse_debug("f_completion = true\n");
+
+		mse_trans_complete(instance, ret);
+
+		if (instance->f_stopping)
+			queue_work(instance->wq_packet, &instance->wk_stop);
+
+		return;
+	}
 
 	/* start workqueue for streaming */
-	if (!instance->f_streaming) {
-		instance->f_streaming = true;
+	if (ret > 0 || instance->f_continue)
 		queue_work(instance->wq_stream, &instance->wk_stream);
+
+	if (instance->f_use_temp_video_buffer) {
+		instance->f_continue = false;
+
+		if (instance->work_length < instance->stored)
+			instance->parsed = instance->work_length;
+
+		if (instance->parsed == instance->stored) {
+			instance->f_temp_video_buffer_rewind = false;
+			instance->stored = 0;
+			instance->parsed = 0;
+		} else if (instance->parsed <= instance->stored / 2) {
+			instance->f_temp_video_buffer_rewind = false;
+		} else {
+			instance->f_temp_video_buffer_rewind = true;
+		}
+	}
+
+	if (!instance->f_continue) {
+		if (!instance->timer_delay || instance->f_force_flush) {
+			instance->f_force_flush = false;
+			instance->f_trans_start = false;
+			mse_trans_complete(instance, ret);
+
+			if (instance->f_stopping) {
+				if (list_empty(&instance->trans_buf_list) &&
+				    list_empty(&instance->done_buf_list)) {
+					instance->f_completion = true;
+					mse_debug("f_completion = true\n");
+					queue_work(instance->wq_packet,
+						   &instance->wk_stop);
+				} else {
+					queue_work(instance->wq_packet,
+						   &instance->wk_start_trans);
+				}
+			}
+		}
+	} else {
+		queue_work(instance->wq_packet, &instance->wk_packetize);
 	}
 }
 
@@ -1401,19 +1566,27 @@ static bool check_presentation_time(struct mse_instance *instance)
 static void mse_work_depacketize(struct work_struct *work)
 {
 	struct mse_instance *instance;
-	int received, ret;
+	int received, ret = 0;
 	unsigned int timestamps[128];
 	int t_stored, i;
 	unsigned int d_t;
 	struct mse_audio_config *audio;
-	unsigned long flags;
 
 	mse_debug("START\n");
 
 	instance = container_of(work, struct mse_instance, wk_depacketize);
 	if (instance->f_stopping) {
-		mse_err("depaketize stopping\n");
-		instance->f_depacketizing = false;
+		if (instance->f_depacketizing) {
+			mse_debug("depaketize stopping\n");
+			instance->f_depacketizing = false;
+		}
+
+		if (!instance->f_completion) {
+			mse_debug("f_completion = true\n");
+			instance->f_completion = true;
+			queue_work(instance->wq_packet, &instance->wk_stop);
+		}
+
 		return;
 	}
 
@@ -1439,8 +1612,7 @@ static void mse_work_depacketize(struct work_struct *work)
 
 			if (ret != -EAGAIN && ret < 0) {
 				instance->f_trans_start = false;
-				instance->mse_completion(
-						instance->private_data, ret);
+				mse_trans_complete(instance, ret);
 				break;
 			}
 
@@ -1492,27 +1664,21 @@ static void mse_work_depacketize(struct work_struct *work)
 		mse_debug("media_buffer=%p received=%d depacketized=%d\n",
 			  instance->media_buffer, received, ret);
 
-		if (instance->f_stopping)
-			break;
-
 		/* complete callback */
 		if (ret >= 0) {
 			instance->f_trans_start = false;
-			instance->mse_completion(instance->private_data, ret);
+			mse_trans_complete(instance, ret);
 			instance->work_length = 0;
 		} else if (ret == -EAGAIN) {
-			spin_lock_irqsave(&instance->lock_timer, flags);
-			instance->timer_cnt++;
-			spin_unlock_irqrestore(&instance->lock_timer, flags);
-			if (!instance->f_streaming) {
+			if (!instance->f_streaming &&
+			    !instance->f_stopping) {
 				instance->f_streaming = true;
 				queue_work(instance->wq_stream,
 					   &instance->wk_stream);
 			}
 		} else {
 			instance->f_trans_start = false;
-			instance->mse_completion(
-					instance->private_data, ret);
+			mse_trans_complete(instance, ret);
 			instance->work_length = 0;
 		}
 		break;
@@ -1521,6 +1687,7 @@ static void mse_work_depacketize(struct work_struct *work)
 		mse_err("unknown type=0x%08x\n", instance->media->type);
 		break;
 	}
+
 	instance->f_depacketizing = false;
 }
 
@@ -1528,33 +1695,50 @@ static void mse_work_callback(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
-	unsigned long flags;
+
+	instance = container_of(work, struct mse_instance, wk_callback);
+	adapter = instance->media;
+
+	if (instance->f_completion)
+		return;
+
+	if (instance->f_continue || !instance->f_trans_start) {
+		/* packetize process continuing, retry */
+		queue_work(instance->wq_packet, &instance->wk_callback);
+
+		return;
+	}
 
 	mse_debug("START\n");
 
-	instance = container_of(work, struct mse_instance, wk_callback);
-	if (instance->f_stopping)
-		return;
+	if (instance->tx) {
+		if (instance->f_stopping) {
+			/* flush buffer before stopping */
+			if (list_empty(&instance->trans_buf_list) &&
+			    list_empty(&instance->done_buf_list))
+				instance->f_force_flush = true;
 
-	adapter = instance->media;
-
-	if (instance->use_temp_video_buffer_mpeg2ts) {
-		mse_debug("mpeg2ts_clock_90k time=%llu pcr=%llu\n",
-			  instance->mpeg2ts_clock_90k,
-			  instance->mpeg2ts_pcr_90k);
-
-		if (compare_pcr(instance->mpeg2ts_pcr_90k,
-				instance->mpeg2ts_clock_90k)) {
-			spin_lock_irqsave(&instance->lock_timer, flags);
-			instance->timer_cnt++;
-			spin_unlock_irqrestore(&instance->lock_timer, flags);
-			return;
+			queue_work(instance->wq_packet,
+				   &instance->wk_start_trans);
 		}
-	}
 
-	if (!instance->tx) {
+		if (IS_MSE_TYPE_MPEG2TS(adapter->type)) {
+			mse_debug("mpeg2ts_clock_90k time=%llu pcr=%llu\n",
+				  instance->mpeg2ts_clock_90k,
+				  instance->mpeg2ts_pcr_90k);
+
+			if (compare_pcr(instance->mpeg2ts_pcr_90k,
+					instance->mpeg2ts_clock_90k))
+				return;
+		}
+
+		/* complete callback */
+		instance->f_trans_start = false;
+		mse_trans_complete(instance, 0);
+	} else {
 		if (IS_MSE_TYPE_AUDIO(adapter->type)) {
-			if (instance->temp_w != instance->temp_r &&
+			if (instance->media_buffer &&
+			    instance->temp_w != instance->temp_r &&
 			    check_presentation_time(instance)) {
 				memcpy(instance->media_buffer,
 				       instance->temp_buffer[instance->temp_r],
@@ -1565,11 +1749,11 @@ static void mse_work_callback(struct work_struct *work)
 		} else {
 			return;
 		}
-	}
 
-	/* complete callback anytime */
-	instance->f_trans_start = false;
-	instance->mse_completion(instance->private_data, 0);
+		/* complete callback */
+		instance->f_trans_start = false;
+		mse_trans_complete(instance, 0);
+	}
 }
 
 static void mse_work_stop(struct work_struct *work)
@@ -1585,40 +1769,42 @@ static void mse_work_stop(struct work_struct *work)
 
 	instance = container_of(work, struct mse_instance, wk_stop);
 
-	instance->state = MSE_STATE_OPEN;
-	adapter = instance->media;
-	crf_type = instance->crf_type;
 	network = instance->network;
 
-	/* timer stop */
-	ret = hrtimer_try_to_cancel(&instance->timer);
-	if (ret)
-		mse_err("The timer was still in use...\n");
-
-	if (instance->f_work_timestamp)
-		flush_work(&instance->wk_timestamp);
-
-	if (instance->f_streaming) {
-		if (instance->tx) {
-			flush_work(&instance->wk_packetize);
-			flush_work(&instance->wk_stream);
-		} else {
+	if (!instance->f_completion) {
+		if (instance->tx)
+			queue_work(instance->wq_packet,
+				   &instance->wk_start_trans);
+		else {
 			ret = network->cancel(instance->index_network);
 			if (ret)
 				mse_err("failed cancel() ret=%d\n", ret);
-			flush_work(&instance->wk_stream);
-			flush_work(&instance->wk_depacketize);
+
+			queue_work(instance->wq_packet,
+				   &instance->wk_depacketize);
 		}
+
+		return;
 	}
+
+	mse_free_all_trans_buffers(instance, -EIO);
+	instance->state = MSE_STATE_OPEN;
+	adapter = instance->media;
+	crf_type = instance->crf_type;
+
+	/* timer stop */
+	ret = hrtimer_try_to_cancel(&instance->timer);
+	if (ret < 0)
+		mse_err("The timer was still in use...\n");
 
 	/* timestamp timer, crf timer stop */
 	if (IS_MSE_TYPE_AUDIO(adapter->type)) {
 		ret = hrtimer_try_to_cancel(&instance->tstamp_timer);
-		if (ret)
+		if (ret < 0)
 			mse_err("The tstamp_timer was still in use...\n");
 
 		ret = hrtimer_try_to_cancel(&instance->crf_timer);
-		if (ret)
+		if (ret < 0)
 			mse_err("The crf_timer was still in use...\n");
 
 		if (instance->mch_index >= 0) {
@@ -1628,17 +1814,32 @@ static void mse_work_stop(struct work_struct *work)
 				mse_err("mch close error(%d).\n", ret);
 			}
 		}
+
 		if (crf_type == MSE_CRF_TYPE_RX) {
 			ret = instance->network->cancel(
 				instance->crf_index_network);
 			if (ret)
 				mse_err("failed cancel() ret=%d\n", ret);
+
 			flush_work(&instance->wk_crf_receive);
 		} else if (crf_type == MSE_CRF_TYPE_TX &&
 			   instance->f_crf_sending) {
 			flush_work(&instance->wk_crf_send);
 		}
 	}
+
+	if (instance->f_work_timestamp)
+		flush_work(&instance->wk_timestamp);
+
+	/* flush workqueue */
+	flush_workqueue(instance->wq_stream);
+
+	atomic_set(&instance->trans_buf_cnt, 0);
+	atomic_set(&instance->done_buf_cnt, 0);
+	instance->f_stopping = false;
+	complete(&instance->completion_stop);
+
+	mse_debug("END\n");
 }
 
 static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
@@ -1646,13 +1847,12 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
 	ktime_t ktime;
-	unsigned long flags;
 
 	instance = container_of(arg, struct mse_instance, timer);
 	adapter = instance->media;
 
-	if (instance->f_stopping) {
-		mse_err("stopping ...\n");
+	if (instance->f_completion) {
+		mse_debug("stopping ...\n");
 		return HRTIMER_NORESTART;
 	}
 
@@ -1667,16 +1867,6 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 	hrtimer_forward(&instance->timer,
 			hrtimer_get_expires(&instance->timer),
 			ktime);
-
-	spin_lock_irqsave(&instance->lock_timer, flags);
-	if (!instance->timer_cnt) {
-		spin_unlock_irqrestore(&instance->lock_timer, flags);
-		mse_debug("timer_cnt error\n");
-		return HRTIMER_RESTART;
-	}
-	instance->timer_cnt--;
-
-	spin_unlock_irqrestore(&instance->lock_timer, flags);
 
 	/* start workqueue for completion */
 	queue_work(instance->wq_packet, &instance->wk_callback);
@@ -1695,7 +1885,7 @@ static void mse_work_crf_send(struct work_struct *work)
 
 	instance = container_of(work, struct mse_instance, wk_crf_send);
 
-	if (instance->f_stopping) {
+	if (instance->f_completion) {
 		instance->f_crf_sending = false;
 		return;
 	}
@@ -1705,7 +1895,7 @@ static void mse_work_crf_send(struct work_struct *work)
 	spin_lock_irqsave(&instance->lock_ques, flags);
 	size = tstamps_get_tstamps_size(&instance->tstamp_que_crf);
 	spin_unlock_irqrestore(&instance->lock_ques, flags);
-	while (!instance->f_stopping && size >= tsize) {
+	while (!instance->f_completion && size >= tsize) {
 		/* get Timestamps */
 		mse_debug("size %d tsize %d\n", size, tsize);
 		spin_lock_irqsave(&instance->lock_ques, flags);
@@ -1832,8 +2022,8 @@ static enum hrtimer_restart mse_crf_callback(struct hrtimer *arg)
 
 	instance = container_of(arg, struct mse_instance, crf_timer);
 
-	if (instance->f_stopping) {
-		mse_err("stopping ...\n");
+	if (instance->f_completion) {
+		mse_debug("stopping ...\n");
 		return HRTIMER_NORESTART;
 	}
 
@@ -1861,8 +2051,8 @@ static enum hrtimer_restart mse_timestamp_collect_callback(struct hrtimer *arg)
 
 	mse_debug("START\n");
 
-	if (instance->f_stopping) {
-		mse_err("stopping ...\n");
+	if (instance->f_completion) {
+		mse_debug("stopping ...\n");
 		return HRTIMER_NORESTART;
 	}
 
@@ -1900,7 +2090,6 @@ static void mse_work_start_streaming(struct work_struct *work)
 	mse_ptp_get_time(instance->ptp_index,
 			 instance->ptp_dev_id, &now);
 	instance->timestamp = (unsigned long)now.sec * NSEC_SCALE + now.nsec;
-	instance->timer_cnt = 0;
 
 	/* prepare std clock time */
 	if (instance->ptp_clock) {
@@ -1981,10 +2170,22 @@ static void mse_work_start_streaming(struct work_struct *work)
 	}
 
 	instance->f_streaming = false;
+	instance->f_continue = false;
 	instance->f_stopping = false;
 	instance->work_length = 0;
 	instance->f_trans_start = false;
 	instance->f_completion = false;
+	instance->f_force_flush = false;
+	instance->f_temp_video_buffer_rewind = false;
+	instance->f_mjpeg_valid = false;
+	instance->f_first_vframe = true;
+	instance->parsed = 0;
+	instance->stored = 0;
+	instance->mpeg2ts_clock_90k = MPEG2TS_PCR90K_INVALID;
+	instance->mpeg2ts_pre_pcr_pid = MPEG2TS_PCR_PID_IGNORE;
+	instance->mpeg2ts_pcr_90k = MPEG2TS_PCR90K_INVALID;
+	instance->mpeg2ts_pre_pcr_90k = MPEG2TS_PCR90K_INVALID;
+	instance->f_depacketizing = false;
 
 	instance->temp_w = 0;
 	instance->temp_r = 0;
@@ -2012,6 +2213,14 @@ static inline bool is_mpeg2ts_m2ts(u8 *tsp)
 	}
 }
 
+static int mpeg2ts_packet_size(struct mse_instance *instance)
+{
+	if (instance->media_config.mpeg2ts.mpeg2ts_type == MSE_MPEG2TS_TYPE_TS)
+		return MPEG2TS_TS_SIZE;
+	else
+		return MPEG2TS_M2TS_SIZE;
+}
+
 static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 {
 	u8 *tsp;
@@ -2020,19 +2229,22 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 	u16 pcr_pid = instance->media_config.mpeg2ts.pcr_pid;
 	u64 pcr;
 	int psize, offset;
+	bool ret = false;
 
-	if (instance->media_config.mpeg2ts.mpeg2ts_type ==
-	    MSE_MPEG2TS_TYPE_TS) {
-		psize = MPEG2TS_TS_SIZE;
-		offset = 0;
-	} else {
-		psize = MPEG2TS_M2TS_SIZE;
-		offset = MPEG2TS_M2TS_OFFSET;
-	}
+	psize = mpeg2ts_packet_size(instance);
+	offset = psize - MPEG2TS_TS_SIZE;
 
 	while (instance->parsed + psize < instance->stored) {
 		tsp = instance->temp_video_buffer +
 			instance->parsed + offset;
+
+		/* check sync byte */
+		if (instance->parsed + psize < instance->stored &&
+		    tsp[0] != MPEG2TS_SYNC) {
+			instance->parsed++;
+			continue;
+		}
+
 		instance->parsed += psize;
 
 		pid = (((u16)tsp[1] << 8) + (u16)tsp[2]) & 0x1fff;
@@ -2065,7 +2277,8 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 				instance->mpeg2ts_pcr_90k = pcr;
 				instance->mpeg2ts_pre_pcr_pid = pid;
 				instance->mpeg2ts_pre_pcr_90k = pcr;
-				return true;
+
+				ret = true;
 			}
 		} else if (pcr_pid != pid) {
 			continue;
@@ -2084,32 +2297,78 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 				instance->mpeg2ts_clock_90k = pcr;
 			instance->mpeg2ts_pcr_90k = pcr;
 
-			return true;
+			ret = true;
 		}
 	}
 
-	return false;
+	return ret;
 }
 
-static bool check_mjpeg(struct mse_instance *instance); /* tobe move */
+static bool check_mjpeg_eoi(struct mse_instance *instance)
+{
+	int i, ret = false;
+	unsigned char *buf = instance->temp_video_buffer;
+
+	for (i = instance->parsed; i < instance->stored - 1; i++) {
+		if (buf[i] == 0xFF && buf[i + 1] == 0xD9) {
+			ret = true;
+			mse_debug("Found EOI, buf[%d]=%02X buf[%d]=%02X\n",
+				  i, buf[i], i + 1, buf[i + 1]);
+			i++;
+			break;
+		}
+	}
+
+	instance->parsed = i + 1;
+
+	return ret;
+}
+
 static void mse_work_start_transmission(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
-	void *buffer;
-	size_t buffer_size;
-	int (*mse_completion)(void *priv, int size);
-	unsigned long flags;
+	struct trans_buffer *trans_buf;
+	void *buffer = NULL;
+	size_t buffer_size = 0;
+	bool trans_start = false;
 	int ret;
 	struct ptp_clock_time now;
 
 	instance = container_of(work, struct mse_instance, wk_start_trans);
 
+	if (instance->f_completion)
+		return;
+
+	if (instance->f_continue ||
+	    (instance->f_trans_start && instance->f_force_flush) ||
+	    (!instance->tx && instance->f_trans_start)) {
+		/* retry */
+		queue_work(instance->wq_packet, &instance->wk_start_trans);
+
+		return;
+	}
+
 	adapter = instance->media;
 
-	buffer = instance->start_buffer;
-	buffer_size = instance->start_buffer_size;
-	mse_completion = instance->start_mse_completion;
+	if (atomic_read(&instance->trans_buf_cnt) > 0 &&
+	    !list_empty(&instance->trans_buf_list)) {
+		trans_buf = list_first_entry(&instance->trans_buf_list,
+					     struct trans_buffer, list);
+		list_del(&trans_buf->list);
+
+		buffer = trans_buf->buffer;
+		buffer_size = trans_buf->buffer_size;
+		instance->private_data = trans_buf->private_data;
+		instance->mse_completion = trans_buf->mse_completion;
+
+		list_add_tail(&trans_buf->list, &instance->done_buf_list);
+		atomic_inc(&instance->done_buf_cnt);
+		atomic_dec(&instance->trans_buf_cnt);
+	}
+
+	mse_debug("index=%d buffer=%p buffer_size=%zu\n",
+		  instance->index_media, buffer, buffer_size);
 
 	/* update timestamp(nsec) */
 	mse_ptp_get_time(instance->ptp_index,
@@ -2120,38 +2379,10 @@ static void mse_work_start_transmission(struct work_struct *work)
 		tstamps_store_ptp_timestamp(instance, &now);
 
 	/* TODO: to be move v4l2 adapter */
-	if (instance->use_temp_video_buffer_mjpeg) {
+	if (instance->f_use_temp_video_buffer) {
 		if (instance->f_temp_video_buffer_rewind) {
 			memcpy(instance->temp_video_buffer,
-			       instance->temp_video_buffer +
-			       instance->parsed + 2,
-			       instance->stored - instance->parsed - 2);
-			instance->stored -= instance->parsed + 2;
-			instance->parsed = 0;
-			instance->f_temp_video_buffer_rewind = false;
-		}
-		if (!instance->f_first_vframe) {
-			memcpy(instance->temp_video_buffer + instance->stored,
-			       instance->start_buffer,
-			       instance->start_buffer_size);
-			instance->stored += buffer_size;
-		}
-		instance->f_first_vframe = false;
-		if (check_mjpeg(instance)) {
-			instance->state = MSE_STATE_EXECUTE;
-			instance->media_buffer = instance->temp_video_buffer;
-			instance->media_buffer_size = instance->parsed + 2;
-			instance->f_trans_start = true;
-		} else {
-			/* not EOI */
-			(*mse_completion)(instance->private_data, 0);
-			return;
-		}
-	} else if (instance->use_temp_video_buffer_mpeg2ts) {
-		if (instance->f_temp_video_buffer_rewind) {
-			memcpy(instance->temp_video_buffer,
-			       instance->temp_video_buffer +
-			       instance->parsed,
+			       instance->temp_video_buffer + instance->parsed,
 			       instance->stored - instance->parsed);
 			instance->stored -= instance->parsed;
 			instance->parsed = 0;
@@ -2159,46 +2390,102 @@ static void mse_work_start_transmission(struct work_struct *work)
 		}
 
 		if (instance->f_first_vframe) {
-			/* check sync byte */
-			enum MSE_MPEG2TS_TYPE ts_type;
+			if (IS_MSE_TYPE_MPEG2TS(adapter->type)) {
+				/* check sync byte */
+				enum MSE_MPEG2TS_TYPE ts_type;
+				struct mse_mpeg2ts_config *mpeg2ts;
 
-			if (is_mpeg2ts_ts(buffer))
-				ts_type = MSE_MPEG2TS_TYPE_TS;
-			else if (is_mpeg2ts_m2ts(buffer))
-				ts_type = MSE_MPEG2TS_TYPE_M2TS;
-			else
-				return;
+				if (is_mpeg2ts_ts(buffer)) {
+					ts_type = MSE_MPEG2TS_TYPE_TS;
+				} else if (is_mpeg2ts_m2ts(buffer)) {
+					ts_type = MSE_MPEG2TS_TYPE_M2TS;
+				} else {
+					mse_trans_complete(instance, 0);
+					return;
+				}
 
-			mse_debug("mpeg2ts_type=%d\n", ts_type);
-			instance->media_config.mpeg2ts.mpeg2ts_type = ts_type;
+				mse_debug("mpeg2ts_type=%d\n", ts_type);
 
-			instance->packetizer->set_mpeg2ts_config(
-				instance->index_packetizer,
-				&instance->media_config.mpeg2ts);
-		} else if (instance->stored + buffer_size <=
+				mpeg2ts = &instance->media_config.mpeg2ts;
+				mpeg2ts->mpeg2ts_type = ts_type;
+				instance->packetizer->set_mpeg2ts_config(
+					instance->index_packetizer, mpeg2ts);
+			} else {
+				/* Check SOI marker for MJPEG validation */
+				unsigned char *buf = buffer;
+
+				if (buf[0] != 0xFF || buf[1] != 0xD8) {
+					mse_trans_complete(instance, 0);
+					return;
+				}
+			}
+			instance->f_first_vframe = false;
+		}
+
+		if (instance->stored + buffer_size <=
 			   sizeof(instance->temp_video_buffer)) {
-			memcpy(instance->temp_video_buffer + instance->stored,
+			memcpy(instance->temp_video_buffer +
+			       instance->stored,
 			       buffer, buffer_size);
 			instance->stored += buffer_size;
 			if (instance->stored + buffer_size >=
 			    sizeof(instance->temp_video_buffer))
 				instance->f_force_flush = true;
 		} else {
-			mse_err("temp buffer overrun %u  %zu\n",
-				instance->stored, buffer_size);
+			mse_err("temp buffer overrun %zu/%zu\n",
+				instance->stored + buffer_size,
+				sizeof(instance->temp_video_buffer));
+			mse_trans_complete(instance, -EIO);
+			if (instance->f_stopping)
+				instance->f_completion = true;
+
 			return;
 		}
 
-		instance->f_first_vframe = false;
+		if (IS_MSE_TYPE_MPEG2TS(adapter->type))
+			trans_start = check_mpeg2ts_pcr(instance);
+		else
+			trans_start = check_mjpeg_eoi(instance);
 
-		if (check_mpeg2ts_pcr(instance) || instance->f_force_flush) {
+#ifdef DEBUG
+		if (instance->f_force_flush) {
+			if (buffer_size > 0) {
+				mse_debug("flush %d bytes.\n",
+					  instance->parsed);
+			} else {
+				mse_debug("flush %d bytes, before stopping.\n",
+					  instance->stored);
+			}
+		}
+#endif
+
+		if (trans_start || instance->f_force_flush) {
 			instance->state = MSE_STATE_EXECUTE;
 			instance->media_buffer = instance->temp_video_buffer;
-			instance->media_buffer_size = instance->parsed;
 			instance->f_trans_start = true;
-			instance->f_temp_video_buffer_rewind = true;
+
+			if (buffer_size > 0) {
+				instance->media_buffer_size = instance->parsed;
+			} else {
+				instance->media_buffer_size = instance->stored;
+				instance->stored = 0;
+				instance->parsed = 0;
+			}
 		} else {
-			(*mse_completion)(instance->private_data, 0);
+			/* Not enough data, request next buffer */
+			mse_trans_complete(instance, 0);
+
+			if (!list_empty(&instance->trans_buf_list)) {
+				queue_work(instance->wq_packet,
+					   &instance->wk_start_trans);
+			} else {
+				if (instance->f_stopping) {
+					instance->f_force_flush = true;
+					queue_work(instance->wq_packet,
+						   &instance->wk_start_trans);
+				}
+			}
+
 			return;
 		}
 	} else {
@@ -2207,36 +2494,29 @@ static void mse_work_start_transmission(struct work_struct *work)
 		instance->media_buffer_size = buffer_size;
 		instance->f_trans_start = true;
 	}
-	instance->mse_completion = mse_completion;
 
 	if (instance->tx) {
 		instance->work_length = 0;
-		/* start workqueue for packetize */
-		instance->f_continue = false;
 
 		if (IS_MSE_TYPE_AUDIO(adapter->type)) {
 			ret = create_avtp_timestamps(instance);
 			if (ret < 0) {
-				mse_completion(instance->private_data, ret);
+				mse_trans_complete(instance, ret);
 				return;
 			}
 		}
 
+		/* start workqueue for packetize */
 		queue_work(instance->wq_packet, &instance->wk_packetize);
 	} else {
-		memset(buffer, 0, buffer_size);
+		if (buffer)
+			memset(buffer, 0, buffer_size);
 
 		/* start workqueue for streaming */
 		if (!instance->f_streaming) {
 			instance->f_streaming = true;
 			queue_work(instance->wq_stream, &instance->wk_stream);
 		}
-	}
-
-	if (!instance->f_force_flush) {
-		spin_lock_irqsave(&instance->lock_timer, flags);
-		instance->timer_cnt++;
-		spin_unlock_irqrestore(&instance->lock_timer, flags);
 	}
 }
 
@@ -2892,6 +3172,11 @@ int mse_open(int index_media, bool tx)
 
 	instance = &mse->instance_table[index];
 	instance->used_f = true;
+	atomic_set(&instance->trans_buf_cnt, 0);
+	atomic_set(&instance->done_buf_cnt, 0);
+	init_waitqueue_head(&instance->wait_wk_stream);
+	INIT_LIST_HEAD(&instance->trans_buf_list);
+	INIT_LIST_HEAD(&instance->done_buf_list);
 	adapter->ro_config_f = true;
 	spin_lock_init(&instance->lock_timer);
 	spin_lock_init(&instance->lock_ques);
@@ -2932,19 +3217,15 @@ int mse_open(int index_media, bool tx)
 		goto error_packetizer_is_not_valid;
 	}
 
-	/* if mjpeg input */
-	if (packetizer_id == MSE_PACKETIZER_CVF_MJPEG && tx) {
-		mse_debug("use mjpeg\n");
-		instance->use_temp_video_buffer_mjpeg = true;
+	/* if mjpeg or mpeg2ts packetizing */
+	if (tx &&
+	    ((packetizer_id == MSE_PACKETIZER_CVF_MJPEG) ||
+	     (packetizer_id == MSE_PACKETIZER_IEC61883_4))) {
+		mse_debug("use temp_video_buffer\n");
+		instance->f_use_temp_video_buffer = true;
 		instance->f_first_vframe = true;
 	}
 
-	/* if mpeg2-ts input */
-	if (packetizer_id == MSE_PACKETIZER_IEC61883_4 && tx) {
-		mse_debug("use mpeg2ts\n");
-		instance->use_temp_video_buffer_mpeg2ts = true;
-		instance->f_first_vframe = true;
-	}
 	instance->f_force_flush = false;
 
 	/* ptp open */
@@ -3198,15 +3479,11 @@ int mse_close(int index)
 		return -EINVAL;
 	}
 
-	/* wait stop */
-	flush_work(&instance->wk_stop);
+	if (instance->f_stopping)
+		wait_for_completion(&instance->completion_stop);
 
-	/* free packet memory */
-	if (instance->packet_buffer)
-		mse_packet_ctrl_free(instance->packet_buffer);
-
-	if (instance->crf_packet_buffer)
-		mse_packet_ctrl_free(instance->crf_packet_buffer);
+	/* flush workqueue */
+	flush_workqueue(instance->wq_packet);
 
 	/* destroy workqueue */
 	destroy_workqueue(instance->wq_packet);
@@ -3225,6 +3502,13 @@ int mse_close(int index)
 	mse_packetizer_release(instance->packetizer_id,
 			       instance->index_packetizer);
 	mse_release_crf_packetizer(instance);
+
+	/* free packet memory */
+	if (instance->packet_buffer)
+		mse_packet_ctrl_free(instance->packet_buffer);
+
+	if (instance->crf_packet_buffer)
+		mse_packet_ctrl_free(instance->crf_packet_buffer);
 
 	ret = mse_ptp_close(instance->ptp_index, instance->ptp_dev_id);
 	if (ret < 0)
@@ -3262,12 +3546,12 @@ int mse_start_streaming(int index)
 		return -EINVAL;
 	}
 
-	queue_work(instance->wq_packet,
-		   &instance->wk_start_stream);
+	if (instance->f_stopping) {
+		mse_err("index=%d streaming stop process working\n", index);
+		return -EBUSY;
+	}
 
-	instance->mpeg2ts_clock_90k = MPEG2TS_PCR90K_INVALID;
-	instance->mpeg2ts_pre_pcr_pid = MPEG2TS_PCR_PID_IGNORE;
-	instance->mpeg2ts_pre_pcr_90k = 0;
+	queue_work(instance->wq_packet, &instance->wk_start_stream);
 
 	return 0;
 }
@@ -3282,7 +3566,7 @@ int mse_stop_streaming(int index)
 		return -EINVAL;
 	}
 
-	mse_err("index=%d\n", index);
+	mse_debug("index=%d\n", index);
 	instance = &mse->instance_table[index];
 
 	if (!instance->used_f) {
@@ -3290,33 +3574,16 @@ int mse_stop_streaming(int index)
 		return -EINVAL;
 	}
 
-	instance->f_stopping = true;
+	if (instance->f_stopping)
+		return 0;
 
-	instance = &mse->instance_table[index];
-	queue_work(instance->wq_packet,
-		   &instance->wk_stop);
+	init_completion(&instance->completion_stop);
+	instance->f_stopping = true;
+	queue_work(instance->wq_packet, &instance->wk_stop);
 
 	return 0;
 }
 EXPORT_SYMBOL(mse_stop_streaming);
-
-static bool check_mjpeg(struct mse_instance *instance)
-{
-	int i;
-
-	if (instance->parsed > 0)
-		return false;
-
-	for (i = 0; i < instance->stored - 1; i++) {
-		if (instance->temp_video_buffer[i] == 0xFF &&
-		    instance->temp_video_buffer[i + 1] == 0xD9) {
-			instance->parsed = i;
-			return true;
-		}
-	}
-
-	return false;
-}
 
 int mse_start_transmission(int index,
 			   void *buffer,
@@ -3325,6 +3592,7 @@ int mse_start_transmission(int index,
 			   int (*mse_completion)(void *priv, int size))
 {
 	struct mse_instance *instance;
+	struct trans_buffer *trans_buf;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
 		mse_err("invalid argument. index=%d\n", index);
@@ -3345,13 +3613,20 @@ int mse_start_transmission(int index,
 		return -EINVAL;
 	}
 
-	instance->start_buffer = buffer;
-	instance->start_buffer_size = buffer_size;
-	instance->private_data = priv;
-	instance->start_mse_completion = mse_completion;
+	if (instance->f_stopping) {
+		mse_err("index=%d is stopping\n", index);
+		return -EBUSY;
+	}
 
-	queue_work(instance->wq_packet,
-		   &instance->wk_start_trans);
+	trans_buf = kmalloc(sizeof(*trans_buf), GFP_KERNEL);
+	trans_buf->buffer = buffer;
+	trans_buf->buffer_size = buffer_size;
+	trans_buf->private_data = priv;
+	trans_buf->mse_completion = mse_completion;
+
+	list_add_tail(&trans_buf->list, &instance->trans_buf_list);
+	atomic_inc(&instance->trans_buf_cnt);
+	queue_work(instance->wq_packet, &instance->wk_start_trans);
 
 	return 0;
 }
