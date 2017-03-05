@@ -202,14 +202,15 @@ int jpeg_read_sof(const u8 *buf,
 	u8 sample_bit, comp_num;
 
 	if (offset_work + JPEG_SOF_LENGTH > len) {
-		mse_warn("invalid header length.\n");
-		return -EPERM;
+		mse_debug("invalid header length, request next buffer.\n");
+		return -EAGAIN;
 	}
 
 	header_len = JPEG_GET_HEADER_SIZE(buf, offset_work);
 	if (header_len < JPEG_SOF_LENGTH) {
-		mse_warn("invalid length. hlen=%zu\n", header_len);
-		return -EPERM;
+		mse_debug("invalid length request next buffer. hlen=%zu\n",
+			  header_len);
+		return -EAGAIN;
 	}
 
 	*offset += header_len;
@@ -306,20 +307,21 @@ int jpeg_read_dqt(const u8 *buf,
 	u8 qid, precision;
 
 	if (*offset + JPEG_MARKER_SIZE_LENGTH > len) {
-		mse_warn("invalid header length.\n");
-		return -EPERM;
+		mse_debug("invalid header length, request next buffer.\n");
+		return -EAGAIN;
 	}
 
 	header_len = JPEG_GET_HEADER_SIZE(buf, *offset);
 	if (header_len < JPEG_MARKER_SIZE_LENGTH) {
-		mse_warn("invalid length. hlen=%zu\n", header_len);
-		return -EPERM;
+		mse_debug("invalid length, request next buffer. hlen=%zu\n",
+			  header_len);
+		return -EAGAIN;
 	}
 
 	if (*offset + header_len > len) {
-		mse_warn("header short. hlen=%zu size=%zu+%zu\n",
-			 header_len, len, *offset);
-		return -EPERM;
+		mse_debug("header short, request next buffer. hlen=%zu size=%zu+%zu\n",
+			  header_len, len, *offset);
+		return -EAGAIN;
 	}
 
 	*offset += JPEG_MARKER_SIZE_LENGTH;
@@ -368,16 +370,17 @@ int jpeg_read_dri(const u8 *buf,
 	size_t offset_work = *offset;
 
 	if (*offset + JPEG_DRI_LENGTH > len) {
-		mse_warn("not enough data for DRI");
+		mse_debug("not enough data for DRI, request next buffer");
 		*offset += len;
-		return -EPERM;
+		return -EAGAIN;
 	}
 
 	header_len = JPEG_GET_HEADER_SIZE(buf, *offset);
 	if (header_len < JPEG_DRI_LENGTH) {
-		mse_warn("invalid length. hlen=%zu\n", header_len);
+		mse_debug("invalid length, request next buffer. hlen=%zu\n",
+			  header_len);
 		*offset += header_len;
-		return -EPERM;
+		return -EAGAIN;
 	}
 
 	*offset += header_len;
