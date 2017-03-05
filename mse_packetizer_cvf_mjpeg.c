@@ -324,7 +324,7 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	size_t offset = 0, data_len, end_len = 0;
 	size_t payload_size;
 	u32 header_len = 0, quant_len = 0;
-	int i, ret;
+	int i, ret = 0;
 	bool pic_end = false;
 
 	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
@@ -410,6 +410,8 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	if (!cvf_mjpeg->dqt_f || !cvf_mjpeg->sof_f) {
 		mse_err("Not support JPEG format sof=%d dqt=%d\n",
 			cvf_mjpeg->dqt_f, cvf_mjpeg->sof_f);
+		ret = -EINVAL;
+
 		goto header_error;
 	}
 
@@ -437,12 +439,16 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 			qid = comp[i].qt;
 			if (qid >= ARRAY_SIZE(qtable)) {
 				mse_err("Invalid qid=%d\n", qid);
+				ret = -EINVAL;
+
 				goto header_error;
 			}
 
 			qlen = qtable[qid].size;
 			if (!qlen) {
 				mse_err("Invalid qlen=0\n");
+				ret = -EINVAL;
+
 				goto header_error;
 			}
 
@@ -564,9 +570,12 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 
 header_error:
 	/* find next header */
-	mse_packetizer_cvf_mjpeg_flag_init(cvf_mjpeg);
+	if (ret != -EAGAIN)
+		mse_packetizer_cvf_mjpeg_flag_init(cvf_mjpeg);
+	else
+		*buffer_processed += offset;
 
-	return -EPERM;
+	return ret;
 }
 
 static int mse_packetizer_cvf_mjpeg_depacketize(int index,
