@@ -434,8 +434,8 @@ static int mse_adapter_v4l2_enum_fmt_vid_cap(struct file *filp,
 	}
 
 	if (fmt->index >= fmt_size) {
-		mse_info("fmt->index(%d) is equal or bigger than %d\n",
-			 fmt->index, fmt_size);
+		mse_debug("fmt->index(%d) is equal or bigger than %d\n",
+			  fmt->index, fmt_size);
 		return -EINVAL;
 	}
 
@@ -483,8 +483,8 @@ static int mse_adapter_v4l2_enum_fmt_vid_out(struct file *filp,
 	}
 
 	if (fmt->index >= fmt_size) {
-		mse_info("fmt->index(%d) is equal or bigger than %d\n",
-			 fmt->index, fmt_size);
+		mse_debug("fmt->index(%d) is equal or bigger than %d\n",
+			  fmt->index, fmt_size);
 		return -EINVAL;
 	}
 
@@ -933,7 +933,7 @@ static int mse_adapter_v4l2_enum_framesizes(
 	}
 
 	if (fsize->index > 0 || !vadp_fmt) {
-		mse_info("fsize->index(%d)\n", fsize->index);
+		mse_debug("fsize->index(%d)\n", fsize->index);
 		return -EINVAL;
 	}
 
