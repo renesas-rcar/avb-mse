@@ -169,9 +169,9 @@ int mse_packet_ctrl_make_packet(int index,
 	       (pcount < MSE_PACKET_COUNT_MAX)) {
 		new_write_p = (dma->write_p + 1) % dma->size;
 		if (new_write_p == dma->read_p) {
-			mse_err("make overrun r=%d w=%d nw=%d p=%zu/%zu\n",
-				dma->read_p, dma->write_p, new_write_p,
-				*processed, size);
+			mse_debug("make overrun r=%d w=%d nw=%d p=%zu/%zu\n",
+				  dma->read_p, dma->write_p, new_write_p,
+				  *processed, size);
 			return *processed;
 		}
 		memset(dma->packet_table[dma->write_p].vaddr, 0,
@@ -205,6 +205,8 @@ int mse_packet_ctrl_make_packet(int index,
 			dma->packet_table[dma->write_p].len = packet_size;
 
 			dma->write_p = new_write_p;
+		} else if (ret < 0) {
+			return ret;
 		} else {
 			break;
 		}
@@ -269,13 +271,14 @@ int mse_packet_ctrl_send_packet(int index,
 {
 	int new_read_p, now_write_p, ret, send_size;
 
-	if (dma->write_p == dma->read_p) {
-		mse_err("no data\n");
-		return 0;
-	}
 	if (!ops) {
 		mse_err("no network adapter\n");
 		return -EINVAL;
+	}
+
+	if (dma->write_p == dma->read_p) {
+		mse_debug("no data\n");
+		return 0;
 	}
 
 	while (dma->write_p != dma->read_p) {
@@ -301,9 +304,6 @@ int mse_packet_ctrl_send_packet(int index,
 			  ret, now_write_p, dma->read_p, new_read_p);
 
 		dma->read_p = new_read_p;
-
-		if (ret == 0)
-			break;
 	}
 
 	return 0;
