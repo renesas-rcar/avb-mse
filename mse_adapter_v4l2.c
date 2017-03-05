@@ -1073,6 +1073,43 @@ static void mse_adapter_v4l2_stop_streaming(struct vb2_queue *vq)
 	mse_debug("END\n");
 }
 
+static void remove_duplicate_buffer(struct v4l2_adapter_device *vadp_dev,
+				    struct v4l2_adapter_buffer *buf)
+{
+	struct v4l2_adapter_buffer *buf_next;
+	void *buf_vaddr, *buf_next_vaddr;
+	unsigned long buf_size, buf_next_size;
+	unsigned long flags;
+
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
+	if (list_is_singular(&vadp_dev->buf_list))
+		buf_next = NULL;
+	else
+		buf_next = list_next_entry(buf, list);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+	if (!buf_next)
+		return;
+
+	buf_size = vb2_get_plane_payload(&buf->vb.vb2_buf, 0);
+	buf_next_size = vb2_get_plane_payload(&buf_next->vb.vb2_buf, 0);
+	if (buf_size != buf_next_size)
+		return;
+	buf_size = min(buf_size, 4096UL);
+
+	buf_vaddr = vb2_plane_vaddr(&buf->vb.vb2_buf, 0);
+	buf_next_vaddr = vb2_plane_vaddr(&buf_next->vb.vb2_buf, 0);
+	if (memcmp(buf_vaddr, buf_next_vaddr, buf_size))
+		return;
+
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
+	list_del(&buf_next->list);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+	vb2_buffer_done(&buf_next->vb.vb2_buf, VB2_BUF_STATE_DONE);
+
+	mse_info("Removed duplicate second buffer.\n");
+	mse_info(" Please set show-preroll-frame=false\n");
+}
+
 static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 {
 	struct v4l2_adapter_buffer *new_buf = NULL;
@@ -1119,6 +1156,10 @@ static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 
 		return err;
 	}
+
+	/* Workaround: remove duplicated second buffer */
+	if (vadp_dev->sequence == 1)
+		remove_duplicate_buffer(vadp_dev, new_buf);
 
 	return 0;
 }
