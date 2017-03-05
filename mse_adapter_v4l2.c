@@ -1059,13 +1059,16 @@ static void mse_adapter_v4l2_stop_streaming(struct vb2_queue *vq)
 		return;
 	}
 
-	return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
-
 	err = mse_stop_streaming(vadp_dev->index_instance);
 	if (err < 0) {
 		mse_err("Failed mse_stop_streaming()\n");
 		return;
 	}
+
+	if (vq == &vadp_dev->q_out)
+		vb2_wait_for_all_buffers(vq);
+
+	return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
 
 	mse_debug("END\n");
 }
@@ -1106,6 +1109,14 @@ static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 				     mse_adapter_v4l2_playback_callback);
 	if (err < 0) {
 		mse_err("Failed mse_start_transmission()\n");
+
+		spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
+		list_del(&new_buf->list);
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
+		vb2_buffer_done(&new_buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
+		vb2_queue_error(&vadp_dev->q_out);
+
 		return err;
 	}
 
@@ -1125,6 +1136,13 @@ static int mse_adapter_v4l2_playback_callback(void *priv, int size)
 	}
 
 	mse_debug("START\n");
+
+	if (size < 0) {
+		vb2_queue_error(&vadp_dev->q_out);
+		return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
+
+		return size;
+	}
 
 	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	if (!list_empty(&vadp_dev->buf_list)) {
@@ -1684,6 +1702,6 @@ static void __exit mse_adapter_v4l2_exit(void)
 module_init(mse_adapter_v4l2_init)
 module_exit(mse_adapter_v4l2_exit)
 
-MODULE_AUTHOR("Jose Luis HIRANO");
+MODULE_AUTHOR("Renesas Electronics Corporation");
 MODULE_DESCRIPTION("Renesas Media Streaming Engine");
 MODULE_LICENSE("Dual MIT/GPL");
