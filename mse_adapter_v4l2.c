@@ -133,6 +133,8 @@ struct v4l2_adapter_device {
 	int			index_instance;
 	bool                    f_opened;
 	bool			f_mse_open;
+	/* previous trans buffer for checking buffer overwite */
+	void			*prev;
 };
 
 /* Format information */
@@ -1127,6 +1129,13 @@ static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 	buf_to_send = vb2_plane_vaddr(&new_buf->vb.vb2_buf, 0);
 	mse_debug("buf_to_send=%p\n", buf_to_send);
 
+	if (vadp_dev->prev && vadp_dev->prev == buf_to_send) {
+		mse_debug("prevent from buffer over write. prev=%p curr=%p\n",
+			  vadp_dev->prev, buf_to_send);
+		return 0;
+	}
+	vadp_dev->prev = buf_to_send;
+
 	new_buf_size = vb2_get_plane_payload(&new_buf->vb.vb2_buf, 0);
 	new_buf->vb.vb2_buf.timestamp = ktime_get_ns();
 	new_buf->vb.sequence = vadp_dev->sequence++;
@@ -1253,6 +1262,7 @@ static int playback_start_streaming(struct v4l2_adapter_device *vadp_dev,
 	int index = vadp_dev->index_instance;
 
 	vadp_dev->sequence = 0;
+	vadp_dev->prev = NULL;
 
 	err = mse_start_streaming(index);
 	if (err < 0) {
