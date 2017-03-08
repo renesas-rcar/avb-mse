@@ -1079,14 +1079,12 @@ static void remove_duplicate_buffer(struct v4l2_adapter_device *vadp_dev,
 	struct v4l2_adapter_buffer *buf_next;
 	void *buf_vaddr, *buf_next_vaddr;
 	unsigned long buf_size, buf_next_size;
-	unsigned long flags;
 
-	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	if (list_is_singular(&vadp_dev->buf_list))
 		buf_next = NULL;
 	else
 		buf_next = list_next_entry(buf, list);
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
 	if (!buf_next)
 		return;
 
@@ -1101,9 +1099,7 @@ static void remove_duplicate_buffer(struct v4l2_adapter_device *vadp_dev,
 	if (memcmp(buf_vaddr, buf_next_vaddr, buf_size))
 		return;
 
-	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	list_del(&buf_next->list);
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 	vb2_buffer_done(&buf_next->vb.vb2_buf, VB2_BUF_STATE_DONE);
 
 	mse_info("Removed duplicate second buffer.\n");
@@ -1114,17 +1110,14 @@ static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 {
 	struct v4l2_adapter_buffer *new_buf = NULL;
 	void *buf_to_send;
-	unsigned long flags;
 	long new_buf_size;
 	int err;
 
-	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	if (!list_empty(&vadp_dev->buf_list)) {
 		new_buf = list_first_entry(&vadp_dev->buf_list,
 					   struct v4l2_adapter_buffer,
 					   list);
 	}
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	if (!new_buf) {
 		mse_debug("new_buf is NULL\n");
@@ -1147,10 +1140,7 @@ static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 	if (err < 0) {
 		mse_err("Failed mse_start_transmission()\n");
 
-		spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 		list_del(&new_buf->list);
-		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
-
 		vb2_buffer_done(&new_buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
 		vb2_queue_error(&vadp_dev->q_out);
 
@@ -1192,16 +1182,18 @@ static int mse_adapter_v4l2_playback_callback(void *priv, int size)
 				       list);
 		list_del(&buf->list);
 	}
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	if (!buf) {
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 		mse_debug("buf is NULL\n");
+
 		return 0;
 	}
 
 	vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
-
 	err = playback_send_first_buffer(vadp_dev);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
 	if (err < 0)
 		return err;
 
@@ -1228,20 +1220,27 @@ static void mse_adapter_v4l2_playback_buf_queue(struct vb2_buffer *vb)
 	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	if (list_empty(&vadp_dev->buf_list))
 		is_need_send = 1;
+
 	list_add_tail(&buf->list, &vadp_dev->buf_list);
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	/* start_streaming is not called yet */
 	if (!vb2_start_streaming_called(&vadp_dev->q_out)) {
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 		mse_debug("start_streaming is not called yet\n");
+
 		return;
 	}
+
 	/* no need to send anything */
 	if (!is_need_send) {
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 		mse_debug("no need to send anything\n");
+
 		return;
 	}
+
 	playback_send_first_buffer(vadp_dev);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	mse_debug("END\n");
 }
@@ -1249,6 +1248,7 @@ static void mse_adapter_v4l2_playback_buf_queue(struct vb2_buffer *vb)
 static int playback_start_streaming(struct v4l2_adapter_device *vadp_dev,
 				    unsigned int count)
 {
+	unsigned long flags;
 	int err;
 	int index = vadp_dev->index_instance;
 
@@ -1260,7 +1260,10 @@ static int playback_start_streaming(struct v4l2_adapter_device *vadp_dev,
 		return err;
 	}
 
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	err = playback_send_first_buffer(vadp_dev);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
 	if (err < 0)
 		return err;
 
@@ -1296,16 +1299,13 @@ static int capture_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
 {
 	struct v4l2_adapter_buffer *new_buf = NULL;
 	void *buf_to_send;
-	unsigned long flags;
 	long new_buf_size;
 	int err;
 
-	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	if (!list_empty(&vadp_dev->buf_list))
 		new_buf = list_first_entry(&vadp_dev->buf_list,
 					   struct v4l2_adapter_buffer,
 					   list);
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	if (!new_buf) {
 		mse_debug("new_buf is NULL\n");
@@ -1350,16 +1350,19 @@ static int mse_adapter_v4l2_capture_callback(void *priv, int size)
 				       list);
 		list_del(&buf->list);
 	}
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	if (!buf) {
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 		mse_debug("buf is NULL\n");
+
 		return 0;
 	}
 
 	if (size < 0) {
 		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
 		vb2_queue_error(&vadp_dev->q_cap);
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
 		return -EINVAL;
 	}
 
@@ -1373,6 +1376,8 @@ static int mse_adapter_v4l2_capture_callback(void *priv, int size)
 		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 
 	err = capture_send_first_buffer(vadp_dev);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
 	if (err < 0)
 		return err;
 
@@ -1399,19 +1404,23 @@ static void mse_adapter_v4l2_capture_buf_queue(struct vb2_buffer *vb)
 	if (list_empty(&vadp_dev->buf_list))
 		is_need_send = 1;
 	list_add_tail(&buf->list, &vadp_dev->buf_list);
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	/* start_streaming is not called yet */
 	if (!vb2_start_streaming_called(&vadp_dev->q_cap)) {
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 		mse_debug("start_streaming is not called yet\n");
+
 		return;
 	}
 	/* no need to send anything */
 	if (!is_need_send) {
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 		mse_debug("no need to send anything\n");
+
 		return;
 	}
 	capture_send_first_buffer(vadp_dev);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	mse_debug("END\n");
 }
@@ -1419,6 +1428,7 @@ static void mse_adapter_v4l2_capture_buf_queue(struct vb2_buffer *vb)
 static int capture_start_streaming(struct v4l2_adapter_device *vadp_dev,
 				   unsigned int count)
 {
+	unsigned long flags;
 	int err;
 	int index = vadp_dev->index_instance;
 
@@ -1430,7 +1440,9 @@ static int capture_start_streaming(struct v4l2_adapter_device *vadp_dev,
 		return err;
 	}
 
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	err = capture_send_first_buffer(vadp_dev);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 	if (err < 0)
 		return err;
 
