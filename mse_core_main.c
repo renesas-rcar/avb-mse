@@ -1004,6 +1004,7 @@ static int media_clock_recovery(struct mse_instance *instance)
 	struct mch_ops *m_ops;
 	int ret, count, out, i;
 	unsigned int avtp_time;
+	unsigned int search_time;
 	unsigned long device_time;
 	unsigned long std_time;
 	u64 crf_time;
@@ -1017,8 +1018,7 @@ static int media_clock_recovery(struct mse_instance *instance)
 	if (instance->crf_type != MSE_CRF_TYPE_RX) {
 		/* avtp */
 		d_t = instance->audio_info.frame_interval_time;
-		if (!instance->f_present)
-			return -1;
+
 		spin_lock_irqsave(&instance->lock_ques, flags);
 		count = tstamps_get_avtp_size(&instance->avtp_que);
 		for (i = 0; i < count; i++) {
@@ -1029,10 +1029,17 @@ static int media_clock_recovery(struct mse_instance *instance)
 				continue;
 
 			if (!instance->f_match_ptp_clock) {
+				search_time = avtp_time;
+
+				if (instance->ptp_clock) {
+					search_time -=
+						instance->listener_delay_time;
+				}
+
 				ret = tstamps_search_tstamp(
 					&instance->tstamp_que,
 					&instance->mch_std_time,
-					avtp_time);
+					search_time);
 				if (ret < 0)
 					continue;
 				instance->f_match_ptp_clock = true;
@@ -1046,6 +1053,8 @@ static int media_clock_recovery(struct mse_instance *instance)
 				&instance->tstamp_que,
 				instance->mch_std_time,
 				&device_time);
+			if (instance->ptp_clock)
+				device_time += instance->listener_delay_time;
 			if (ret < 0) {
 				mse_debug("skip recovery\n");
 				continue;
@@ -1070,10 +1079,18 @@ static int media_clock_recovery(struct mse_instance *instance)
 				continue;
 
 			if (!instance->f_match_ptp_clock) {
+				search_time = crf_time -
+					instance->max_transit_time;
+
+				if (instance->ptp_clock) {
+					search_time -=
+						instance->talker_delay_time;
+				}
+
 				ret = tstamps_search_tstamp(
 					&instance->tstamp_que,
 					&instance->mch_std_time,
-					crf_time);
+					search_time);
 				if (ret < 0) {
 					mse_debug("skip recovery\n");
 					continue;
@@ -1086,6 +1103,11 @@ static int media_clock_recovery(struct mse_instance *instance)
 			ret = tstamps_calc_tstamp(&instance->tstamp_que,
 						  instance->mch_std_time,
 						  &device_time);
+			device_time += instance->max_transit_time;
+			if (instance->ptp_clock) {
+				device_time +=
+					instance->talker_delay_time;
+			}
 
 			if (ret < 0)
 				continue;
