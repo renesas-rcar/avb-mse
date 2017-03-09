@@ -859,7 +859,7 @@ static int tstamps_search_tstamp(
 	for (p = que->head; p != que->tail;
 	     p = q_next(p, PTP_TIMESTAMPS_MAX)) {
 		t = (u64)que->times[p].sec * NSEC_SCALE + que->times[p].nsec;
-		t_d = avtp_time - t;
+		t_d = t - avtp_time;
 		if (t_d < UINT_MAX / 2)
 			break;
 	}
@@ -867,6 +867,11 @@ static int tstamps_search_tstamp(
 	if (p == que->tail || p == que->head)
 		return -1;
 	*std_time = que->std_times[p];
+	if (t_d < NSEC_SCALE)
+		*std_time -= t_d;
+	else
+		mse_info("not precision offset capture %u", t_d);
+
 	mse_debug("found %lu t= %u avtp= %u\n", *std_time, t, avtp_time);
 	return 0;
 }
