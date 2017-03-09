@@ -2125,6 +2125,17 @@ static enum hrtimer_restart mse_timestamp_collect_callback(struct hrtimer *arg)
 	return HRTIMER_RESTART;
 }
 
+static s64 calc_diff_ptp_clock_time(struct ptp_clock_time *a,
+				    struct ptp_clock_time *b)
+{
+	s64 a_nsec, b_nsec;
+
+	a_nsec = a->sec * NSEC_SCALE + a->nsec;
+	b_nsec = b->sec * NSEC_SCALE + b->nsec;
+
+	return a_nsec - b_nsec;
+}
+
 static void mse_work_start_streaming(struct work_struct *work)
 {
 	struct mse_instance *instance;
@@ -2174,6 +2185,9 @@ static void mse_work_start_streaming(struct work_struct *work)
 		/* capture timestamps */
 		if (instance->ptp_clock == 1) {
 			int count, i;
+			s64 delay;
+			s64 diff = 0;
+
 			/* get timestamps */
 			ret = mse_ptp_get_timestamps(instance->ptp_index,
 						     instance->ptp_dev_id,
@@ -2187,8 +2201,31 @@ static void mse_work_start_streaming(struct work_struct *work)
 			}
 
 			/* store timestamps */
+			if (instance->tx)
+				delay = instance->talker_delay_time;
+			else
+				delay = instance->listener_delay_time;
+
 			spin_lock_irqsave(&instance->lock_ques, flags);
+			/* skip older timestamp */
 			for (i = 0; i < count; i++) {
+				diff = calc_diff_ptp_clock_time(
+					&now, &instance->timestamps[i]) - delay;
+				if (diff <= 0)
+					break;
+				instance->std_time_avtp = diff;
+			}
+			if (i != 0) {
+				i--;
+			} else {
+				/* not enough timestamps */
+				if (instance->tx)
+					instance->talker_delay_time += diff;
+				else
+					instance->listener_delay_time += diff;
+			}
+
+			for (; i < count; i++) {
 				tstamps_enq_tstamps(&instance->tstamp_que,
 						    instance->std_time_counter,
 						    &instance->timestamps[i]);
