@@ -363,6 +363,8 @@ struct mse_instance {
 	int remain;
 
 	bool f_present;
+	bool f_get_first_packet;
+	unsigned int first_avtp_timestamp;
 
 	/** @brief packet buffer */
 	int crf_index_network;
@@ -1597,8 +1599,8 @@ static bool check_presentation_time(struct mse_instance *instance)
 		mse_ptp_get_time(instance->ptp_index,
 				 instance->ptp_dev_id, &now);
 		t = (unsigned long)now.sec * NSEC_SCALE + now.nsec;
-		t_d = instance->timestamp - t;
-		if (t_d > UINT_MAX / 2 &&
+		t_d = instance->first_avtp_timestamp - t;
+		if (t_d < UINT_MAX / 2 &&
 		    instance->temp_w < MSE_DECODE_BUFFER_NUM_START_MAX)
 			return false;
 		mse_debug("start present avtp %u ptp %u q %d\n",
@@ -1675,6 +1677,10 @@ static void mse_work_depacketize(struct work_struct *work)
 					instance->std_time_avtp,
 					timestamps[i]);
 				instance->std_time_avtp += d_t;
+			}
+			if (!instance->f_get_first_packet && t_stored > 0) {
+				instance->first_avtp_timestamp = timestamps[0];
+				instance->f_get_first_packet = true;
 			}
 			if (instance->work_length >=
 			    instance->media_buffer_size) {
@@ -2155,6 +2161,7 @@ static void mse_work_start_streaming(struct work_struct *work)
 	instance->std_time_crf = 0;
 
 	instance->f_present = false;
+	instance->f_get_first_packet = false;
 	instance->remain = 0;
 
 	/* start timer */
