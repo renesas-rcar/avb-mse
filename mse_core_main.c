@@ -1965,7 +1965,7 @@ static void mse_work_crf_send(struct work_struct *work)
 				if (instance->tx)
 					t += instance->talker_delay_time;
 				else
-					t -= instance->listener_delay_time;
+					t += instance->listener_delay_time;
 			}
 			timestamps[i].sec = div_s64_rem(t, NSEC_SCALE,
 							&timestamps[i].nsec);
