@@ -169,17 +169,12 @@ int mse_packetizer_calc_cbs(u64 bw_num,
 	}
 
 	bw_frac = div64_u64((u64)UINT_MAX * bw_num, bw_denom);
-	if (bw_frac > UINT_MAX) {
+	if (bw_frac > (UINT_MAX - (1 << 15))) {
 		mse_err("error insufficient bandwidth, (bw_frac > 1.0)\n");
 		return -ENOSPC;
 	}
 
-	if (!bw_frac) {
-		/* For avoid that bw_frac is prohibited to set 0 */
-		mse_debug("bw_frac is 0, set to 1\n");
-		bw_frac = 1;
-	}
-
+	bw_frac += 1 << 15;
 	cbs->bandwidth_fraction = (u32)bw_frac;
 	cbs->idle_slope = bw_frac >> 16;
 	cbs->send_slope = (USHRT_MAX - cbs->idle_slope) * -1;
