@@ -999,128 +999,147 @@ static int tstamps_deq_crf(struct crf_queue *que,
 	return 0;
 }
 
-static int media_clock_recovery(struct mse_instance *instance)
+static int media_clock_recovery_avtp(struct mse_instance *instance,
+				     unsigned int d_t,
+				     int *count_out)
 {
-	struct mch_ops *m_ops;
-	int ret, count, out, i;
+	unsigned long flags;
+	int i, count, out;
 	unsigned int avtp_time;
 	unsigned int search_time;
 	unsigned long device_time;
 	unsigned long std_time;
-	u64 crf_time;
+	int ret;
+
+	spin_lock_irqsave(&instance->lock_ques, flags);
+
+	out = 0;
+	count = tstamps_get_avtp_size(&instance->avtp_que);
+	for (i = 0; i < count; i++) {
+		ret = tstamps_deq_avtp(&instance->avtp_que, &std_time,
+				       &avtp_time);
+		if (ret < 0)
+			continue;
+
+		if (instance->f_match_ptp_clock) {
+			instance->mch_std_time += d_t;
+		} else {
+			search_time = avtp_time;
+
+			if (instance->ptp_clock)
+				search_time -= instance->listener_delay_time;
+
+			ret = tstamps_search_tstamp(
+				&instance->tstamp_que,
+				&instance->mch_std_time,
+				search_time);
+			if (ret < 0)
+				continue;
+
+			instance->f_match_ptp_clock = true;
+		}
+
+		ret = tstamps_calc_tstamp(&instance->tstamp_que,
+					  instance->mch_std_time,
+					  &device_time);
+		if (ret < 0)
+			continue;
+
+		if (instance->ptp_clock)
+			device_time += instance->listener_delay_time;
+
+		instance->master_timestamps[out] = avtp_time;
+		instance->device_timestamps[out] = device_time;
+		out++;
+
+		if (out >= ARRAY_SIZE(instance->master_timestamps))
+			break;
+	}
+
+	spin_unlock_irqrestore(&instance->lock_ques, flags);
+
+	*count_out = out;
+
+	return ret;
+}
+
+static int media_clock_recovery_crf(struct mse_instance *instance,
+				    unsigned int d_t,
+				    int *count_out)
+{
 	unsigned long flags;
+	int i, count, out;
+	unsigned int search_time;
+	unsigned long device_time;
+	unsigned long std_time;
+	u64 crf_time;
+	int ret;
+
+	spin_lock_irqsave(&instance->lock_ques, flags);
+
+	out = 0;
+	count = tstamps_get_crf_size(&instance->crf_que);
+	for (i = 0; i < count; i++) {
+		ret = tstamps_deq_crf(&instance->crf_que, &std_time,
+				      &crf_time);
+		if (ret < 0)
+			continue;
+
+		if (instance->f_match_ptp_clock) {
+			instance->mch_std_time += d_t;
+		} else {
+			search_time = crf_time - instance->max_transit_time;
+
+			if (instance->ptp_clock)
+				search_time -= instance->talker_delay_time;
+
+			ret = tstamps_search_tstamp(
+				&instance->tstamp_que,
+				&instance->mch_std_time,
+				search_time);
+			if (ret < 0)
+				continue;
+
+			instance->f_match_ptp_clock = true;
+		}
+
+		ret = tstamps_calc_tstamp(&instance->tstamp_que,
+					  instance->mch_std_time,
+					  &device_time);
+		if (ret < 0)
+			continue;
+
+		device_time += instance->max_transit_time;
+		if (instance->ptp_clock)
+			device_time += instance->talker_delay_time;
+
+		instance->master_timestamps[out] = (unsigned int)crf_time;
+		instance->device_timestamps[out] = device_time;
+		out++;
+
+		if (out >= ARRAY_SIZE(instance->master_timestamps))
+			break;
+	}
+
+	spin_unlock_irqrestore(&instance->lock_ques, flags);
+
+	*count_out = out;
+
+	return ret;
+}
+
+static int media_clock_recovery(struct mse_instance *instance)
+{
+	struct mch_ops *m_ops;
+	int ret, out;
 	unsigned int d_t;
 
-	ret = 0;
-	out = 0;
-	d_t = 0;
-
 	if (instance->crf_type != MSE_CRF_TYPE_RX) {
-		/* avtp */
 		d_t = instance->audio_info.frame_interval_time;
-
-		spin_lock_irqsave(&instance->lock_ques, flags);
-		count = tstamps_get_avtp_size(&instance->avtp_que);
-		for (i = 0; i < count; i++) {
-			device_time = 0;
-			ret = tstamps_deq_avtp(&instance->avtp_que, &std_time,
-					       &avtp_time);
-			if (ret < 0)
-				continue;
-
-			if (!instance->f_match_ptp_clock) {
-				search_time = avtp_time;
-
-				if (instance->ptp_clock) {
-					search_time -=
-						instance->listener_delay_time;
-				}
-
-				ret = tstamps_search_tstamp(
-					&instance->tstamp_que,
-					&instance->mch_std_time,
-					search_time);
-				if (ret < 0)
-					continue;
-				instance->f_match_ptp_clock = true;
-			} else {
-				instance->mch_std_time += d_t;
-				mse_debug("mch std_time %lu\n",
-					  instance->mch_std_time);
-			}
-
-			ret = tstamps_calc_tstamp(
-				&instance->tstamp_que,
-				instance->mch_std_time,
-				&device_time);
-			if (instance->ptp_clock)
-				device_time += instance->listener_delay_time;
-			if (ret < 0) {
-				mse_debug("skip recovery\n");
-				continue;
-			}
-			instance->master_timestamps[out] = avtp_time;
-			instance->device_timestamps[out] = device_time;
-			out++;
-
-			if (out >= ARRAY_SIZE(instance->master_timestamps))
-				break;
-		}
-		spin_unlock_irqrestore(&instance->lock_ques, flags);
+		ret = media_clock_recovery_avtp(instance, d_t, &out);
 	} else {
-		/* crf */
-		spin_lock_irqsave(&instance->lock_ques, flags);
 		d_t = instance->crf_audio_info.frame_interval_time;
-		count = tstamps_get_crf_size(&instance->crf_que);
-		for (i = 0; i < count; i++) {
-			ret = tstamps_deq_crf(&instance->crf_que, &std_time,
-					      &crf_time);
-			if (ret < 0)
-				continue;
-
-			if (!instance->f_match_ptp_clock) {
-				search_time = crf_time -
-					instance->max_transit_time;
-
-				if (instance->ptp_clock) {
-					search_time -=
-						instance->talker_delay_time;
-				}
-
-				ret = tstamps_search_tstamp(
-					&instance->tstamp_que,
-					&instance->mch_std_time,
-					search_time);
-				if (ret < 0) {
-					mse_debug("skip recovery\n");
-					continue;
-				}
-				instance->f_match_ptp_clock = true;
-			} else {
-				instance->mch_std_time += d_t;
-			}
-
-			ret = tstamps_calc_tstamp(&instance->tstamp_que,
-						  instance->mch_std_time,
-						  &device_time);
-			device_time += instance->max_transit_time;
-			if (instance->ptp_clock) {
-				device_time +=
-					instance->talker_delay_time;
-			}
-
-			if (ret < 0)
-				continue;
-
-			instance->master_timestamps[out] =
-						(unsigned int)crf_time;
-			instance->device_timestamps[out] = device_time;
-			out++;
-
-			if (out >= ARRAY_SIZE(instance->master_timestamps))
-				break;
-		}
-		spin_unlock_irqrestore(&instance->lock_ques, flags);
+		ret = media_clock_recovery_crf(instance, d_t, &out);
 	}
 
 	if (out <= 0) {
