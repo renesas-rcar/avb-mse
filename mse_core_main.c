@@ -123,6 +123,8 @@
 #define MSE_DECODE_BUFFER_NUM_START_MAX (6)
 #define MAX_DECODE_SIZE       (8192) /* ALSA Period byte size */
 
+#define MSE_TEMP_VIDEO_BUF_SIZE (512U * 1024U) /* temp buffer for video */
+
 #define mbit_to_bit(mbit)     (mbit * 1000000)
 
 #define MPEG2TS_TIMER_NS        (10000000)           /* 10 msec */
@@ -384,7 +386,7 @@ struct mse_instance {
 	int mpeg2ts_pre_pcr_pid;
 	u64 mpeg2ts_pre_pcr_90k;
 	bool f_force_flush;
-	unsigned char temp_video_buffer[128 * 1024];
+	unsigned char *temp_video_buffer;
 	/** @brief audio buffer  */
 	int temp_w;
 	int temp_r;
@@ -2169,6 +2171,10 @@ static void mse_work_start_streaming(struct work_struct *work)
 		}
 	}
 
+	if (instance->temp_video_buffer)
+		memset(instance->temp_video_buffer, 0,
+		       MSE_TEMP_VIDEO_BUF_SIZE);
+
 	instance->f_streaming = false;
 	instance->f_continue = false;
 	instance->f_stopping = false;
@@ -2422,19 +2428,17 @@ static void mse_work_start_transmission(struct work_struct *work)
 			instance->f_first_vframe = false;
 		}
 
-		if (instance->stored + buffer_size <=
-			   sizeof(instance->temp_video_buffer)) {
-			memcpy(instance->temp_video_buffer +
-			       instance->stored,
+		if (instance->stored + buffer_size <= MSE_TEMP_VIDEO_BUF_SIZE) {
+			memcpy(instance->temp_video_buffer + instance->stored,
 			       buffer, buffer_size);
 			instance->stored += buffer_size;
 			if (instance->stored + buffer_size >=
-			    sizeof(instance->temp_video_buffer))
+			    MSE_TEMP_VIDEO_BUF_SIZE)
 				instance->f_force_flush = true;
 		} else {
-			mse_err("temp buffer overrun %zu/%zu\n",
+			mse_err("temp buffer overrun %zu/%u\n",
 				instance->stored + buffer_size,
-				sizeof(instance->temp_video_buffer));
+				MSE_TEMP_VIDEO_BUF_SIZE);
 			mse_trans_complete(instance, -EIO);
 			if (instance->f_stopping)
 				instance->f_completion = true;
@@ -3223,7 +3227,15 @@ int mse_open(int index_media, bool tx)
 	     (packetizer_id == MSE_PACKETIZER_IEC61883_4))) {
 		mse_debug("use temp_video_buffer\n");
 		instance->f_use_temp_video_buffer = true;
-		instance->f_first_vframe = true;
+		instance->temp_video_buffer = kmalloc(MSE_TEMP_VIDEO_BUF_SIZE,
+						      GFP_KERNEL);
+
+		if (!instance->temp_video_buffer) {
+			mse_err("cannot allocate temp_video_buffer\n");
+			err = -ENOMEM;
+
+			goto error_cannot_alloc_temp_video_buffer;
+		}
 	}
 
 	instance->f_force_flush = false;
@@ -3449,8 +3461,15 @@ error_cannot_open_network_adapter:
 	mse_ptp_close(instance->ptp_index, instance->ptp_dev_id);
 
 error_cannot_open_ptp:
-error_network_adapter_not_found:
+	if (instance->f_use_temp_video_buffer) {
+		kfree(instance->temp_video_buffer);
+		instance->temp_video_buffer = NULL;
+		instance->f_use_temp_video_buffer = false;
+	}
+
+error_cannot_alloc_temp_video_buffer:
 error_packetizer_is_not_valid:
+error_network_adapter_not_found:
 	instance->used_f = false;
 	adapter->ro_config_f = false;
 
@@ -3513,6 +3532,12 @@ int mse_close(int index)
 	ret = mse_ptp_close(instance->ptp_index, instance->ptp_dev_id);
 	if (ret < 0)
 		mse_err("cannot mse_ptp_close()\n");
+
+	if (instance->f_use_temp_video_buffer) {
+		kfree(instance->temp_video_buffer);
+		instance->temp_video_buffer = NULL;
+		instance->f_use_temp_video_buffer = false;
+	}
 
 	/* set table */
 	memset(instance, 0, sizeof(*instance));
