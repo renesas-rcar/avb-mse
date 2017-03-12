@@ -2136,16 +2136,99 @@ static s64 calc_diff_ptp_clock_time(struct ptp_clock_time *a,
 	return a_nsec - b_nsec;
 }
 
+static void mse_get_capture_timestamp_first(struct mse_instance *instance,
+					    struct ptp_clock_time *now)
+{
+	int ret = 0;
+	unsigned long flags;
+	int count, i;
+	s64 delay, diff;
+
+	/* get timestamps */
+	ret = mse_ptp_get_timestamps(instance->ptp_index,
+				     instance->ptp_dev_id,
+				     instance->ptp_clock_ch,
+				     &count,
+				     instance->timestamps);
+	if (ret) {
+		mse_warn("could not get timestamps ret=%d\n", ret);
+		return;
+	}
+
+	/* store timestamps */
+	if (instance->tx)
+		delay = instance->talker_delay_time;
+	else
+		delay = instance->listener_delay_time;
+
+	spin_lock_irqsave(&instance->lock_ques, flags);
+
+	diff = 0;
+	/* skip older timestamp */
+	for (i = 0; i < count; i++) {
+		diff = calc_diff_ptp_clock_time(now, &instance->timestamps[i]);
+		diff -= delay;
+		if (diff <= 0)
+			break;
+		instance->std_time_avtp = diff;
+	}
+	if (i != 0) {
+		i--;
+	} else {
+		/* not enough timestamps */
+		if (instance->tx)
+			instance->talker_delay_time += diff;
+		else
+			instance->listener_delay_time += diff;
+	}
+
+	for (; i < count; i++) {
+		tstamps_enq_tstamps(&instance->tstamp_que,
+				    instance->std_time_counter,
+				    &instance->timestamps[i]);
+		tstamps_enq_tstamps(&instance->tstamp_que_crf,
+				    instance->std_time_counter,
+				    &instance->timestamps[i]);
+		instance->std_time_counter += instance->add_std_time;
+	}
+
+	spin_unlock_irqrestore(&instance->lock_ques, flags);
+}
+
+static void mse_start_streaming_audio(struct mse_instance *instance,
+				      struct ptp_clock_time *now)
+{
+	/* ptp_clock is capture, capture timestamps */
+	if (instance->ptp_clock == 1)
+		mse_get_capture_timestamp_first(instance, now);
+
+	/* ptp_clock is capture or media_clock_recovery is enable */
+	if (instance->ptp_clock == 1 ||
+	    instance->media_clock_recovery == 1) {
+		hrtimer_start(&instance->tstamp_timer,
+			      ns_to_ktime(instance->tstamp_timer_delay),
+			      HRTIMER_MODE_REL);
+	}
+
+	/* send clock using CRF */
+	if (instance->crf_type == MSE_CRF_TYPE_TX) {
+		hrtimer_start(&instance->crf_timer,
+			      ns_to_ktime(instance->crf_timer_delay),
+			      HRTIMER_MODE_REL);
+	}
+
+	/* receive clcok using CRF */
+	if (instance->crf_type == MSE_CRF_TYPE_RX) {
+		queue_work(instance->wq_crf_packet,
+			   &instance->wk_crf_receive);
+	}
+}
+
 static void mse_work_start_streaming(struct work_struct *work)
 {
 	struct mse_instance *instance;
-	ktime_t ktime;
-	ktime_t ktime_ts;
-	ktime_t ktime_crf;
 	struct mse_adapter *adapter;
-	int ret = 0;
 	struct ptp_clock_time now;
-	unsigned long flags;
 
 	instance = container_of(work, struct mse_instance, wk_start_stream);
 
@@ -2177,89 +2260,13 @@ static void mse_work_start_streaming(struct work_struct *work)
 
 	/* start timer */
 	if (instance->timer_delay) {
-		ktime = ktime_set(0, instance->timer_delay);
-		hrtimer_start(&instance->timer, ktime, HRTIMER_MODE_REL);
+		hrtimer_start(&instance->timer,
+			      ns_to_ktime(instance->timer_delay),
+			      HRTIMER_MODE_REL);
 	}
 
-	if (IS_MSE_TYPE_AUDIO(adapter->type)) {
-		/* capture timestamps */
-		if (instance->ptp_clock == 1) {
-			int count, i;
-			s64 delay;
-			s64 diff = 0;
-
-			/* get timestamps */
-			ret = mse_ptp_get_timestamps(instance->ptp_index,
-						     instance->ptp_dev_id,
-						     instance->ptp_clock_ch,
-						     &count,
-						     instance->timestamps);
-			if (ret) {
-				mse_debug("could not get timestamps ret=%d\n",
-					  ret);
-				count = 0;
-			}
-
-			/* store timestamps */
-			if (instance->tx)
-				delay = instance->talker_delay_time;
-			else
-				delay = instance->listener_delay_time;
-
-			spin_lock_irqsave(&instance->lock_ques, flags);
-			/* skip older timestamp */
-			for (i = 0; i < count; i++) {
-				diff = calc_diff_ptp_clock_time(
-					&now, &instance->timestamps[i]) - delay;
-				if (diff <= 0)
-					break;
-				instance->std_time_avtp = diff;
-			}
-			if (i != 0) {
-				i--;
-			} else {
-				/* not enough timestamps */
-				if (instance->tx)
-					instance->talker_delay_time += diff;
-				else
-					instance->listener_delay_time += diff;
-			}
-
-			for (; i < count; i++) {
-				tstamps_enq_tstamps(&instance->tstamp_que,
-						    instance->std_time_counter,
-						    &instance->timestamps[i]);
-				tstamps_enq_tstamps(&instance->tstamp_que_crf,
-						    instance->std_time_counter,
-						    &instance->timestamps[i]);
-				instance->std_time_counter +=
-					instance->add_std_time;
-			}
-			spin_unlock_irqrestore(&instance->lock_ques, flags);
-		}
-
-		/* ptp_clock is capture or media_clock_recovery is enable */
-		if (instance->ptp_clock == 1 ||
-		    instance->media_clock_recovery == 1) {
-			ktime_ts = ktime_set(0, instance->tstamp_timer_delay);
-			hrtimer_start(&instance->tstamp_timer,
-				      ktime_ts, HRTIMER_MODE_REL);
-		}
-
-		/* send clock using CRF */
-		if (instance->crf_type == MSE_CRF_TYPE_TX) {
-			ktime_crf = ktime_set(0, instance->crf_timer_delay);
-			hrtimer_start(&instance->crf_timer,
-				      ktime_crf,
-				      HRTIMER_MODE_REL);
-		}
-
-		/* receive clcok using CRF */
-		if (instance->crf_type == MSE_CRF_TYPE_RX) {
-			queue_work(instance->wq_crf_packet,
-				   &instance->wk_crf_receive);
-		}
-	}
+	if (IS_MSE_TYPE_AUDIO(adapter->type))
+		mse_start_streaming_audio(instance, &now);
 
 	if (instance->temp_video_buffer)
 		memset(instance->temp_video_buffer, 0,
