@@ -320,6 +320,7 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	struct mjpeg_quant_header qheader;
 	struct mjpeg_quant_table qtable[JPEG_QUANT_NUM];
 	struct mjpeg_component comp[JPEG_COMP_NUM];
+	size_t buffer_start = *buffer_processed;
 	u8 *buf, *payload;
 	size_t offset = 0, data_len, end_len = 0;
 	size_t payload_size;
@@ -564,7 +565,9 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 		return MSE_PACKETIZE_STATUS_CONTINUE;
 	}
 
-	*buffer_processed -= header_len;
+	cvf_mjpeg->header_f = true;
+	cvf_mjpeg->eoi_f = false;
+	*buffer_processed = buffer_start;
 
 	return MSE_PACKETIZE_STATUS_NOT_ENOUGH;
 
