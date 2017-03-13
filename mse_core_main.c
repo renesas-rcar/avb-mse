@@ -1457,6 +1457,7 @@ static void mse_work_packetize(struct work_struct *work)
 			instance->f_trans_start = false;
 			instance->f_force_flush = false;
 			instance->f_completion = true;
+			mse_debug("f_completion = true\n");
 			queue_work(instance->wq_packet, &instance->wk_stop);
 
 			return;
@@ -1478,7 +1479,7 @@ static void mse_work_packetize(struct work_struct *work)
 	}
 
 	/* start workqueue for streaming */
-	if (ret > 0 || instance->f_continue)
+	if ((ret > 0 || instance->f_continue) && !instance->f_completion)
 		queue_work(instance->wq_stream, &instance->wk_stream);
 
 	if (instance->f_use_temp_video_buffer) {
@@ -1491,8 +1492,7 @@ static void mse_work_packetize(struct work_struct *work)
 			instance->f_temp_video_buffer_rewind = false;
 			instance->stored = 0;
 			instance->parsed = 0;
-		} else if (instance->parsed <= instance->stored / 2) {
-			instance->f_temp_video_buffer_rewind = false;
+			instance->work_length = 0;
 		} else {
 			instance->f_temp_video_buffer_rewind = true;
 		}
@@ -2235,6 +2235,7 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 	u16 pcr_pid = instance->media_config.mpeg2ts.pcr_pid;
 	u64 pcr;
 	int psize, offset;
+	int discard = 0;
 	bool ret = false;
 
 	psize = mpeg2ts_packet_size(instance);
@@ -2248,7 +2249,14 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 		if (instance->parsed + psize < instance->stored &&
 		    tsp[0] != MPEG2TS_SYNC) {
 			instance->parsed++;
+			discard++;
 			continue;
+		}
+
+		if (discard) {
+			mse_err("can not find sync byte. discard %d byte\n",
+				discard);
+			discard = 0;
 		}
 
 		instance->parsed += psize;
@@ -2312,7 +2320,8 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 
 static bool check_mjpeg_eoi(struct mse_instance *instance)
 {
-	int i, ret = false;
+	int i;
+	bool ret = false;
 	unsigned char *buf = instance->temp_video_buffer;
 
 	for (i = instance->parsed; i < instance->stored - 1; i++) {
@@ -2386,12 +2395,19 @@ static void mse_work_start_transmission(struct work_struct *work)
 
 	/* TODO: to be move v4l2 adapter */
 	if (instance->f_use_temp_video_buffer) {
+		unsigned char *temp_buf = instance->temp_video_buffer;
+		unsigned int temp_buf_size = MSE_TEMP_VIDEO_BUF_SIZE;
+
 		if (instance->f_temp_video_buffer_rewind) {
-			memcpy(instance->temp_video_buffer,
-			       instance->temp_video_buffer + instance->parsed,
-			       instance->stored - instance->parsed);
-			instance->stored -= instance->parsed;
-			instance->parsed = 0;
+			int rewind_size = instance->stored - instance->parsed;
+
+			if (rewind_size < instance->parsed) {
+				memcpy(temp_buf, temp_buf + instance->parsed,
+				       rewind_size);
+				instance->stored = rewind_size;
+				instance->parsed = 0;
+				instance->work_length = 0;
+			}
 			instance->f_temp_video_buffer_rewind = false;
 		}
 
@@ -2428,20 +2444,23 @@ static void mse_work_start_transmission(struct work_struct *work)
 			instance->f_first_vframe = false;
 		}
 
-		if (instance->stored + buffer_size <= MSE_TEMP_VIDEO_BUF_SIZE) {
-			memcpy(instance->temp_video_buffer + instance->stored,
+		if (instance->stored + buffer_size <= temp_buf_size) {
+			memcpy(temp_buf + instance->stored,
 			       buffer, buffer_size);
 			instance->stored += buffer_size;
-			if (instance->stored + buffer_size >=
-			    MSE_TEMP_VIDEO_BUF_SIZE)
+			if (instance->stored + buffer_size >= temp_buf_size)
 				instance->f_force_flush = true;
 		} else {
 			mse_err("temp buffer overrun %zu/%u\n",
 				instance->stored + buffer_size,
-				MSE_TEMP_VIDEO_BUF_SIZE);
+				temp_buf_size);
 			mse_trans_complete(instance, -EIO);
-			if (instance->f_stopping)
+			if (instance->f_stopping) {
+				mse_debug("f_completion = true\n");
 				instance->f_completion = true;
+				queue_work(instance->wq_packet,
+					   &instance->wk_stop);
+			}
 
 			return;
 		}
@@ -2464,16 +2483,17 @@ static void mse_work_start_transmission(struct work_struct *work)
 #endif
 
 		if (trans_start || instance->f_force_flush) {
+			if (trans_start)
+				instance->f_force_flush = false;
+
 			instance->state = MSE_STATE_EXECUTE;
-			instance->media_buffer = instance->temp_video_buffer;
+			instance->media_buffer = temp_buf;
 			instance->f_trans_start = true;
 
 			if (buffer_size > 0) {
 				instance->media_buffer_size = instance->parsed;
 			} else {
 				instance->media_buffer_size = instance->stored;
-				instance->stored = 0;
-				instance->parsed = 0;
 			}
 		} else {
 			/* Not enough data, request next buffer */
@@ -2500,7 +2520,8 @@ static void mse_work_start_transmission(struct work_struct *work)
 	}
 
 	if (instance->tx) {
-		instance->work_length = 0;
+		if (!instance->f_use_temp_video_buffer)
+			instance->work_length = 0;
 
 		if (IS_MSE_TYPE_AUDIO(adapter->type)) {
 			ret = create_avtp_timestamps(instance);
