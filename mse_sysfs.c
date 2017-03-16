@@ -210,7 +210,7 @@ static int strtobin(unsigned char *dest, const char *in_str, int len)
 	} decode;
 	int err, i, j;
 
-	err = kstrtoll(in_str, MSE_RADIX_HEXADECIMAL, &decode.hex);
+	err = kstrtoull(in_str, MSE_RADIX_HEXADECIMAL, &decode.hex);
 	if (err < 0)
 		return err;
 
