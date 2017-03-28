@@ -1492,22 +1492,22 @@ static void mse_work_packetize(struct work_struct *work)
 			instance->parsed = instance->work_length;
 
 		if (list_empty(&instance->trans_buf_list)) {
-			mse_err("short of data\n");
-			return;
-		}
-
-		if (instance->f_stopping &&
-		    list_empty(&instance->trans_buf_list)) {
-			mse_debug("discard %zu byte before stopping\n",
-				  instance->media_buffer_size -
-				  instance->work_length);
-
 			instance->f_continue = false;
-			instance->f_trans_start = false;
 			instance->f_force_flush = false;
-			instance->f_completion = true;
-			mse_debug("f_completion = true\n");
-			queue_work(instance->wq_packet, &instance->wk_stop);
+
+			if (instance->f_stopping) {
+				mse_debug("discard %zu byte before stopping\n",
+					  instance->media_buffer_size -
+					  instance->work_length);
+
+				instance->f_trans_start = false;
+				instance->f_completion = true;
+				mse_debug("f_completion = true\n");
+				queue_work(instance->wq_packet,
+					   &instance->wk_stop);
+			} else {
+				mse_err("short of data\n");
+			}
 
 			return;
 		}
