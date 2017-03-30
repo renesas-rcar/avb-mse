@@ -687,61 +687,42 @@ static int mse_ptp_get_timestamps(int index,
 				     timestamps);
 }
 
-static int mse_trans_complete(struct mse_instance *instance, int size)
+static void callback_completion(struct trans_buffer *buf, int size)
 {
-	int done_buf_cnt = atomic_read(&instance->done_buf_cnt);
+	mse_debug("buf=%p buffer=%p buffer_size=%zu callback=%p private=%p\n",
+		  buf, buf->buffer, buf->buffer_size,
+		  buf->mse_completion, buf->private_data);
 
-	mse_debug("trans_buf_cnt=%d done_buf_cnt=%d\n",
-		  atomic_read(&instance->trans_buf_cnt), done_buf_cnt);
+	if (buf->mse_completion)
+		buf->mse_completion(buf->private_data, size);
 
-	if (done_buf_cnt > 0 && !list_empty(&instance->done_buf_list)) {
-		struct trans_buffer *done_buf;
+	list_del(&buf->list);
+	kfree(buf);
+}
 
-		done_buf = list_first_entry(&instance->done_buf_list,
-					    struct trans_buffer, list);
+static void mse_trans_complete(struct mse_instance *instance, int size)
+{
+	struct trans_buffer *buf;
 
-		mse_debug("buffer=%p buffer_size=%zu\n",
-			  done_buf->buffer, done_buf->buffer_size);
-
-		if (done_buf->mse_completion)
-			done_buf->mse_completion(done_buf->private_data, size);
-
-		list_del(&done_buf->list);
-		kfree(done_buf);
-		atomic_dec(&instance->done_buf_cnt);
-	}
-
-	return atomic_read(&instance->done_buf_cnt);
+	buf = list_first_entry_or_null(&instance->done_buf_list,
+				       struct trans_buffer, list);
+	if (buf)
+		callback_completion(buf, size);
 }
 
 static void mse_free_all_trans_buffers(struct mse_instance *instance, int size)
 {
-	int trans_buf_cnt;
+	struct trans_buffer *buf, *buf1;
 
-	while (mse_trans_complete(instance, size))
-		;
+	/* free all buf from DONE buf list */
+	list_for_each_entry_safe(buf, buf1, &instance->done_buf_list, list)
+		callback_completion(buf, size);
+	atomic_set(&instance->done_buf_cnt, 0);
 
-	trans_buf_cnt = atomic_read(&instance->trans_buf_cnt);
-	mse_debug("trans_buf_cnt=%d done_buf_cnt=%d\n",
-		  trans_buf_cnt, atomic_read(&instance->done_buf_cnt));
-
-	while (trans_buf_cnt > 0 && !list_empty(&instance->trans_buf_list)) {
-		struct trans_buffer *trans_buf;
-
-		trans_buf = list_first_entry(&instance->trans_buf_list,
-					     struct trans_buffer, list);
-
-		mse_debug("buffer=%p buffer_size=%zu\n",
-			  trans_buf->buffer, trans_buf->buffer_size);
-
-		if (trans_buf->mse_completion)
-			trans_buf->mse_completion(trans_buf->private_data,
-						  size);
-
-		list_del(&trans_buf->list);
-		kfree(trans_buf);
-		atomic_dec(&instance->trans_buf_cnt);
-	}
+	/* free all buf from TRANS buf list */
+	list_for_each_entry_safe(buf, buf1, &instance->trans_buf_list, list)
+		callback_completion(buf, size);
+	atomic_set(&instance->trans_buf_cnt, 0);
 }
 
 static void mse_work_stream(struct work_struct *work)
@@ -1445,7 +1426,9 @@ static void mse_work_packetize(struct work_struct *work)
 		  trans_size, instance->media_buffer,
 		  instance->media_buffer_size);
 
-	if (instance->media_buffer && trans_size > 0) {
+	if (!(instance->media_buffer && trans_size > 0)) {
+		instance->f_force_flush = false;
+	} else {
 		/* wait for packet buffer processed */
 		wait_event_interruptible(instance->wait_wk_stream,
 					 check_packet_remain(instance));
@@ -1488,11 +1471,10 @@ static void mse_work_packetize(struct work_struct *work)
 
 	if (ret == -EAGAIN) {
 		instance->f_continue = false;
-		if (instance->work_length < instance->stored)
+		if (instance->work_length <= instance->stored)
 			instance->parsed = instance->work_length;
 
 		if (list_empty(&instance->trans_buf_list)) {
-			instance->f_continue = false;
 			instance->f_force_flush = false;
 
 			if (instance->f_stopping) {
@@ -1532,9 +1514,20 @@ static void mse_work_packetize(struct work_struct *work)
 		queue_work(instance->wq_stream, &instance->wk_stream);
 
 	if (instance->f_use_temp_video_buffer) {
-		instance->f_continue = false;
+		if (!instance->f_stopping) {
+			instance->f_continue = false;
+		} else if (!ret) {
+			/* for not enough data */
+			instance->f_continue = false;
+			instance->f_force_flush = false;
+			instance->f_completion = true;
+			mse_debug("f_completion = true\n");
+			queue_work(instance->wq_packet, &instance->wk_stop);
 
-		if (instance->work_length < instance->stored)
+			return;
+		}
+
+		if (instance->work_length <= instance->stored)
 			instance->parsed = instance->work_length;
 
 		if (instance->parsed == instance->stored) {
@@ -1547,27 +1540,29 @@ static void mse_work_packetize(struct work_struct *work)
 		}
 	}
 
-	if (!instance->f_continue) {
-		if (!instance->timer_delay || instance->f_force_flush) {
-			instance->f_force_flush = false;
-			instance->f_trans_start = false;
-			mse_trans_complete(instance, ret);
+	if (instance->f_continue) {
+		queue_work(instance->wq_packet, &instance->wk_packetize);
+	} else {
+		if (ret != -EAGAIN)
+			atomic_inc(&instance->done_buf_cnt);
 
-			if (instance->f_stopping) {
-				if (list_empty(&instance->trans_buf_list) &&
-				    list_empty(&instance->done_buf_list)) {
-					instance->f_completion = true;
-					mse_debug("f_completion = true\n");
-					queue_work(instance->wq_packet,
-						   &instance->wk_stop);
-				} else {
-					queue_work(instance->wq_packet,
-						   &instance->wk_start_trans);
-				}
+		if (!instance->timer_delay) {
+			queue_work(instance->wq_packet,
+				   &instance->wk_callback);
+		}
+
+		if (instance->f_stopping) {
+			if (list_empty(&instance->trans_buf_list) &&
+			    list_empty(&instance->done_buf_list)) {
+				instance->f_completion = true;
+				mse_debug("f_completion = true\n");
+				queue_work(instance->wq_packet,
+					   &instance->wk_stop);
+			} else {
+				queue_work(instance->wq_packet,
+					   &instance->wk_start_trans);
 			}
 		}
-	} else {
-		queue_work(instance->wq_packet, &instance->wk_packetize);
 	}
 }
 
@@ -1750,6 +1745,7 @@ static void mse_work_callback(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
+	int buf_cnt;
 
 	instance = container_of(work, struct mse_instance, wk_callback);
 	adapter = instance->media;
@@ -1757,12 +1753,16 @@ static void mse_work_callback(struct work_struct *work)
 	if (instance->f_completion)
 		return;
 
-	if (instance->f_continue || !instance->f_trans_start) {
-		/* packetize process continuing, retry */
-		queue_work(instance->wq_packet, &instance->wk_callback);
+	buf_cnt = atomic_read(&instance->done_buf_cnt);
 
+	/* for output audio silent data */
+	if (IS_MSE_TYPE_AUDIO(adapter->type) && instance->f_trans_start)
+		if (!buf_cnt)
+			buf_cnt = atomic_inc_return(&instance->done_buf_cnt);
+
+	/* no processed data */
+	if (!buf_cnt)
 		return;
-	}
 
 	mse_debug("START\n");
 
@@ -1775,21 +1775,26 @@ static void mse_work_callback(struct work_struct *work)
 
 			queue_work(instance->wq_packet,
 				   &instance->wk_start_trans);
-		}
-
-		if (IS_MSE_TYPE_MPEG2TS(adapter->type)) {
-			mse_debug("mpeg2ts_clock_90k time=%llu pcr=%llu\n",
-				  instance->mpeg2ts_clock_90k,
-				  instance->mpeg2ts_pcr_90k);
-
-			if (compare_pcr(instance->mpeg2ts_pcr_90k,
-					instance->mpeg2ts_clock_90k))
+		} else {
+			if (instance->f_force_flush) {
+				queue_work(instance->wq_packet,
+					   &instance->wk_packetize);
 				return;
-		}
+			}
 
-		/* complete callback */
-		instance->f_trans_start = false;
-		mse_trans_complete(instance, 0);
+			if (IS_MSE_TYPE_MPEG2TS(adapter->type)) {
+				u64 clock_90k = instance->mpeg2ts_clock_90k;
+				u64 pcr_90k = instance->mpeg2ts_pcr_90k;
+
+				if (clock_90k != MPEG2TS_PCR90K_INVALID) {
+					mse_debug("mpeg2ts_clock_90k time=%llu pcr=%llu\n",
+						  clock_90k, pcr_90k);
+
+					if (compare_pcr(pcr_90k, clock_90k))
+						return;
+				}
+			}
+		}
 	} else {
 		if (IS_MSE_TYPE_AUDIO(adapter->type)) {
 			if (instance->media_buffer &&
@@ -1804,10 +1809,13 @@ static void mse_work_callback(struct work_struct *work)
 		} else {
 			return;
 		}
+	}
 
-		/* complete callback */
-		instance->f_trans_start = false;
+	/* complete callback */
+	instance->f_trans_start = false;
+	if (atomic_read(&instance->done_buf_cnt) > 0) {
 		mse_trans_complete(instance, 0);
+		atomic_dec(&instance->done_buf_cnt);
 	}
 }
 
@@ -2464,8 +2472,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 
 	adapter = instance->media;
 
-	if (atomic_read(&instance->trans_buf_cnt) > 0 &&
-	    !list_empty(&instance->trans_buf_list)) {
+	if (!list_empty(&instance->trans_buf_list)) {
 		trans_buf = list_first_entry(&instance->trans_buf_list,
 					     struct trans_buffer, list);
 		list_del(&trans_buf->list);
@@ -2476,7 +2483,6 @@ static void mse_work_start_transmission(struct work_struct *work)
 		instance->mse_completion = trans_buf->mse_completion;
 
 		list_add_tail(&trans_buf->list, &instance->done_buf_list);
-		atomic_inc(&instance->done_buf_cnt);
 		atomic_dec(&instance->trans_buf_cnt);
 	}
 
@@ -2617,10 +2623,10 @@ static void mse_work_start_transmission(struct work_struct *work)
 		instance->f_trans_start = true;
 	}
 
-	if (instance->tx) {
-		if (!instance->f_use_temp_video_buffer)
-			instance->work_length = 0;
+	if (!instance->f_use_temp_video_buffer)
+		instance->work_length = 0;
 
+	if (instance->tx) {
 		if (IS_MSE_TYPE_AUDIO(adapter->type)) {
 			ret = create_avtp_timestamps(instance);
 			if (ret < 0) {
