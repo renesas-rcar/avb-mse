@@ -334,11 +334,14 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	cvf_mjpeg = &cvf_mjpeg_packetizer_table[index];
 
 	mse_debug("index=%d seqnum=%d process=%zu/%zu t=%u\n",
-		  index, cvf_mjpeg->send_seq_num, *buffer_processed,
+		  index, cvf_mjpeg->send_seq_num, buffer_start,
 		  buffer_size, *timestamp);
 
-	buf = (u8 *)(buffer + *buffer_processed);
-	data_len = buffer_size - *buffer_processed;
+	if (!buffer_start)
+		cvf_mjpeg->eoi_f = false;
+
+	buf = (u8 *)(buffer + buffer_start);
+	data_len = buffer_size - buffer_start;
 	memset(qtable, 0, sizeof(qtable));
 	memset(comp, 0, sizeof(comp));
 
@@ -408,14 +411,6 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 		}
 	}
 
-	if (!cvf_mjpeg->dqt_f || !cvf_mjpeg->sof_f) {
-		mse_err("Not support JPEG format sof=%d dqt=%d\n",
-			cvf_mjpeg->dqt_f, cvf_mjpeg->sof_f);
-		ret = -EINVAL;
-
-		goto header_error;
-	}
-
 	/* Search EOI */
 	if (!cvf_mjpeg->eoi_f) {
 		for (i = offset; i < data_len; i++) {
@@ -423,7 +418,17 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 			    buf[i + 1] == JPEG_MARKER_KIND_EOI) {
 				cvf_mjpeg->eoi_f = true;
 				cvf_mjpeg->eoi_offset = i + 2;
+
+				break;
 			}
+		}
+	} else {
+		if (!cvf_mjpeg->dqt_f || !cvf_mjpeg->sof_f) {
+			mse_err("Not support JPEG data, sof=%d dqt=%d\n",
+				cvf_mjpeg->dqt_f, cvf_mjpeg->sof_f);
+			ret = -EINVAL;
+
+			goto header_error;
 		}
 	}
 
@@ -512,7 +517,8 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 
 	if (cvf_mjpeg->eoi_f)
 		/* length of EOI marker */
-		end_len = cvf_mjpeg->eoi_offset - *buffer_processed;
+		end_len = buffer_start + cvf_mjpeg->eoi_offset -
+			  *buffer_processed;
 	else
 		/* length of buffer */
 		end_len = buffer_size - *buffer_processed;
@@ -536,47 +542,49 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	*packet_size = AVTP_CVF_MJPEG_PAYLOAD_OFFSET - AVTP_JPEG_HEADER_SIZE +
 		avtp_get_stream_data_length(packet);
 
+	/* read buffer length */
+	*buffer_processed += data_len;
+
 	if (pic_end) {
 		/* jpeg frame data end */
-		/* read buffer length */
-		*buffer_processed += data_len;
-
 		mse_debug("last frame seq=%d process=%zu/%zu t=%u\n",
 			  cvf_mjpeg->send_seq_num, *buffer_processed,
 			  buffer_size, *timestamp);
 
 		cvf_mjpeg->send_seq_num++;
-
 		mse_packetizer_cvf_mjpeg_flag_init(cvf_mjpeg);
 
-		return MSE_PACKETIZE_STATUS_COMPLETE;
+		/* check buffer end */
+		if (*buffer_processed < buffer_size)
+			ret = MSE_PACKETIZE_STATUS_CONTINUE;
+		else
+			ret = MSE_PACKETIZE_STATUS_COMPLETE;
+	} else {
+		if (cvf_mjpeg->eoi_f) {
+			if (*buffer_processed < buffer_size) {
+				cvf_mjpeg->send_seq_num++;
+				cvf_mjpeg->header_f = false;
+				cvf_mjpeg->eoi_f = false;
+				cvf_mjpeg->jpeg_offset += data_len;
+				ret = MSE_PACKETIZE_STATUS_CONTINUE;
+			} else {
+				*buffer_processed = buffer_start;
+				ret = MSE_PACKETIZE_STATUS_NOT_ENOUGH;
+			}
+		} else {
+			*buffer_processed = buffer_start;
+			ret = MSE_PACKETIZE_STATUS_NOT_ENOUGH;
+		}
 	}
 
-	cvf_mjpeg->header_f = false;
-
-	/* buffer end */
-	if (*buffer_processed + data_len < buffer_size) {
-		cvf_mjpeg->jpeg_offset += data_len;
-		cvf_mjpeg->send_seq_num++;
-
-		/* read buffer length */
-		*buffer_processed += data_len;
-
-		return MSE_PACKETIZE_STATUS_CONTINUE;
-	}
-
-	cvf_mjpeg->header_f = true;
-	cvf_mjpeg->eoi_f = false;
-	*buffer_processed = buffer_start;
-
-	return MSE_PACKETIZE_STATUS_NOT_ENOUGH;
+	return ret;
 
 header_error:
 	/* find next header */
 	if (ret != -EAGAIN)
-		mse_packetizer_cvf_mjpeg_flag_init(cvf_mjpeg);
-	else
-		*buffer_processed += offset;
+		*buffer_processed = buffer_start;
+
+	mse_packetizer_cvf_mjpeg_flag_init(cvf_mjpeg);
 
 	return ret;
 }
