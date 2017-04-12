@@ -2420,22 +2420,21 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 static bool check_mjpeg_eoi(struct mse_instance *instance)
 {
 	int i;
-	bool ret = false;
 	unsigned char *buf = instance->temp_video_buffer;
 
 	for (i = instance->parsed; i < instance->stored - 1; i++) {
 		if (buf[i] == 0xFF && buf[i + 1] == 0xD9) {
-			ret = true;
 			mse_debug("Found EOI, buf[%d]=%02X buf[%d]=%02X\n",
 				  i, buf[i], i + 1, buf[i + 1]);
-			i++;
-			break;
+			instance->parsed = i + 2;
+
+			return true;
 		}
 	}
 
-	instance->parsed = i + 1;
+	instance->parsed = instance->stored;
 
-	return ret;
+	return false;
 }
 
 static void mse_work_start_transmission(struct work_struct *work)
