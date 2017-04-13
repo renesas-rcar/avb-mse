@@ -276,7 +276,7 @@ int mse_ptp_get_timestamps_dummy(int dev_id,
 
 	queue = &dev->que;
 
-	for (i = 0; i < MAX_TIMESTAMPS; i++) {
+	for (i = 0; i < *count; i++) {
 		if (dequeue(queue, &clock_time) < 0)
 			break;
 		timestamps[i] = clock_time;

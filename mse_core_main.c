@@ -1200,6 +1200,7 @@ static void mse_work_timestamp(struct work_struct *work)
 		unsigned long flags;
 
 		/* get timestamps */
+		count = ARRAY_SIZE(instance->timestamps);
 		ret = mse_ptp_get_timestamps(instance->ptp_index,
 					     instance->ptp_dev_id,
 					     instance->ptp_clock_ch,
@@ -2145,6 +2146,7 @@ static void mse_get_capture_timestamp_first(struct mse_instance *instance,
 	s64 delay, diff;
 
 	/* get timestamps */
+	count = ARRAY_SIZE(instance->timestamps);
 	ret = mse_ptp_get_timestamps(instance->ptp_index,
 				     instance->ptp_dev_id,
 				     instance->ptp_clock_ch,
