@@ -3390,10 +3390,6 @@ int mse_open(int index_media, bool tx)
 	}
 	instance->index_network = ret;
 
-	ret = network->set_option(instance->index_network);
-	if (ret)
-		mse_err("failed set_option() ret=%d\n", ret);
-
 	/* get speed link */
 	link_speed = network->get_link_speed(instance->index_network);
 	if (link_speed <= 0) {

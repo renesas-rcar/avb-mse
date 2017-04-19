@@ -246,8 +246,6 @@ struct mse_adapter_network_ops {
 	int (*open)(char *name);
 	/** @brief release function pointer */
 	int (*release)(int index);
-	/** @brief set_option function pointer */
-	int (*set_option)(int index);
 	/** @brief set CBS config function pointer */
 	int (*set_cbs_param)(int index, struct mse_cbsparam *cbs);
 	/** @brief set Stream ID config function pointer */
@@ -266,8 +264,6 @@ struct mse_adapter_network_ops {
 			       int num_packets);
 	/** @brief receive function pointer */
 	int (*receive)(int index, int num_packets);
-	/** @brief check function pointer */
-	int (*check_receive)(int index);
 	/** @brief cancel function pointer */
 	int (*cancel)(int index);
 	/** @brief get link speed function pointer */
