@@ -391,22 +391,6 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 	return 0;
 }
 
-static int mse_adapter_eavb_check_receive(int index)
-{
-	struct mse_adapter_eavb *eavb;
-
-	mse_debug("index=%d", index);
-
-	eavb = mse_adapter_eavb_get_priv(index);
-	if (!eavb)
-		return -EPERM;
-
-	if (avb_device_is_tx(eavb->device_id))
-		return -EPERM;
-
-	return avb_check_completed(eavb);
-}
-
 static int mse_adapter_eavb_send_prepare(int index,
 					 struct mse_packet *packets,
 					 int num_packets)
@@ -682,21 +666,6 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 	return receive;
 }
 
-static int mse_adapter_eavb_set_option(int index)
-{
-	struct mse_adapter_eavb *eavb;
-	static struct eavb_option option = {
-		.id = EAVB_OPTIONID_BLOCKMODE,
-		.param = EAVB_BLOCK_WAITALL,
-	};
-
-	eavb = mse_adapter_eavb_get_priv(index);
-	if (!eavb)
-		return -EPERM;
-
-	return eavb->ravb.set_option(eavb->ravb.handle, &option);
-}
-
 static int mse_adapter_eavb_cancel(int index)
 {
 	struct mse_adapter_eavb *eavb;
@@ -732,14 +701,12 @@ static struct mse_adapter_network_ops mse_adapter_eavb_ops = {
 	.type = MSE_TYPE_ADAPTER_NETWORK,
 	.open = mse_adapter_eavb_open,
 	.release = mse_adapter_eavb_release,
-	.set_option = mse_adapter_eavb_set_option,
 	.set_cbs_param = mse_adapter_eavb_set_cbs_param,
 	.set_streamid = mse_adapter_eavb_set_streamid,
 	.send_prepare = mse_adapter_eavb_send_prepare,
 	.send = mse_adapter_eavb_send,
 	.receive_prepare = mse_adapter_eavb_receive_prepare,
 	.receive = mse_adapter_eavb_receive,
-	.check_receive = mse_adapter_eavb_check_receive,
 	.cancel = mse_adapter_eavb_cancel,
 	.get_link_speed = mse_adapter_eavb_get_link_speed,
 };
