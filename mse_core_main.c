@@ -129,12 +129,13 @@
 
 #define MPEG2TS_TIMER_NS        (10000000)           /* 10 msec */
 
+/* (timer_ns * 90kHz) / 1e9 => (timer_ns * 9) / 1e5 */
+#define MPEG2TS_CLOCK_INC       ((MPEG2TS_TIMER_NS * 9) / 100000)
+
 #define MPEG2TS_TS_SIZE         (188)
 #define MPEG2TS_SYNC            (0x47)
 #define MPEG2TS_M2TS_OFFSET     (4)
 #define MPEG2TS_M2TS_SIZE       (MPEG2TS_M2TS_OFFSET + MPEG2TS_TS_SIZE)
-#define MPEG2TS_CLOCK_N         (9)                   /* 90kHz / 10K */
-#define MPEG2TS_CLOCK_D         (100000)              /* 10^9(NSEC) / 10K */
 #define MPEG2TS_PCR90K_BITS     (33)
 #define MPEG2TS_PCR90K_INVALID  (BIT(MPEG2TS_PCR90K_BITS))
 #define MPEG2TS_PCR_PID_IGNORE  (MSE_CONFIG_PCR_PID_MAX)
@@ -265,18 +266,18 @@ struct mse_instance {
 
 	/** @brief timer handler */
 	struct hrtimer timer;
-	int timer_delay;
+	u64 timer_delay;
 
 	/** @brief spin lock for timer count */
 	spinlock_t lock_timer;
 
 	/** @brief timestamp timer handler */
 	struct hrtimer tstamp_timer;
-	int tstamp_timer_delay;
+	u64 tstamp_timer_delay;
 
 	/** @brief crf timer handler */
 	struct hrtimer crf_timer;
-	int crf_timer_delay;
+	u64 crf_timer_delay;
 
 	/* @brief crf packetizer index */
 	int crf_index;
@@ -1919,11 +1920,8 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 		return HRTIMER_NORESTART;
 	}
 
-	if (instance->mpeg2ts_clock_90k != MPEG2TS_PCR90K_INVALID) {
-		instance->mpeg2ts_clock_90k +=
-			(instance->timer_delay * MPEG2TS_CLOCK_N) /
-			MPEG2TS_CLOCK_D;
-	}
+	if (instance->mpeg2ts_clock_90k != MPEG2TS_PCR90K_INVALID)
+		instance->mpeg2ts_clock_90k += MPEG2TS_CLOCK_INC;
 
 	/* timer update */
 	ktime = ktime_set(0, instance->timer_delay);
@@ -2905,7 +2903,6 @@ EXPORT_SYMBOL(mse_get_audio_config);
 int mse_set_audio_config(int index, struct mse_audio_config *config)
 {
 	struct mse_instance *instance;
-	u64 timer;
 	struct mse_adapter *adapter;
 	struct mse_media_audio_config *media_audio_config;
 	struct mse_network_config *net_config;
@@ -2949,10 +2946,10 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	index_network = instance->index_network;
 
 	/* calc timer value */
-	timer = NSEC_SCALE * (u64)config->period_size;
-	do_div(timer, config->sample_rate);
-	instance->timer_delay = timer;
-	mse_info("timer_delay=%d\n", instance->timer_delay);
+	instance->timer_delay = div64_u64(
+		NSEC_SCALE * (u64)config->period_size,
+		(u64)config->sample_rate);
+	mse_info("timer_delay=%llu\n", instance->timer_delay);
 
 	/* set AVTP header info */
 	ret = packetizer->set_network_config(index_packetizer, net_config);
@@ -3029,7 +3026,6 @@ EXPORT_SYMBOL(mse_get_video_config);
 int mse_set_video_config(int index, struct mse_video_config *config)
 {
 	struct mse_instance *instance;
-	u64 framerate;
 	struct mse_network_config *net_config;
 	struct mse_packetizer_ops *packetizer;
 	struct mse_adapter_network_ops *network;
@@ -3091,10 +3087,10 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 	/* calc timer value */
 	if (instance->tx &&
 	    config->fps.denominator != 0 && config->fps.numerator != 0) {
-		framerate = NSEC_SCALE * (u64)config->fps.denominator;
-		do_div(framerate, config->fps.numerator);
-		instance->timer_delay = framerate;
-		mse_info("timer_delay=%d\n", instance->timer_delay);
+		instance->timer_delay = div64_u64(
+			NSEC_SCALE * (u64)config->fps.denominator,
+			config->fps.numerator);
+		mse_info("timer_delay=%llu\n", instance->timer_delay);
 	}
 
 	/* set AVTP header info */
@@ -3198,7 +3194,7 @@ int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 	index_network = instance->index_network;
 
 	instance->timer_delay = MPEG2TS_TIMER_NS;
-	mse_info("timer_delay=%d\n", instance->timer_delay);
+	mse_info("timer_delay=%llu\n", instance->timer_delay);
 
 	/* set AVTP header info */
 	ret = packetizer->set_network_config(index_packetizer, net_config);
