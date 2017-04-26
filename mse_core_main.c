@@ -108,10 +108,10 @@
 #define q_next(pos, max)        (((pos) + 1) % max)
 
 #define PTP_TIMESTAMPS_MAX   (512)
-#define PTP_DELAY            (20 * 1000000)  /* 1/300 sec * 6 = 20ms */
+#define PTP_TIMER_INTERVAL   (20 * 1000000)  /* 1/300 sec * 6 = 20ms */
 
 #define CRF_TIMESTAMPS_MAX   (512)
-#define CRF_DELAY            (20 * 1000000)  /* 20ms */
+#define CRF_TIMER_INTERVAL   (20 * 1000000)  /* 20ms */
 #define CRF_PTP_TIMESTAMPS   (1)     /* timestamps per CRF packet using ptp */
 #define CRF_AUDIO_TIMESTAMPS (6)     /* audio timestamps per CRF packet */
 
@@ -266,18 +266,18 @@ struct mse_instance {
 
 	/** @brief timer handler */
 	struct hrtimer timer;
-	u64 timer_delay;
+	u64 timer_interval;
 
 	/** @brief spin lock for timer count */
 	spinlock_t lock_timer;
 
 	/** @brief timestamp timer handler */
 	struct hrtimer tstamp_timer;
-	u64 tstamp_timer_delay;
+	u64 tstamp_timer_interval;
 
 	/** @brief crf timer handler */
 	struct hrtimer crf_timer;
-	u64 crf_timer_delay;
+	u64 crf_timer_interval;
 
 	/* @brief crf packetizer index */
 	int crf_index;
@@ -1547,7 +1547,7 @@ static void mse_work_packetize(struct work_struct *work)
 		if (ret != -EAGAIN)
 			atomic_inc(&instance->done_buf_cnt);
 
-		if (!instance->timer_delay) {
+		if (!instance->timer_interval) {
 			queue_work(instance->wq_packet,
 				   &instance->wk_callback);
 		}
@@ -1923,7 +1923,7 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 		instance->mpeg2ts_clock_90k += MPEG2TS_CLOCK_INC;
 
 	/* timer update */
-	hrtimer_add_expires_ns(&instance->timer, instance->timer_delay);
+	hrtimer_add_expires_ns(&instance->timer, instance->timer_interval);
 
 	/* start workqueue for completion */
 	queue_work(instance->wq_packet, &instance->wk_callback);
@@ -2084,7 +2084,8 @@ static enum hrtimer_restart mse_crf_callback(struct hrtimer *arg)
 	}
 
 	/* timer update */
-	hrtimer_add_expires_ns(&instance->crf_timer, instance->crf_timer_delay);
+	hrtimer_add_expires_ns(&instance->crf_timer,
+			       instance->crf_timer_interval);
 
 	/* start workqueue for send */
 	if (!instance->f_crf_sending) {
@@ -2110,7 +2111,7 @@ static enum hrtimer_restart mse_timestamp_collect_callback(struct hrtimer *arg)
 
 	/* timer update */
 	hrtimer_add_expires_ns(&instance->tstamp_timer,
-			       instance->tstamp_timer_delay);
+			       instance->tstamp_timer_interval);
 
 	if (instance->f_work_timestamp)
 		return HRTIMER_RESTART;
@@ -2203,14 +2204,14 @@ static void mse_start_streaming_audio(struct mse_instance *instance,
 	if (instance->ptp_clock == 1 ||
 	    instance->media_clock_recovery == 1) {
 		hrtimer_start(&instance->tstamp_timer,
-			      ns_to_ktime(instance->tstamp_timer_delay),
+			      ns_to_ktime(instance->tstamp_timer_interval),
 			      HRTIMER_MODE_REL);
 	}
 
 	/* send clock using CRF */
 	if (instance->crf_type == MSE_CRF_TYPE_TX) {
 		hrtimer_start(&instance->crf_timer,
-			      ns_to_ktime(instance->crf_timer_delay),
+			      ns_to_ktime(instance->crf_timer_interval),
 			      HRTIMER_MODE_REL);
 	}
 
@@ -2243,8 +2244,8 @@ static void mse_work_start_streaming(struct work_struct *work)
 		instance->add_crf_std_time =
 			NSEC_SCALE / instance->ptp_capture_freq;
 	} else {
-		instance->add_std_time = instance->timer_delay;
-		instance->add_crf_std_time = instance->timer_delay;
+		instance->add_std_time = instance->timer_interval;
+		instance->add_crf_std_time = instance->timer_interval;
 	}
 
 	instance->std_time_counter = 0;
@@ -2256,9 +2257,9 @@ static void mse_work_start_streaming(struct work_struct *work)
 	instance->remain = 0;
 
 	/* start timer */
-	if (instance->timer_delay) {
+	if (instance->timer_interval) {
 		hrtimer_start(&instance->timer,
-			      ns_to_ktime(instance->timer_delay),
+			      ns_to_ktime(instance->timer_interval),
 			      HRTIMER_MODE_REL);
 	}
 
@@ -2935,10 +2936,10 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 	index_network = instance->index_network;
 
 	/* calc timer value */
-	instance->timer_delay = div64_u64(
+	instance->timer_interval = div64_u64(
 		NSEC_SCALE * (u64)config->period_size,
 		(u64)config->sample_rate);
-	mse_info("timer_delay=%llu\n", instance->timer_delay);
+	mse_info("timer_interval=%llu\n", instance->timer_interval);
 
 	/* set AVTP header info */
 	ret = packetizer->set_network_config(index_packetizer, net_config);
@@ -3076,10 +3077,10 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 	/* calc timer value */
 	if (instance->tx &&
 	    config->fps.denominator != 0 && config->fps.numerator != 0) {
-		instance->timer_delay = div64_u64(
+		instance->timer_interval = div64_u64(
 			NSEC_SCALE * (u64)config->fps.denominator,
 			config->fps.numerator);
-		mse_info("timer_delay=%llu\n", instance->timer_delay);
+		mse_info("timer_interval=%llu\n", instance->timer_interval);
 	}
 
 	/* set AVTP header info */
@@ -3182,8 +3183,8 @@ int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 	network = instance->network;
 	index_network = instance->index_network;
 
-	instance->timer_delay = MPEG2TS_TIMER_NS;
-	mse_info("timer_delay=%llu\n", instance->timer_delay);
+	instance->timer_interval = MPEG2TS_TIMER_NS;
+	mse_info("timer_interval=%llu\n", instance->timer_interval);
 
 	/* set AVTP header info */
 	ret = packetizer->set_network_config(index_packetizer, net_config);
@@ -3424,7 +3425,7 @@ int mse_open(int index_media, bool tx)
 	instance->wq_stream = create_singlethread_workqueue("mse_streamq");
 	instance->wq_packet = create_singlethread_workqueue("mse_packetq");
 	hrtimer_init(&instance->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	instance->timer_delay = 0;
+	instance->timer_interval = 0;
 	instance->timer.function = &mse_timer_callback;
 
 	/* for timestamp */
@@ -3437,7 +3438,7 @@ int mse_open(int index_media, bool tx)
 
 		hrtimer_init(&instance->tstamp_timer,
 			     CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-		instance->tstamp_timer_delay = PTP_DELAY;
+		instance->tstamp_timer_interval = PTP_TIMER_INTERVAL;
 		instance->tstamp_timer.function =
 					&mse_timestamp_collect_callback;
 
@@ -3446,7 +3447,7 @@ int mse_open(int index_media, bool tx)
 			create_singlethread_workqueue("mse_crfpacketq");
 		hrtimer_init(&instance->crf_timer,
 			     CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-		instance->crf_timer_delay = CRF_DELAY;
+		instance->crf_timer_interval = CRF_TIMER_INTERVAL;
 		instance->crf_timer.function = &mse_crf_callback;
 	}
 

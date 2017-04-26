@@ -71,10 +71,10 @@
 
 #include "ravb_mse_kernel.h"
 
-#define MAX_PTP_DEVICES  10
-#define DELAY            3333333  /* 3.33..ms */
+#define MAX_PTP_DEVICES    10
+#define MAX_TIMESTAMPS     100
 
-#define MAX_TIMESTAMPS   100
+#define PTP_DUMMY_INTERVAL 3333333  /* 3.33..ms */
 
 #define q_next(n)        (((n) + 1) % MAX_TIMESTAMPS)
 
@@ -88,7 +88,7 @@ struct ptp_queue {
 struct ptp_device {
 	struct ptp_queue	que;
 	struct			hrtimer timer;
-	int			timer_delay;
+	int			timer_interval;
 	spinlock_t		qlock;
 };
 
@@ -130,10 +130,10 @@ static enum hrtimer_restart ptp_timestamp_callback(struct hrtimer *arg)
 
 	dev = container_of(arg, struct ptp_device, timer);
 
-	if (!dev->timer_delay)
+	if (!dev->timer_interval)
 		return HRTIMER_NORESTART;
 
-	hrtimer_add_expires_ns(&dev->timer, dev->timer_delay);
+	hrtimer_add_expires_ns(&dev->timer, dev->timer_interval);
 
 	/* Get time from system timer */
 	getnstimeofday64(&time);
@@ -180,12 +180,12 @@ int mse_ptp_open_dummy(int *dev_id)
 
 	/* init timer */
 	hrtimer_init(&dev->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	dev->timer_delay = DELAY;
+	dev->timer_interval = PTP_DUMMY_INTERVAL;
 	dev->timer.function = &ptp_timestamp_callback;
 
 	/* start timer */
 	hrtimer_start(&dev->timer,
-		      ns_to_ktime(dev->timer_delay),
+		      ns_to_ktime(dev->timer_interval),
 		      HRTIMER_MODE_REL);
 
 	*dev_id = index;
@@ -216,7 +216,7 @@ int mse_ptp_close_dummy(int dev_id)
 	spin_unlock_irqrestore(&ptp_dummy_lock, flags);
 
 	/* timer stop */
-	dev->timer_delay = 0;
+	dev->timer_interval = 0;
 	hrtimer_cancel(&dev->timer);
 
 	kfree(dev);
