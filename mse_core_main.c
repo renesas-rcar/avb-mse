@@ -1910,7 +1910,6 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 {
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
-	ktime_t ktime;
 
 	instance = container_of(arg, struct mse_instance, timer);
 	adapter = instance->media;
@@ -1924,10 +1923,7 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 		instance->mpeg2ts_clock_90k += MPEG2TS_CLOCK_INC;
 
 	/* timer update */
-	ktime = ktime_set(0, instance->timer_delay);
-	hrtimer_forward(&instance->timer,
-			hrtimer_get_expires(&instance->timer),
-			ktime);
+	hrtimer_add_expires_ns(&instance->timer, instance->timer_delay);
 
 	/* start workqueue for completion */
 	queue_work(instance->wq_packet, &instance->wk_callback);
@@ -2079,7 +2075,6 @@ static void mse_work_crf_receive(struct work_struct *work)
 static enum hrtimer_restart mse_crf_callback(struct hrtimer *arg)
 {
 	struct mse_instance *instance;
-	ktime_t ktime;
 
 	instance = container_of(arg, struct mse_instance, crf_timer);
 
@@ -2089,10 +2084,7 @@ static enum hrtimer_restart mse_crf_callback(struct hrtimer *arg)
 	}
 
 	/* timer update */
-	ktime = ktime_set(0, instance->crf_timer_delay);
-	hrtimer_forward(&instance->crf_timer,
-			hrtimer_get_expires(&instance->crf_timer),
-			ktime);
+	hrtimer_add_expires_ns(&instance->crf_timer, instance->crf_timer_delay);
 
 	/* start workqueue for send */
 	if (!instance->f_crf_sending) {
@@ -2106,7 +2098,6 @@ static enum hrtimer_restart mse_crf_callback(struct hrtimer *arg)
 static enum hrtimer_restart mse_timestamp_collect_callback(struct hrtimer *arg)
 {
 	struct mse_instance *instance;
-	ktime_t ktime;
 
 	instance = container_of(arg, struct mse_instance, tstamp_timer);
 
@@ -2118,10 +2109,8 @@ static enum hrtimer_restart mse_timestamp_collect_callback(struct hrtimer *arg)
 	}
 
 	/* timer update */
-	ktime = ktime_set(0, instance->tstamp_timer_delay);
-	hrtimer_forward(&instance->tstamp_timer,
-			hrtimer_get_expires(&instance->tstamp_timer),
-			ktime);
+	hrtimer_add_expires_ns(&instance->tstamp_timer,
+			       instance->tstamp_timer_delay);
 
 	if (instance->f_work_timestamp)
 		return HRTIMER_RESTART;

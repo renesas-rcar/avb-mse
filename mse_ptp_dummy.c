@@ -133,9 +133,7 @@ static enum hrtimer_restart ptp_timestamp_callback(struct hrtimer *arg)
 	if (!dev->timer_delay)
 		return HRTIMER_NORESTART;
 
-	hrtimer_forward(&dev->timer,
-			hrtimer_get_expires(&dev->timer),
-			ns_to_ktime(dev->timer_delay));
+	hrtimer_add_expires_ns(&dev->timer, dev->timer_delay);
 
 	/* Get time from system timer */
 	getnstimeofday64(&time);
