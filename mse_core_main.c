@@ -77,6 +77,7 @@
 #include <linux/delay.h>
 #include <linux/ptp_clock.h>
 #include <linux/list.h>
+#include <linux/dma-mapping.h>
 #include "avtp.h"
 #include "ravb_mse_kernel.h"
 #include "mse_packetizer.h"
@@ -3907,7 +3908,17 @@ static int mse_probe(void)
 	}
 
 	/* W/A for cannot using DMA APIs */
-	of_dma_configure(&mse->pdev->dev, NULL);
+	if (IS_ENABLED(CONFIG_OF))
+		of_dma_configure(&mse->pdev->dev, NULL);
+	else
+		/*
+		 * MSE has no dependency to OF, but w/o CONFIG_OF set the
+		 * above function does nothing while at least initializing
+		 * dma_mask, coherent_dma_mask is mandatory. Limitation to
+		 * 32bit is needed, as struct eavb_entryvec relies on 32bit
+		 * addresses.
+		 */
+		dma_coerce_mask_and_coherent(&mse->pdev->dev, DMA_BIT_MASK(32));
 
 #if defined(CONFIG_MSE_SYSFS)
 	/* create class */
