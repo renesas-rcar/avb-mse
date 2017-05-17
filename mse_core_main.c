@@ -2221,7 +2221,7 @@ static void mse_work_stop(struct work_struct *work)
 	read_unlock_irqrestore(&instance->lock_state, flags);
 
 	/* return callback to all transmission request */
-	mse_free_all_trans_buffers(instance, -EIO);
+	mse_free_all_trans_buffers(instance, 0);
 
 	/* stop streaming */
 	mse_stop_streaming_common(instance);
