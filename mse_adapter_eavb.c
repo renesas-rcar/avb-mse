@@ -66,6 +66,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
+#include <linux/fs.h>
 #include "ravb_mse_kernel.h"
 #include "ravb_eavb.h"
 
@@ -245,7 +246,7 @@ static int mse_adapter_eavb_open(char *name)
 	if (!eavb)
 		return -EPERM;
 
-	err = ravb_streaming_open_stq_kernel(device_id, &eavb->ravb, 0);
+	err = ravb_streaming_open_stq_kernel(device_id, &eavb->ravb, O_DSYNC);
 	if (err) {
 		mse_err("error open dev=%s code=%d\n", avb_devname, err);
 		goto error_allocated_eavb;
