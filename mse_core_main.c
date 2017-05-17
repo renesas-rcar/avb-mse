@@ -4230,7 +4230,7 @@ int mse_start_transmission(int index,
 	write_unlock_irqrestore(&instance->lock_state, flags);
 
 	if (!err) {
-		trans_buf = kmalloc(sizeof(*trans_buf), GFP_KERNEL);
+		trans_buf = kmalloc(sizeof(*trans_buf), GFP_ATOMIC);
 		trans_buf->buffer = buffer;
 		trans_buf->buffer_size = buffer_size;
 		trans_buf->private_data = priv;
