@@ -87,6 +87,8 @@
 #include "mse_ptp.h"
 #include "mse_ioctl_local.h"
 
+#define MSE_DEBUG_TSTAMPS (0)
+
 #define BUF_SIZE                (32)
 
 #define NANO_SCALE              (1000000000ul)
@@ -857,7 +859,10 @@ static int tstamps_search_tstamp(
 	else
 		mse_info("not precision offset capture %u", t_d);
 
+#if (MSE_DEBUG_TSTAMPS)
 	mse_debug("found %lu t= %u avtp= %u\n", *std_time, t, avtp_time);
+#endif
+
 	return 0;
 }
 
@@ -865,7 +870,9 @@ static int tstamps_enq_tstamps(struct timestamp_queue *que,
 			       unsigned long std_time,
 			       struct ptp_clock_time *clock_time)
 {
+#if (MSE_DEBUG_TSTAMPS)
 	mse_debug("START head=%d, tail=%d\n", que->head, que->tail);
+#endif
 
 	que->std_times[que->tail] = std_time;
 	que->times[que->tail] = *clock_time;
@@ -910,7 +917,9 @@ static int tstamps_clear_tstamps(struct timestamp_queue *que)
 static int tstamps_enq_avtp(struct avtp_queue *que, unsigned long std_time,
 			    unsigned int clock_time)
 {
+#if (MSE_DEBUG_TSTAMPS)
 	mse_debug("START head=%d, tail=%d\n", que->head, que->tail);
+#endif
 
 	que->std_times[que->tail] = std_time;
 	que->times[que->tail] = clock_time;
@@ -949,7 +958,9 @@ static int tstamps_enq_crf(struct crf_queue *que,
 			   unsigned long *std_times,
 			   u64 *clock_time)
 {
+#if (MSE_DEBUG_TSTAMPS)
 	mse_debug("START head=%d, tail=%d\n", que->head, que->tail);
+#endif
 
 	que->std_times[que->tail] = *std_times;
 	que->times[que->tail] = *clock_time;
@@ -1228,7 +1239,9 @@ static int get_timestamps(struct timestamp_queue *que,
 	if (tstamps_get_tstamps_size(que) < count)
 		return -1;
 
+#if (MSE_DEBUG_TSTAMPS)
 	mse_debug("total=%d\n", count);
+#endif
 
 	for (i = 0; i < count; i++) {
 		tstamps_deq_tstamps(que, &std_time, &clock_time);
