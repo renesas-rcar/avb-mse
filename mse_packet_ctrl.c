@@ -161,11 +161,6 @@ int mse_packet_ctrl_make_packet(int index,
 	unsigned int timestamp;
 	int packetized;
 
-	if (!ops) {
-		mse_err("no packetizer\n");
-		return -EINVAL;
-	}
-
 	packetized = mse_packet_ctrl_check_packet_remain(dma);
 	pcount_max = min(dma->size - packetized - 1, MSE_PACKET_COUNT_MAX);
 	while ((ret == MSE_PACKETIZE_STATUS_CONTINUE) &&
@@ -275,11 +270,6 @@ int mse_packet_ctrl_send_packet(int index,
 	int read_p, ret, send_size;
 	int packetized;
 
-	if (!ops) {
-		mse_err("no network adapter\n");
-		return -EINVAL;
-	}
-
 	packetized = mse_packet_ctrl_check_packet_remain(dma);
 	send_size = min(packetized, MSE_PACKET_COUNT_MAX);
 
@@ -319,11 +309,6 @@ int mse_packet_ctrl_receive_packet(int index,
 	int received = 0, empty_slot;
 	int size = min(max_size, MSE_PACKET_COUNT_MAX);
 
-	if (!ops) {
-		mse_err("no network adapter\n");
-		return -EINVAL;
-	}
-
 	mse_debug("network adapter=%s r=%d w=%d\n",
 		  ops->name, dma->read_p, dma->write_p);
 
@@ -358,11 +343,6 @@ int mse_packet_ctrl_receive_packet_crf(int index,
 {
 	int write_p, ret;
 	int size = max_size;
-
-	if (!ops) {
-		mse_err("no network adapter\n");
-		return -EINVAL;
-	}
 
 	mse_debug("network adapter=%s r=%d w=%d\n",
 		  ops->name, dma->read_p, dma->write_p);
@@ -406,11 +386,6 @@ int mse_packet_ctrl_take_out_packet(int index,
 	unsigned int recv_time;
 	int pcount = 0;
 	int received;
-
-	if (!ops) {
-		mse_err("no packetizer\n");
-		return -EINVAL;
-	}
 
 	mse_debug("r=%d w=%d s=%d v=%p\n",
 		  dma->read_p, dma->write_p, dma->size,
