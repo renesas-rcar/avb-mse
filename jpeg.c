@@ -352,6 +352,7 @@ int jpeg_read_dqt(const u8 *buf,
 		mse_debug("DQT Tq=%d Pq=%d Size=%zu",
 			  qid, precision, quant_len);
 
+		qtable[qid].precision = precision;
 		qtable[qid].size = quant_len;
 		memcpy(qtable[qid].data, &buf[*offset], quant_len);
 		header_len -= quant_len;
@@ -392,7 +393,7 @@ int jpeg_read_dri(const u8 *buf,
 				     JPEG_DRI_L_DEFAULT |
 				     JPEG_DRI_RCOUNT_DEFAULT;
 
-	return rheader->restart_interval > 0;
+	return 0;
 }
 
 static u8 *jpeg_make_quantizer(u8 *p, u32 id, u8 q)

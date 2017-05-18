@@ -134,6 +134,7 @@ struct mjpeg_quant_header {
 
 struct mjpeg_quant_table {
 	u8 size;
+	u8 precision;
 	u8 data[JPEG_DQT_QUANT_SIZE16];
 };
 
