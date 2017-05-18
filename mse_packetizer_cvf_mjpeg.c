@@ -105,6 +105,9 @@ struct cvf_mjpeg_packetizer {
 	size_t eoi_offset;
 	size_t jpeg_offset;
 
+	size_t piece_data_len;
+	u8 piece_data[ETHFRAMELEN_MAX];
+
 	u8 packet_template[ETHFRAMELEN_MAX];
 
 	struct mse_network_config net_config;
@@ -164,6 +167,7 @@ static void mse_packetizer_cvf_mjpeg_flag_init(
 	cvf_mjpeg->max_comp = 0;
 	cvf_mjpeg->eoi_offset = 0;
 	cvf_mjpeg->jpeg_offset = 0;
+	cvf_mjpeg->piece_data_len = 0;
 }
 
 static int mse_packetizer_cvf_mjpeg_packet_init(int index)
@@ -320,7 +324,6 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	struct mjpeg_quant_header qheader;
 	struct mjpeg_quant_table qtable[JPEG_QUANT_NUM];
 	struct mjpeg_component comp[JPEG_COMP_NUM];
-	size_t buffer_start = *buffer_processed;
 	u8 *buf, *payload;
 	size_t offset = 0, data_len, end_len = 0;
 	size_t payload_size;
@@ -334,25 +337,28 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	cvf_mjpeg = &cvf_mjpeg_packetizer_table[index];
 
 	mse_debug("index=%d seqnum=%d process=%zu/%zu t=%u\n",
-		  index, cvf_mjpeg->send_seq_num, buffer_start,
+		  index, cvf_mjpeg->send_seq_num, *buffer_processed,
 		  buffer_size, *timestamp);
 
-	if (!buffer_start)
+	if (!*buffer_processed)
 		cvf_mjpeg->eoi_f = false;
 
-	buf = (u8 *)(buffer + buffer_start);
-	data_len = buffer_size - buffer_start;
+	buf = (u8 *)(buffer + *buffer_processed);
+	data_len = buffer_size - *buffer_processed;
 	memset(qtable, 0, sizeof(qtable));
 	memset(comp, 0, sizeof(comp));
 
 	while (offset < data_len && cvf_mjpeg->header_f &&
-	       !cvf_mjpeg->eoi_f && !cvf_mjpeg->sos_f) {
+	       !cvf_mjpeg->sos_f) {
 		u8 mk;
 
 		mk = jpeg_get_marker(buf, data_len, &offset);
 		switch (mk) {
 		case JPEG_MARKER_KIND_NIL:
+			break;
+
 		case JPEG_MARKER_KIND_SOI:
+			mse_packetizer_cvf_mjpeg_flag_init(cvf_mjpeg);
 			break;
 
 		case JPEG_MARKER_KIND_SOF0:
@@ -418,6 +424,8 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 			    buf[i + 1] == JPEG_MARKER_KIND_EOI) {
 				cvf_mjpeg->eoi_f = true;
 				cvf_mjpeg->eoi_offset = i + 2;
+				mse_debug("Found EOI offset=%zu\n",
+					  cvf_mjpeg->eoi_offset);
 
 				break;
 			}
@@ -432,56 +440,47 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 		}
 	}
 
+	payload = packet + AVTP_CVF_MJPEG_PAYLOAD_OFFSET;
 	payload_size = cvf_mjpeg->payload_max;
 	data_len = payload_size - AVTP_JPEG_HEADER_SIZE;
 
-	if (cvf_mjpeg->quant >= MJPEG_QUANT_QTABLE_BIT &&
-	    !cvf_mjpeg->jpeg_offset && cvf_mjpeg->header_f) {
-		memset(&qheader, 0, sizeof(qheader));
+	if (cvf_mjpeg->header_f) {
+		if (cvf_mjpeg->quant >= MJPEG_QUANT_QTABLE_BIT &&
+		    !cvf_mjpeg->jpeg_offset) {
+			memset(&qheader, 0, sizeof(qheader));
 
-		for (i = 0; i <= cvf_mjpeg->max_comp; i++) {
-			u8 qlen, qid;
+			for (i = 0; i <= cvf_mjpeg->max_comp; i++) {
+				u8 qlen, qid;
 
-			qid = comp[i].qt;
-			if (qid >= ARRAY_SIZE(qtable)) {
-				mse_err("Invalid qid=%d\n", qid);
-				ret = -EINVAL;
+				qid = comp[i].qt;
+				if (qid >= ARRAY_SIZE(qtable)) {
+					mse_err("Invalid qid=%d\n", qid);
+					ret = -EINVAL;
 
-				goto header_error;
+					goto header_error;
+				}
+
+				qlen = qtable[qid].size;
+				if (!qlen) {
+					mse_err("Invalid qlen=0\n");
+					ret = -EINVAL;
+
+					goto header_error;
+				}
+
+				qheader.precision |=
+					(qlen == JPEG_DQT_QUANT_SIZE8) ?
+					0 : (1 << i);
+				quant_len += qlen;
 			}
-
-			qlen = qtable[qid].size;
-			if (!qlen) {
-				mse_err("Invalid qlen=0\n");
-				ret = -EINVAL;
-
-				goto header_error;
-			}
-
-			qheader.precision |= (qlen == JPEG_DQT_QUANT_SIZE8) ?
-					     0 : (1 << i);
-			quant_len += qlen;
+			qheader.length = htons(quant_len);
 		}
-		qheader.length = htons(quant_len);
-	}
 
-	/* set header */
-	memcpy(packet, cvf_mjpeg->packet_template,
-	       AVTP_CVF_MJPEG_PAYLOAD_OFFSET);
-	avtp_set_sequence_num(packet, cvf_mjpeg->send_seq_num);
-	avtp_set_timestamp(packet, (u32)*timestamp);
-	avtp_set_cvf_mjpeg_tspec(packet, 0);
-	avtp_set_cvf_mjpeg_offset(packet, cvf_mjpeg->jpeg_offset);
-	avtp_set_cvf_mjpeg_type(packet, cvf_mjpeg->type);
-	avtp_set_cvf_mjpeg_q(packet, cvf_mjpeg->quant);
-	avtp_set_cvf_mjpeg_width(packet, cvf_mjpeg->width);
-	avtp_set_cvf_mjpeg_height(packet, cvf_mjpeg->height);
-
-	payload = packet + AVTP_CVF_MJPEG_PAYLOAD_OFFSET;
-
-	if (cvf_mjpeg->dri_f) {
-		memcpy(payload, &rheader, sizeof(rheader));
-		payload += sizeof(rheader);
+		if (cvf_mjpeg->dri_f) {
+			memcpy(payload, &rheader, sizeof(rheader));
+			payload += sizeof(rheader);
+			data_len -= sizeof(rheader);
+		}
 	}
 
 	/* only first packet */
@@ -507,9 +506,37 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 		if (qlen + data_len > JPEG_PAYLOAD_MAX) {
 			payload_size = AVTP_PAYLOAD_MAX;
 			data_len = JPEG_PAYLOAD_MAX - qlen;
+			if (cvf_mjpeg->dri_f)
+				data_len -= sizeof(rheader);
 		} else {
 			payload_size += qlen;
 		}
+	}
+
+	cvf_mjpeg->header_f = false;
+
+	/* set avtp header */
+	memcpy(packet, cvf_mjpeg->packet_template,
+	       AVTP_CVF_MJPEG_PAYLOAD_OFFSET);
+	avtp_set_sequence_num(packet, cvf_mjpeg->send_seq_num);
+	avtp_set_timestamp(packet, (u32)*timestamp);
+	avtp_set_cvf_mjpeg_tspec(packet, 0);
+	avtp_set_cvf_mjpeg_offset(packet, cvf_mjpeg->jpeg_offset);
+	avtp_set_cvf_mjpeg_type(packet, cvf_mjpeg->type);
+	avtp_set_cvf_mjpeg_q(packet, cvf_mjpeg->quant);
+	avtp_set_cvf_mjpeg_width(packet, cvf_mjpeg->width);
+	avtp_set_cvf_mjpeg_height(packet, cvf_mjpeg->height);
+
+	/* restore piece data */
+	if (cvf_mjpeg->piece_data_len) {
+		mse_debug("restore a piece of data len=%zu\n",
+			  cvf_mjpeg->piece_data_len);
+		memcpy(payload, cvf_mjpeg->piece_data,
+		       cvf_mjpeg->piece_data_len);
+		payload += cvf_mjpeg->piece_data_len;
+		cvf_mjpeg->jpeg_offset += cvf_mjpeg->piece_data_len;
+		data_len -= cvf_mjpeg->piece_data_len;
+		cvf_mjpeg->piece_data_len = 0;
 	}
 
 	buf += header_len;
@@ -517,22 +544,35 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 
 	if (cvf_mjpeg->eoi_f)
 		/* length of EOI marker */
-		end_len = buffer_start + cvf_mjpeg->eoi_offset -
-			  *buffer_processed;
+		end_len = cvf_mjpeg->eoi_offset - *buffer_processed;
 	else
 		/* length of buffer */
 		end_len = buffer_size - *buffer_processed;
 
 	/* adjustment end packet */
 	if (data_len >= end_len) {
+		payload_size -= data_len - end_len;
+		data_len = end_len;
 		if (cvf_mjpeg->eoi_f) {
 			/* M bit */
 			avtp_set_cvf_m(packet, true);
 			pic_end = true;
+		} else {
+			/* save piece data */
+			memcpy(cvf_mjpeg->piece_data, buf, data_len);
+			cvf_mjpeg->piece_data_len = data_len;
 		}
-		payload_size -= data_len - end_len;
-		data_len = end_len;
 	}
+
+	/* processed buffer length */
+	*buffer_processed += data_len;
+
+	if (cvf_mjpeg->piece_data_len) {
+		mse_debug("save a piece of data len=%zu\n",
+			  cvf_mjpeg->piece_data_len);
+		return MSE_PACKETIZE_STATUS_NOT_ENOUGH;
+	}
+
 	avtp_set_stream_data_length(packet, payload_size);
 
 	/* set jpeg data */
@@ -542,8 +582,7 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	*packet_size = AVTP_CVF_MJPEG_PAYLOAD_OFFSET - AVTP_JPEG_HEADER_SIZE +
 		avtp_get_stream_data_length(packet);
 
-	/* read buffer length */
-	*buffer_processed += data_len;
+	cvf_mjpeg->jpeg_offset += data_len;
 
 	if (pic_end) {
 		/* jpeg frame data end */
@@ -551,39 +590,18 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 			  cvf_mjpeg->send_seq_num, *buffer_processed,
 			  buffer_size, *timestamp);
 
-		cvf_mjpeg->send_seq_num++;
 		mse_packetizer_cvf_mjpeg_flag_init(cvf_mjpeg);
-
-		/* check buffer end */
-		if (*buffer_processed < buffer_size)
-			ret = MSE_PACKETIZE_STATUS_CONTINUE;
-		else
-			ret = MSE_PACKETIZE_STATUS_COMPLETE;
-	} else {
-		if (cvf_mjpeg->eoi_f) {
-			if (*buffer_processed < buffer_size) {
-				cvf_mjpeg->send_seq_num++;
-				cvf_mjpeg->header_f = false;
-				cvf_mjpeg->eoi_f = false;
-				cvf_mjpeg->jpeg_offset += data_len;
-				ret = MSE_PACKETIZE_STATUS_CONTINUE;
-			} else {
-				*buffer_processed = buffer_start;
-				ret = MSE_PACKETIZE_STATUS_NOT_ENOUGH;
-			}
-		} else {
-			*buffer_processed = buffer_start;
-			ret = MSE_PACKETIZE_STATUS_NOT_ENOUGH;
-		}
 	}
 
-	return ret;
+	cvf_mjpeg->send_seq_num++;
+
+	/* check buffer end */
+	if (*buffer_processed < buffer_size)
+		return MSE_PACKETIZE_STATUS_CONTINUE;
+	else
+		return MSE_PACKETIZE_STATUS_COMPLETE;
 
 header_error:
-	/* find next header */
-	if (ret != -EAGAIN)
-		*buffer_processed = buffer_start;
-
 	mse_packetizer_cvf_mjpeg_flag_init(cvf_mjpeg);
 
 	return ret;
