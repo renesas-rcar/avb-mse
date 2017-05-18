@@ -120,7 +120,7 @@ int mse_packet_ctrl_make_packet_crf(int index,
 				    struct mse_packet_ctrl *dma);
 int mse_packet_ctrl_take_out_packet_crf(int index,
 					u64 *timestamp,
-					int size,
+					int t_size,
 					struct mse_packet_ctrl *dma);
 
 #endif /* __MSE_PACKET_CTRL_H__ */
