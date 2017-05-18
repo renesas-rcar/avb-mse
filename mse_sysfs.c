@@ -205,12 +205,12 @@ static struct convert_table ptp_type_table[] = {
 static int strtobin(unsigned char *dest, const char *in_str, int len)
 {
 	union {
-		unsigned long long hex;
+		u64 hex;
 		unsigned char byte[sizeof(unsigned long long)];
 	} decode;
 	int err, i, j;
 
-	err = kstrtoull(in_str, MSE_RADIX_HEXADECIMAL, &decode.hex);
+	err = kstrtou64(in_str, MSE_RADIX_HEXADECIMAL, &decode.hex);
 	if (err < 0)
 		return err;
 
@@ -508,7 +508,7 @@ static ssize_t mse_avtp_tx_dst_mac_store(struct device *dev,
 	if (ret < 0)
 		return -EINVAL;
 
-	ret =  mse_config_set_avtp_tx_param(index, &data);
+	ret = mse_config_set_avtp_tx_param(index, &data);
 	if (ret)
 		return ret;
 
@@ -569,7 +569,7 @@ static ssize_t mse_avtp_tx_src_mac_store(struct device *dev,
 	if (ret < 0)
 		return -EINVAL;
 
-	ret =  mse_config_set_avtp_tx_param(index, &data);
+	ret = mse_config_set_avtp_tx_param(index, &data);
 	if (ret)
 		return ret;
 
@@ -580,13 +580,14 @@ static ssize_t mse_avtp_tx_src_mac_store(struct device *dev,
 	return len;
 }
 
-static ssize_t mse_avtp_tx_int_show(struct device *dev,
+static ssize_t mse_avtp_tx_u32_show(struct device *dev,
 				    struct device_attribute *attr,
 				    char *buf)
 {
 	struct mse_avtp_tx_param data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	u32 value;
 
 	mse_debug("START %s\n", attr->attr.name);
 
@@ -606,25 +607,26 @@ static ssize_t mse_avtp_tx_int_show(struct device *dev,
 	else
 		return -EPERM;
 
-	ret = sprintf(buf, "%d\n", value);
+	ret = sprintf(buf, "%u\n", value);
 
-	mse_debug("END value=%s ret=%d\n", buf, ret);
+	mse_debug("END value=%s(%u) ret=%d\n", buf, value, ret);
 
 	return ret;
 }
 
-static ssize_t mse_avtp_tx_int_store(struct device *dev,
+static ssize_t mse_avtp_tx_u16_store(struct device *dev,
 				     struct device_attribute *attr,
 				     const char *buf,
 				     size_t len)
 {
 	struct mse_avtp_tx_param data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	u16 value;
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
-	ret = kstrtol(buf, 0, (long *)&value);
+	ret = kstrtou16(buf, 0, &value);
 	if (ret)
 		return -EINVAL;
 
@@ -638,17 +640,49 @@ static ssize_t mse_avtp_tx_int_store(struct device *dev,
 	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_PRIORITY,
 			  strlen(attr->attr.name)))
 		data.priority = value;
-	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_UNIQUEID,
-			  strlen(attr->attr.name)))
+	else
+		return -EPERM;
+
+	ret = mse_config_set_avtp_tx_param(index, &data);
+	if (ret)
+		return ret;
+
+	mse_debug("END value=%u ret=%zd\n", value, len);
+
+	return len;
+}
+
+static ssize_t mse_avtp_tx_u32_store(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf,
+				     size_t len)
+{
+	struct mse_avtp_tx_param data;
+	int index = mse_dev_to_index(dev);
+	int ret;
+	u32 value;
+
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
+
+	ret = kstrtou32(buf, 0, &value);
+	if (ret)
+		return -EINVAL;
+
+	ret = mse_config_get_avtp_tx_param(index, &data);
+	if (ret)
+		return ret;
+
+	if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_UNIQUEID,
+		     strlen(attr->attr.name)))
 		data.uniqueid = value;
 	else
 		return -EPERM;
 
-	ret =  mse_config_set_avtp_tx_param(index, &data);
+	ret = mse_config_set_avtp_tx_param(index, &data);
 	if (ret)
 		return ret;
 
-	mse_debug("END value=%d ret=%zd\n", value, len);
+	mse_debug("END value=%u ret=%zd\n", value, len);
 
 	return len;
 }
@@ -704,7 +738,7 @@ static ssize_t mse_avtp_rx_streamid_store(struct device *dev,
 	if (ret < 0)
 		return -EINVAL;
 
-	ret =  mse_config_set_avtp_rx_param(index, &data);
+	ret = mse_config_set_avtp_rx_param(index, &data);
 	if (ret)
 		return ret;
 
@@ -716,13 +750,14 @@ static ssize_t mse_avtp_rx_streamid_store(struct device *dev,
 	return len;
 }
 
-static ssize_t mse_audio_config_int_show(struct device *dev,
+static ssize_t mse_audio_config_u32_show(struct device *dev,
 					 struct device_attribute *attr,
 					 char *buf)
 {
 	struct mse_media_audio_config data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	u32 value;
 
 	mse_debug("START %s\n", attr->attr.name);
 
@@ -736,25 +771,26 @@ static ssize_t mse_audio_config_int_show(struct device *dev,
 	else
 		return -EPERM;
 
-	ret = sprintf(buf, "%d\n", value);
+	ret = sprintf(buf, "%u\n", value);
 
-	mse_debug("END value=%d ret=%d\n", value, ret);
+	mse_debug("END value=%s(%u) ret=%d\n", buf, value, ret);
 
 	return ret;
 }
 
-static ssize_t mse_audio_config_int_store(struct device *dev,
+static ssize_t mse_audio_config_u32_store(struct device *dev,
 					  struct device_attribute *attr,
 					  const char *buf,
 					  size_t len)
 {
 	struct mse_media_audio_config data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	u32 value;
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
-	ret = kstrtol(buf, 0, (long *)&value);
+	ret = kstrtou32(buf, 0, &value);
 	if (ret)
 		return -EINVAL;
 
@@ -768,11 +804,11 @@ static ssize_t mse_audio_config_int_store(struct device *dev,
 	else
 		return -EPERM;
 
-	ret =  mse_config_set_media_audio_config(index, &data);
+	ret = mse_config_set_media_audio_config(index, &data);
 	if (ret)
 		return ret;
 
-	mse_debug("END value=%d ret=%zd\n", value, len);
+	mse_debug("END value=%u ret=%zd\n", value, len);
 
 	return len;
 }
@@ -839,13 +875,14 @@ static ssize_t mse_audio_config_crf_type_store(struct device *dev,
 	return len;
 }
 
-static ssize_t mse_video_config_int_show(struct device *dev,
+static ssize_t mse_video_config_u32_show(struct device *dev,
 					 struct device_attribute *attr,
 					 char *buf)
 {
 	struct mse_media_video_config data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	u32 value;
 
 	mse_debug("START %s\n", attr->attr.name);
 
@@ -868,25 +905,26 @@ static ssize_t mse_video_config_int_show(struct device *dev,
 	else
 		return -EPERM;
 
-	ret = sprintf(buf, "%d\n", value);
+	ret = sprintf(buf, "%u\n", value);
 
-	mse_debug("END %d ret:%d\n", value, ret);
+	mse_debug("END value=%s(%u) ret:%d\n", buf, value, ret);
 
 	return ret;
 }
 
-static ssize_t mse_video_config_int_store(struct device *dev,
+static ssize_t mse_video_config_u32_store(struct device *dev,
 					  struct device_attribute *attr,
 					  const char *buf,
 					  size_t len)
 {
 	struct mse_media_video_config data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	u32 value;
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
-	ret = kstrtol(buf, 0, (long *)&value);
+	ret = kstrtou32(buf, 0, &value);
 	if (ret)
 		return -EINVAL;
 
@@ -909,22 +947,23 @@ static ssize_t mse_video_config_int_store(struct device *dev,
 	else
 		return -EPERM;
 
-	ret =  mse_config_set_media_video_config(index, &data);
+	ret = mse_config_set_media_video_config(index, &data);
 	if (ret)
 		return ret;
 
-	mse_debug("END value=%d ret=%zd\n", value, len);
+	mse_debug("END value=%u ret=%zd\n", value, len);
 
 	return len;
 }
 
-static ssize_t mse_mpeg2ts_config_int_show(struct device *dev,
+static ssize_t mse_mpeg2ts_config_u32_show(struct device *dev,
 					   struct device_attribute *attr,
 					   char *buf)
 {
 	struct mse_media_mpeg2ts_config data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	u32 value;
 
 	mse_debug("START %s\n", attr->attr.name);
 
@@ -944,25 +983,26 @@ static ssize_t mse_mpeg2ts_config_int_show(struct device *dev,
 	else
 		return -EPERM;
 
-	ret = sprintf(buf, "%d\n", value);
+	ret = sprintf(buf, "%u\n", value);
 
-	mse_debug("END value=%d ret=%d\n", value, ret);
+	mse_debug("END value=%s(%u) ret=%d\n", buf, value, ret);
 
 	return ret;
 }
 
-static ssize_t mse_mpeg2ts_config_int_store(struct device *dev,
+static ssize_t mse_mpeg2ts_config_u32_store(struct device *dev,
 					    struct device_attribute *attr,
 					    const char *buf,
 					    size_t len)
 {
 	struct mse_media_mpeg2ts_config data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	u32 value;
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
-	ret = kstrtol(buf, 0, (long *)&value);
+	ret = kstrtou32(buf, 0, &value);
 	if (ret)
 		return -EINVAL;
 
@@ -982,11 +1022,11 @@ static ssize_t mse_mpeg2ts_config_int_store(struct device *dev,
 	else
 		return -EPERM;
 
-	ret =  mse_config_set_media_mpeg2ts_config(index, &data);
+	ret = mse_config_set_media_mpeg2ts_config(index, &data);
 	if (ret)
 		return ret;
 
-	mse_debug("END value=%d ret=%zd\n", value, len);
+	mse_debug("END value=%u ret=%zd\n", value, len);
 
 	return len;
 }
@@ -1063,7 +1103,7 @@ static ssize_t mse_ptp_config_type_store(struct device *dev,
 	return len;
 }
 
-static ssize_t mse_ptp_config_int_show(struct device *dev,
+static ssize_t mse_ptp_config_u32_show(struct device *dev,
 				       struct device_attribute *attr,
 				       char *buf)
 {
@@ -1096,12 +1136,12 @@ static ssize_t mse_ptp_config_int_show(struct device *dev,
 
 	ret = sprintf(buf, "%u\n", value);
 
-	mse_debug("END value=%u ret=%d\n", value, ret);
+	mse_debug("END value=%s(%u) ret=%d\n", buf, value, ret);
 
 	return ret;
 }
 
-static ssize_t mse_ptp_config_int_store(struct device *dev,
+static ssize_t mse_ptp_config_u32_store(struct device *dev,
 					struct device_attribute *attr,
 					const char *buf,
 					size_t len)
@@ -1113,7 +1153,7 @@ static ssize_t mse_ptp_config_int_store(struct device *dev,
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
-	ret = kstrtouint(buf, 0, &value);
+	ret = kstrtou32(buf, 0, &value);
 	if (ret)
 		return -EINVAL;
 
@@ -1137,23 +1177,23 @@ static ssize_t mse_ptp_config_int_store(struct device *dev,
 	else
 		return -EPERM;
 
-	ret =  mse_config_set_ptp_config(index, &data);
+	ret = mse_config_set_ptp_config(index, &data);
 	if (ret)
 		return ret;
 
-	mse_debug("END value=%d ret=%zd\n", value, len);
+	mse_debug("END value=%u ret=%d\n", value, ret);
 
 	return len;
 }
 
-static ssize_t mse_mch_config_int_show(struct device *dev,
-				       struct device_attribute *attr,
-				       char *buf)
+static ssize_t mse_mch_config_bool_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
 {
 	struct mse_mch_config data;
 	int index = mse_dev_to_index(dev);
 	int ret;
-	bool value;
+	u32 value;
 
 	mse_debug("START %s\n", attr->attr.name);
 
@@ -1167,25 +1207,26 @@ static ssize_t mse_mch_config_int_show(struct device *dev,
 	else
 		return -EPERM;
 
-	ret = sprintf(buf, "%d\n", value);
+	ret = sprintf(buf, "%u\n", value);
 
-	mse_debug("END value=%d ret=%d\n", value, ret);
+	mse_debug("END value=%s(%u) ret=%d\n", buf, value, ret);
 
 	return ret;
 }
 
-static ssize_t mse_mch_config_int_store(struct device *dev,
-					struct device_attribute *attr,
-					const char *buf,
-					size_t len)
+static ssize_t mse_mch_config_bool_store(struct device *dev,
+					 struct device_attribute *attr,
+					 const char *buf,
+					 size_t len)
 {
 	struct mse_mch_config data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	bool value;
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
-	ret = kstrtol(buf, 0, (long *)&value);
+	ret = kstrtobool(buf, &value);
 	if (ret)
 		return -EINVAL;
 
@@ -1202,11 +1243,11 @@ static ssize_t mse_mch_config_int_store(struct device *dev,
 	else
 		return -EPERM;
 
-	ret =  mse_config_set_mch_config(index, &data);
+	ret = mse_config_set_mch_config(index, &data);
 	if (ret)
 		return ret;
 
-	mse_debug("END value=%d ret=%zd\n", value, len);
+	mse_debug("END value=%u ret=%zd\n", value, len);
 
 	return len;
 }
@@ -1261,7 +1302,7 @@ static ssize_t mse_avtp_tx_crf_dst_mac_store(struct device *dev,
 	if (ret < 0)
 		return -EINVAL;
 
-	ret =  mse_config_set_avtp_tx_param_crf(index, &data);
+	ret = mse_config_set_avtp_tx_param_crf(index, &data);
 	if (ret)
 		return ret;
 
@@ -1322,7 +1363,7 @@ static ssize_t mse_avtp_tx_crf_src_mac_store(struct device *dev,
 	if (ret < 0)
 		return -EINVAL;
 
-	ret =  mse_config_set_avtp_tx_param_crf(index, &data);
+	ret = mse_config_set_avtp_tx_param_crf(index, &data);
 	if (ret)
 		return ret;
 
@@ -1333,13 +1374,14 @@ static ssize_t mse_avtp_tx_crf_src_mac_store(struct device *dev,
 	return len;
 }
 
-static ssize_t mse_avtp_tx_crf_int_show(struct device *dev,
+static ssize_t mse_avtp_tx_crf_u32_show(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
 {
 	struct mse_avtp_tx_param data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	u32 value;
 
 	mse_debug("START %s\n", attr->attr.name);
 
@@ -1359,25 +1401,26 @@ static ssize_t mse_avtp_tx_crf_int_show(struct device *dev,
 	else
 		return -EPERM;
 
-	ret = sprintf(buf, "%d\n", value);
+	ret = sprintf(buf, "%u\n", value);
 
-	mse_debug("END value=%s ret=%d\n", buf, ret);
+	mse_debug("END value=%s(%u) ret=%d\n", buf, value, ret);
 
 	return ret;
 }
 
-static ssize_t mse_avtp_tx_crf_int_store(struct device *dev,
+static ssize_t mse_avtp_tx_crf_u16_store(struct device *dev,
 					 struct device_attribute *attr,
 					 const char *buf,
 					 size_t len)
 {
 	struct mse_avtp_tx_param data;
 	int index = mse_dev_to_index(dev);
-	int ret, value;
+	int ret;
+	u16 value;
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
-	ret = kstrtol(buf, 0, (long *)&value);
+	ret = kstrtou16(buf, 0, &value);
 	if (ret)
 		return -EINVAL;
 
@@ -1391,17 +1434,49 @@ static ssize_t mse_avtp_tx_crf_int_store(struct device *dev,
 	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_PRIORITY,
 			  strlen(attr->attr.name)))
 		data.priority = value;
-	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_UNIQUEID,
-			  strlen(attr->attr.name)))
+	else
+		return -EPERM;
+
+	ret = mse_config_set_avtp_tx_param_crf(index, &data);
+	if (ret)
+		return ret;
+
+	mse_debug("END value=%u ret=%zd\n", value, len);
+
+	return len;
+}
+
+static ssize_t mse_avtp_tx_crf_u32_store(struct device *dev,
+					 struct device_attribute *attr,
+					 const char *buf,
+					 size_t len)
+{
+	struct mse_avtp_tx_param data;
+	int index = mse_dev_to_index(dev);
+	int ret;
+	u32 value;
+
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
+
+	ret = kstrtou32(buf, 0, &value);
+	if (ret)
+		return -EINVAL;
+
+	ret = mse_config_get_avtp_tx_param_crf(index, &data);
+	if (ret)
+		return ret;
+
+	if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_UNIQUEID,
+		     strlen(attr->attr.name)))
 		data.uniqueid = value;
 	else
 		return -EPERM;
 
-	ret =  mse_config_set_avtp_tx_param_crf(index, &data);
+	ret = mse_config_set_avtp_tx_param_crf(index, &data);
 	if (ret)
 		return ret;
 
-	mse_debug("END value=%d ret=%zd\n", value, len);
+	mse_debug("END value=%u ret=%zd\n", value, len);
 
 	return len;
 }
@@ -1457,7 +1532,7 @@ static ssize_t mse_avtp_rx_crf_streamid_store(struct device *dev,
 	if (ret < 0)
 		return -EINVAL;
 
-	ret =  mse_config_set_avtp_rx_param_crf(index, &data);
+	ret = mse_config_set_avtp_rx_param_crf(index, &data);
 	if (ret)
 		return ret;
 
@@ -1469,7 +1544,7 @@ static ssize_t mse_avtp_rx_crf_streamid_store(struct device *dev,
 	return len;
 }
 
-static ssize_t mse_delay_time_int_show(struct device *dev,
+static ssize_t mse_delay_time_u32_show(struct device *dev,
 				       struct device_attribute *attr,
 				       char *buf)
 {
@@ -1498,12 +1573,12 @@ static ssize_t mse_delay_time_int_show(struct device *dev,
 
 	ret = sprintf(buf, "%u\n", value);
 
-	mse_debug("END value=%s ret=%d\n", buf, ret);
+	mse_debug("END value=%s(%u) ret=%d\n", buf, value, ret);
 
 	return ret;
 }
 
-static ssize_t mse_delay_time_int_store(struct device *dev,
+static ssize_t mse_delay_time_u32_store(struct device *dev,
 					struct device_attribute *attr,
 					const char *buf,
 					size_t len)
@@ -1515,7 +1590,7 @@ static ssize_t mse_delay_time_int_store(struct device *dev,
 
 	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
 
-	ret = kstrtouint(buf, 0, &value);
+	ret = kstrtou32(buf, 0, &value);
 	if (ret)
 		return -EINVAL;
 
@@ -1535,7 +1610,7 @@ static ssize_t mse_delay_time_int_store(struct device *dev,
 	else
 		return -EPERM;
 
-	ret =  mse_config_set_delay_time(index, &data);
+	ret = mse_config_set_delay_time(index, &data);
 	if (ret)
 		return ret;
 
@@ -1616,11 +1691,11 @@ static struct attribute_group mse_attr_group_packetizer = {
 static MSE_DEVICE_ATTR_RW(dst_mac, avtp_tx);
 static MSE_DEVICE_ATTR_RW(src_mac, avtp_tx);
 static MSE_DEVICE_ATTR(vlan, avtp_tx, 0644,
-		       mse_avtp_tx_int_show, mse_avtp_tx_int_store);
+		       mse_avtp_tx_u32_show, mse_avtp_tx_u16_store);
 static MSE_DEVICE_ATTR(priority, avtp_tx, 0644,
-		       mse_avtp_tx_int_show, mse_avtp_tx_int_store);
+		       mse_avtp_tx_u32_show, mse_avtp_tx_u16_store);
 static MSE_DEVICE_ATTR(uniqueid, avtp_tx, 0644,
-		       mse_avtp_tx_int_show, mse_avtp_tx_int_store);
+		       mse_avtp_tx_u32_show, mse_avtp_tx_u32_store);
 
 static struct attribute *mse_attr_avtp_tx[] = {
 	&mse_dev_attr_avtp_tx_dst_mac.attr,
@@ -1649,7 +1724,7 @@ static struct attribute_group mse_attr_group_avtp_rx = {
 };
 
 static MSE_DEVICE_ATTR(samples_per_frame, audio_config, 0644,
-		       mse_audio_config_int_show, mse_audio_config_int_store);
+		       mse_audio_config_u32_show, mse_audio_config_u32_store);
 static MSE_DEVICE_ATTR_RW(crf_type, audio_config);
 
 static struct attribute *mse_attr_audio_config[] = {
@@ -1664,13 +1739,13 @@ static struct attribute_group mse_attr_group_audio_config = {
 };
 
 static MSE_DEVICE_ATTR(bytes_per_frame, video_config, 0644,
-		       mse_video_config_int_show, mse_video_config_int_store);
+		       mse_video_config_u32_show, mse_video_config_u32_store);
 static MSE_DEVICE_ATTR(fps_denominator, video_config, 0644,
-		       mse_video_config_int_show, mse_video_config_int_store);
+		       mse_video_config_u32_show, mse_video_config_u32_store);
 static MSE_DEVICE_ATTR(fps_numerator, video_config, 0644,
-		       mse_video_config_int_show, mse_video_config_int_store);
+		       mse_video_config_u32_show, mse_video_config_u32_store);
 static MSE_DEVICE_ATTR(bitrate, video_config, 0644,
-		       mse_video_config_int_show, mse_video_config_int_store);
+		       mse_video_config_u32_show, mse_video_config_u32_store);
 
 static struct attribute *mse_attr_video_config[] = {
 	&mse_dev_attr_video_config_bytes_per_frame.attr,
@@ -1686,14 +1761,14 @@ static struct attribute_group mse_attr_group_video_config = {
 };
 
 static MSE_DEVICE_ATTR(tspackets_per_frame, mpeg2ts_config, 0644,
-		       mse_mpeg2ts_config_int_show,
-		       mse_mpeg2ts_config_int_store);
+		       mse_mpeg2ts_config_u32_show,
+		       mse_mpeg2ts_config_u32_store);
 static MSE_DEVICE_ATTR(bitrate, mpeg2ts_config, 0644,
-		       mse_mpeg2ts_config_int_show,
-		       mse_mpeg2ts_config_int_store);
+		       mse_mpeg2ts_config_u32_show,
+		       mse_mpeg2ts_config_u32_store);
 static MSE_DEVICE_ATTR(pcr_pid, mpeg2ts_config, 0644,
-		       mse_mpeg2ts_config_int_show,
-		       mse_mpeg2ts_config_int_store);
+		       mse_mpeg2ts_config_u32_show,
+		       mse_mpeg2ts_config_u32_store);
 
 static struct attribute *mse_attr_mpeg2ts_config[] = {
 	&mse_dev_attr_mpeg2ts_config_tspackets_per_frame.attr,
@@ -1709,13 +1784,13 @@ static struct attribute_group mse_attr_group_mpeg2ts_config = {
 
 static MSE_DEVICE_ATTR_RW(type, ptp_config);
 static MSE_DEVICE_ATTR(deviceid, ptp_config, 0644,
-		       mse_ptp_config_int_show, mse_ptp_config_int_store);
+		       mse_ptp_config_u32_show, mse_ptp_config_u32_store);
 static MSE_DEVICE_ATTR(capture_ch, ptp_config, 0644,
-		       mse_ptp_config_int_show, mse_ptp_config_int_store);
+		       mse_ptp_config_u32_show, mse_ptp_config_u32_store);
 static MSE_DEVICE_ATTR(capture_freq, ptp_config, 0644,
-		       mse_ptp_config_int_show, mse_ptp_config_int_store);
+		       mse_ptp_config_u32_show, mse_ptp_config_u32_store);
 static MSE_DEVICE_ATTR(recovery_capture_freq, ptp_config, 0644,
-		       mse_ptp_config_int_show, mse_ptp_config_int_store);
+		       mse_ptp_config_u32_show, mse_ptp_config_u32_store);
 
 static struct attribute *mse_attr_ptp_config_audio[] = {
 	&mse_dev_attr_ptp_config_type.attr,
@@ -1743,7 +1818,7 @@ static struct attribute_group mse_attr_group_ptp_config_other = {
 };
 
 static MSE_DEVICE_ATTR(enable, mch_config, 0644,
-		       mse_mch_config_int_show, mse_mch_config_int_store);
+		       mse_mch_config_bool_show, mse_mch_config_bool_store);
 
 static struct attribute *mse_attr_mch_config[] = {
 	&mse_dev_attr_mch_config_enable.attr,
@@ -1758,11 +1833,11 @@ static struct attribute_group mse_attr_group_mch_config = {
 static MSE_DEVICE_ATTR_RW(dst_mac, avtp_tx_crf);
 static MSE_DEVICE_ATTR_RW(src_mac, avtp_tx_crf);
 static MSE_DEVICE_ATTR(vlan, avtp_tx_crf, 0644,
-		       mse_avtp_tx_crf_int_show, mse_avtp_tx_crf_int_store);
+		       mse_avtp_tx_crf_u32_show, mse_avtp_tx_crf_u16_store);
 static MSE_DEVICE_ATTR(priority, avtp_tx_crf, 0644,
-		       mse_avtp_tx_crf_int_show, mse_avtp_tx_crf_int_store);
+		       mse_avtp_tx_crf_u32_show, mse_avtp_tx_crf_u16_store);
 static MSE_DEVICE_ATTR(uniqueid, avtp_tx_crf, 0644,
-		       mse_avtp_tx_crf_int_show, mse_avtp_tx_crf_int_store);
+		       mse_avtp_tx_crf_u32_show, mse_avtp_tx_crf_u32_store);
 
 static struct attribute *mse_attr_avtp_tx_crf[] = {
 	&mse_dev_attr_avtp_tx_crf_dst_mac.attr,
@@ -1791,11 +1866,11 @@ static struct attribute_group mse_attr_group_avtp_rx_crf = {
 };
 
 static MSE_DEVICE_ATTR(max_transit_time_ns, delay_time, 0644,
-		       mse_delay_time_int_show, mse_delay_time_int_store);
+		       mse_delay_time_u32_show, mse_delay_time_u32_store);
 static MSE_DEVICE_ATTR(tx_delay_time_ns, delay_time, 0644,
-		       mse_delay_time_int_show, mse_delay_time_int_store);
+		       mse_delay_time_u32_show, mse_delay_time_u32_store);
 static MSE_DEVICE_ATTR(rx_delay_time_ns, delay_time, 0644,
-		       mse_delay_time_int_show, mse_delay_time_int_store);
+		       mse_delay_time_u32_show, mse_delay_time_u32_store);
 
 static struct attribute *mse_attr_delay_time[] = {
 	&mse_dev_attr_delay_time_max_transit_time_ns.attr,
