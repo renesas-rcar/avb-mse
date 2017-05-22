@@ -121,8 +121,15 @@ struct v4l2_adapter_temp_buffer {
 	bool prepared;
 };
 
+/* File handle information */
+struct v4l2_adapter_fh {
+	struct v4l2_fh fh;
+	struct v4l2_adapter_device *dev;
+};
+
 /* Device information */
 struct v4l2_adapter_device {
+	struct v4l2_adapter_fh	*owner;
 	struct v4l2_device	v4l2_dev;
 	struct video_device	vdev;
 	/* mutex lock */
@@ -146,7 +153,6 @@ struct v4l2_adapter_device {
 	enum MSE_TYPE		type;
 	/* index for MSE instance */
 	int			index_instance;
-	bool                    f_opened;
 	bool			f_mse_open;
 	/* previous trans buffer for checking buffer overwite */
 	void			*prev;
@@ -589,10 +595,63 @@ static inline const char *convert_type_to_str(enum MSE_TYPE type)
 	}
 }
 
+static inline struct v4l2_adapter_fh *to_v4l2_adapter_fh(struct file *filp)
+{
+	return container_of(filp->private_data, struct v4l2_adapter_fh, fh);
+}
+
 static inline struct v4l2_adapter_buffer *to_v4l2_adapter_buffer(
 						struct vb2_v4l2_buffer *vbuf)
 {
 	return container_of(vbuf, struct v4l2_adapter_buffer, vb);
+}
+
+/* Get V4L2 Adapter device ownership */
+static int vadp_owner_get(struct v4l2_adapter_fh *vadp_fh)
+{
+	unsigned long flags;
+	int ret = 0;
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
+
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
+
+	if (!vadp_dev->owner)
+		vadp_dev->owner = vadp_fh;
+	else if (vadp_dev->owner != vadp_fh)
+		ret = -EBUSY;
+
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
+	return ret;
+}
+
+/* Put V4L2 Adapter device ownership */
+static void vadp_owner_put(struct v4l2_adapter_fh *vadp_fh)
+{
+	unsigned long flags;
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
+
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
+
+	vadp_dev->owner = NULL;
+
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+}
+
+/* Test V4L2 Adapter device ownership */
+static int vadp_owner_is(struct v4l2_adapter_fh *vadp_fh)
+{
+	unsigned long flags;
+	int ret;
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
+
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
+
+	ret = (vadp_dev->owner == vadp_fh);
+
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
+	return ret;
 }
 
 static int try_mse_open(struct v4l2_adapter_device *vadp_dev,
@@ -649,8 +708,8 @@ static int try_mse_close(struct v4l2_adapter_device *vadp_dev)
 
 static int mse_adapter_v4l2_fop_open(struct file *filp)
 {
-	int err;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	struct v4l2_adapter_fh *vadp_fh;
 
 	mse_debug("START\n");
 
@@ -659,23 +718,16 @@ static int mse_adapter_v4l2_fop_open(struct file *filp)
 		return -EINVAL;
 	}
 
-	if (vadp_dev->f_opened) {
-		mse_err("v4l2 device is opened\n");
-		return -EPERM;
-	}
+	vadp_fh = kzalloc(sizeof(*vadp_fh), GFP_KERNEL);
+	if (!vadp_fh)
+		return -ENOMEM;
 
-	if (vadp_dev->f_mse_open) {
-		mse_err("using mse device\n");
-		return -EPERM;
-	}
+	v4l2_fh_init(&vadp_fh->fh, &vadp_dev->vdev);
+	v4l2_fh_add(&vadp_fh->fh);
 
-	err = v4l2_fh_open(filp);
-	if (err < 0) {
-		mse_err("Failed v4l2_fh_open()\n");
-		return err;
-	}
+	vadp_fh->dev = vadp_dev;
+	filp->private_data = &vadp_fh->fh;
 
-	vadp_dev->f_opened = true;
 	mse_debug("END\n");
 
 	return 0;
@@ -684,7 +736,8 @@ static int mse_adapter_v4l2_fop_open(struct file *filp)
 static int mse_adapter_v4l2_fop_release(struct file *filp)
 {
 	int err;
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 
 	mse_debug("START\n");
 
@@ -693,26 +746,22 @@ static int mse_adapter_v4l2_fop_release(struct file *filp)
 		return -EINVAL;
 	}
 
-	if (!vadp_dev->f_opened) {
-		mse_err("v4l2 device is not opened\n");
-		return -EPERM;
-	}
-
-	if (vadp_dev->f_mse_open) {
-		err = try_mse_close(vadp_dev);
-		if (err < 0) {
-			mse_err("Failed mse_close()\n");
-			return err;
+	if (vadp_owner_is(vadp_fh)) {
+		if (vadp_dev->f_mse_open) {
+			err = try_mse_close(vadp_dev);
+			if (err < 0) {
+				mse_err("Failed mse_close()\n");
+				return err;
+			}
 		}
+		vadp_owner_put(vadp_fh);
 	}
 
-	err = v4l2_fh_release(filp);
-	if (err < 0) {
-		mse_err("Failed v4l2_fh_release()\n");
-		return err;
-	}
+	filp->private_data = NULL;
+	v4l2_fh_del(&vadp_fh->fh);
+	v4l2_fh_exit(&vadp_fh->fh);
+	kfree(vadp_fh);
 
-	vadp_dev->f_opened = false;
 	mse_debug("END\n");
 
 	return 0;
@@ -722,7 +771,8 @@ static int mse_adapter_v4l2_querycap(struct file *filp,
 				     void *priv,
 				     struct v4l2_capability *vcap)
 {
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 
 	mse_debug("START\n");
 
@@ -752,7 +802,8 @@ static int mse_adapter_v4l2_enum_fmt_vid(struct file *filp,
 	unsigned int index;
 	const struct v4l2_fmtdesc *fmtdesc;
 	const struct v4l2_fmtdesc *fmtbase;
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 	enum v4l2_buf_type buf_type;
 	int fmt_size;
 
@@ -850,7 +901,8 @@ static int mse_adapter_v4l2_try_fmt_vid(struct file *filp,
 	const struct v4l2_fmtdesc *fmtdesc;
 	const struct v4l2_fmtdesc *fmtbase;
 	const struct v4l2_adapter_fmt *vadp_fmt;
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
 	struct video_device *vdev;
 	int fmt_size, vadp_fmt_size;
@@ -861,6 +913,10 @@ static int mse_adapter_v4l2_try_fmt_vid(struct file *filp,
 		mse_err("Failed video_drvdata()\n");
 		return -EINVAL;
 	}
+
+	if (vadp_owner_get(vadp_fh))
+		return -EBUSY;
+
 	vdev = &vadp_dev->vdev;
 
 	if (V4L2_TYPE_IS_OUTPUT(fmt->type))
@@ -918,7 +974,8 @@ static int mse_adapter_v4l2_g_fmt_vid(struct file *filp,
 				      void *priv,
 				      struct v4l2_format *fmt)
 {
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
 
 	mse_debug("START\n");
@@ -940,7 +997,8 @@ static int mse_adapter_v4l2_s_fmt_vid(struct file *filp,
 				      struct v4l2_format *fmt)
 {
 	int err;
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
 
 	mse_debug("START\n");
@@ -973,7 +1031,8 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 				     enum v4l2_buf_type i)
 {
 	int err;
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 
 	mse_debug("START\n");
 
@@ -981,6 +1040,9 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 		mse_err("Failed video_drvdata()\n");
 		return -EINVAL;
 	}
+
+	if (!vadp_owner_is(vadp_fh))
+		return -EBUSY;
 
 	err = try_mse_open(vadp_dev, i);
 	if (err) {
@@ -1014,7 +1076,8 @@ static int mse_adapter_v4l2_g_parm(struct file *filp,
 				   void *priv,
 				   struct v4l2_streamparm *sp)
 {
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 	struct v4l2_fract *fract;
 
 	mse_debug("START\n");
@@ -1044,7 +1107,8 @@ static int mse_adapter_v4l2_s_parm(struct file *filp,
 				   void *priv,
 				   struct v4l2_streamparm *sp)
 {
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 	struct v4l2_fract *fract;
 
 	mse_debug("START\n");
@@ -1053,6 +1117,9 @@ static int mse_adapter_v4l2_s_parm(struct file *filp,
 		mse_err("Failed video_drvdata()\n");
 		return -EINVAL;
 	}
+
+	if (vadp_owner_get(vadp_fh))
+		return -EBUSY;
 
 	if (V4L2_TYPE_IS_OUTPUT(sp->type))
 		fract = &sp->parm.output.timeperframe;
@@ -1073,7 +1140,8 @@ static int mse_adapter_v4l2_enum_framesizes(
 {
 	const struct v4l2_adapter_fmt *vadp_fmt = NULL;
 	const struct v4l2_adapter_fmt *vadp_fmtbase;
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
+	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 	int i, vadp_fmt_size;
 
 	mse_debug("START fsize->index=%d\n", fsize->index);
