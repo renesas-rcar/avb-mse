@@ -1003,6 +1003,11 @@ static void mse_work_stream(struct work_struct *work)
 				mse_err("receive error %d\n", err);
 				break;
 			}
+
+			/* if NOT work queued, then queue it */
+			if (!work_busy(&instance->wk_depacketize))
+				queue_work(instance->wq_packet,
+					   &instance->wk_depacketize);
 		}
 	}
 
@@ -1967,20 +1972,8 @@ static void mse_work_depacketize(struct work_struct *work)
 		queue_work(instance->wq_packet, &instance->wk_callback);
 
 	/* state is NOT EXECUTE */
-	if (!mse_state_test(instance, MSE_STATE_EXECUTE)) {
+	if (!mse_state_test(instance, MSE_STATE_EXECUTE))
 		instance->f_depacketizing = false;
-		mse_debug("END\n");
-	} else {
-		if (IS_MSE_TYPE_AUDIO(instance->media->type)) {
-			queue_work(instance->wq_packet,
-				   &instance->wk_depacketize);
-		} else {
-			if (!atomic_read(&instance->done_buf_cnt)) {
-				queue_work(instance->wq_packet,
-					   &instance->wk_depacketize);
-			}
-		}
-	}
 }
 
 static void mse_work_callback(struct work_struct *work)
