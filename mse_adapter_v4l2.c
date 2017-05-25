@@ -81,6 +81,7 @@
 #include <media/videobuf2-memops.h>
 
 #include "ravb_mse_kernel.h"
+#include "jpeg.h"
 
 /*********************/
 /* Name of driver    */
@@ -102,6 +103,7 @@
 #define MSE_ADAPTER_V4L2_MPEG2TS_BYTESPERLINE   (188 * 192)
 #define MSE_ADAPTER_V4L2_MPEG2TS_SIZEIMAGE \
 	(MSE_ADAPTER_V4L2_MPEG2TS_BYTESPERLINE * 14)
+#define MSE_ADAPTER_V4L2_TEMP_BUF_MAXSIZE       (2048 * 1024)
 
 /*************/
 /* Structure */
@@ -110,6 +112,13 @@
 struct v4l2_adapter_buffer {
 	struct vb2_v4l2_buffer vb;
 	struct list_head list;
+};
+
+struct v4l2_adapter_temp_buffer {
+	size_t bytesused;
+	size_t length;
+	unsigned char *buf;
+	bool prepared;
 };
 
 /* Device information */
@@ -124,8 +133,14 @@ struct v4l2_adapter_device {
 	struct vb2_queue	q_out;
 	/* spin lock */
 	spinlock_t		lock_buf_list;    /* lock for buf_list */
+	/* list of buffer queued from v4l2 core */
 	struct list_head	buf_list;
+	/* list of buffer for mse transmission */
+	struct list_head	stream_buf_list;
 	unsigned int		sequence;
+	/* for buffer management debug */
+	unsigned int		queued;
+	unsigned int		dequeued;
 	/* index for register */
 	int			index_mse;
 	enum MSE_TYPE		type;
@@ -135,6 +150,15 @@ struct v4l2_adapter_device {
 	bool			f_mse_open;
 	/* previous trans buffer for checking buffer overwite */
 	void			*prev;
+	/* temp video buffer */
+	bool			use_temp_buffer;
+	struct v4l2_adapter_temp_buffer		temp_buf[NUM_BUFFERS];
+	void *temp_buf_base;
+	int temp_w;
+	int temp_r;
+
+	/* mpeg2ts stream type */
+	enum MSE_MPEG2TS_TYPE	mpeg2ts_type;
 };
 
 /* Format information */
@@ -237,6 +261,320 @@ static int v4l2_devices;
 /************/
 /* Function */
 /************/
+#define vadp_buffer_done(vadp_dev, vadp_buf, state) \
+	do { \
+		struct v4l2_adapter_device *__dev = (vadp_dev); \
+		struct v4l2_adapter_buffer *__buf = (vadp_buf); \
+		mse_debug("queued=%u dequeued=%u\n", \
+			__dev->queued, ++(__dev->dequeued)); \
+		list_del(&__buf->list); \
+		vb2_buffer_done(&__buf->vb.vb2_buf, (state)); \
+	} while (0)
+
+#define v4l2_type_stringfy(type) \
+		(V4L2_TYPE_IS_OUTPUT(type) ? "output" : "capture")
+
+/*
+ * temp_buffer related functions
+ */
+static void temp_buffer_free(struct v4l2_adapter_device *vadp_dev)
+{
+	int i;
+	struct v4l2_adapter_temp_buffer *temp;
+
+	/* NOT allocated, skip */
+	if (!vadp_dev->temp_buf_base)
+		return;
+
+	for (i = 0; i < NUM_BUFFERS; i++) {
+		temp = &vadp_dev->temp_buf[i];
+		temp->buf = NULL;
+		temp->length = 0;
+	}
+
+	kfree(vadp_dev->temp_buf_base);
+	vadp_dev->temp_buf_base = NULL;
+}
+
+static int temp_buffer_alloc(struct v4l2_adapter_device *vadp_dev)
+{
+	int i;
+	struct v4l2_adapter_temp_buffer *temp;
+	u32 length;
+	u8 *buf;
+
+	/* already allocated, skip allocate memory */
+	if (vadp_dev->temp_buf_base)
+		return 0;
+
+	length = min_t(u32, vadp_dev->format.sizeimage,
+		       MSE_ADAPTER_V4L2_TEMP_BUF_MAXSIZE);
+
+	buf = kmalloc_array((size_t)length, NUM_BUFFERS, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	vadp_dev->temp_buf_base = buf;
+	vadp_dev->temp_w = 0;
+	vadp_dev->temp_r = 0;
+
+	for (i = 0; i < NUM_BUFFERS; i++) {
+		temp = &vadp_dev->temp_buf[i];
+		temp->length = (size_t)length;
+		temp->buf = buf + (temp->length * i);
+		temp->prepared = false;
+		temp->bytesused = 0;
+	}
+
+	return 0;
+}
+
+static struct v4l2_adapter_temp_buffer *temp_buffer_get_prepared(
+					struct v4l2_adapter_device *vadp_dev)
+{
+	struct v4l2_adapter_temp_buffer *temp;
+
+	temp = &vadp_dev->temp_buf[vadp_dev->temp_r];
+	if (!temp->prepared)
+		return NULL;
+
+	return temp;
+}
+
+#define MPEG2TS_TS_SIZE         (188)
+#define MPEG2TS_SYNC            (0x47)
+#define MPEG2TS_M2TS_OFFSET     (4)
+#define MPEG2TS_M2TS_SIZE       (MPEG2TS_M2TS_OFFSET + MPEG2TS_TS_SIZE)
+static bool is_mpeg2ts_ts(unsigned char *tsp)
+{
+	if (tsp[0] == MPEG2TS_SYNC &&
+	    tsp[MPEG2TS_TS_SIZE] == MPEG2TS_SYNC &&
+	    tsp[MPEG2TS_TS_SIZE * 2] == MPEG2TS_SYNC)
+		return true;
+	else
+		return false;
+}
+
+static bool is_mpeg2ts_m2ts(unsigned char *tsp)
+{
+	if (tsp[MPEG2TS_M2TS_OFFSET] == MPEG2TS_SYNC &&
+	    tsp[MPEG2TS_M2TS_OFFSET + MPEG2TS_M2TS_SIZE] == MPEG2TS_SYNC &&
+	    tsp[MPEG2TS_M2TS_OFFSET + MPEG2TS_M2TS_SIZE * 2] == MPEG2TS_SYNC)
+		return true;
+	else
+		return false;
+}
+
+static int get_mpeg2ts_format(unsigned char *buf)
+{
+	if (is_mpeg2ts_ts(buf))
+		return MSE_MPEG2TS_TYPE_TS;
+	else if (is_mpeg2ts_m2ts(buf))
+		return MSE_MPEG2TS_TYPE_M2TS;
+	else
+		return -1;
+}
+
+static bool tspacket_size_is_valid(enum MSE_MPEG2TS_TYPE type,
+				   size_t size)
+{
+	if (type == MSE_MPEG2TS_TYPE_M2TS)
+		return !(size % MPEG2TS_M2TS_SIZE);
+	else if (type == MSE_MPEG2TS_TYPE_TS)
+		return !(size % MPEG2TS_TS_SIZE);
+	else
+		return false;
+}
+
+static bool jpeg_frame_is_valid(unsigned char *buf, size_t size)
+{
+	size_t offset = 0;
+
+	if ((buf[offset] != JPEG_MARKER) ||
+	    (buf[offset + 1] != JPEG_MARKER_KIND_SOI))
+		return false;
+
+	offset = size - JPEG_MARKER_SIZE_LENGTH;
+
+	if ((buf[offset] != JPEG_MARKER) ||
+	    (buf[offset + 1] != JPEG_MARKER_KIND_EOI))
+		return false;
+
+	return true;
+}
+
+static int temp_buffer_check_type(struct v4l2_adapter_device *vadp_dev,
+				  unsigned char *buf,
+				  size_t size)
+{
+	int ret;
+	u8 mk;
+	size_t offset = 0;
+
+	switch (vadp_dev->format.pixelformat) {
+	case V4L2_PIX_FMT_MPEG:
+		ret = get_mpeg2ts_format(buf);
+		vadp_dev->mpeg2ts_type = ret;
+		vadp_dev->use_temp_buffer = !tspacket_size_is_valid(ret, size);
+		break;
+
+	case V4L2_PIX_FMT_MJPEG:
+		mk = jpeg_get_marker(buf, size, &offset);
+		ret = (mk == JPEG_MARKER_KIND_SOI) ? 0 : -1;
+		vadp_dev->use_temp_buffer = !jpeg_frame_is_valid(buf, size);
+		break;
+
+	default:
+		ret = 0;
+		vadp_dev->use_temp_buffer = false;
+		break;
+	}
+
+	return ret;
+}
+
+static int temp_buffer_write_mpeg2ts(struct v4l2_adapter_device *vadp_dev,
+				     unsigned char *buf,
+				     size_t size)
+{
+	struct v4l2_adapter_temp_buffer *temp;
+	unsigned char *copy_from;
+	size_t bytesused, length, pos;
+	size_t copy_size;
+	size_t psize;
+	int temp_w = vadp_dev->temp_w;
+	int temp_r = vadp_dev->temp_r;
+
+	temp = &vadp_dev->temp_buf[temp_w];
+
+	if (temp->prepared)
+		return -EAGAIN;
+
+	bytesused = temp->bytesused;
+	length = temp->length;
+
+	mse_debug("temp_w=%d bytesused=%zu buf=%p size=%zu\n",
+		  temp_w, bytesused, buf, size);
+
+	if (vadp_dev->mpeg2ts_type == MSE_MPEG2TS_TYPE_M2TS)
+		psize = MPEG2TS_M2TS_SIZE;
+	else
+		psize = MPEG2TS_TS_SIZE;
+
+	if (!((temp_w + NUM_BUFFERS - temp_r - 1) % NUM_BUFFERS > 0)) {
+		if (bytesused + size % psize) {
+			mse_debug("temp buffer has no enough area\n");
+			return -EAGAIN;
+		}
+	}
+
+	copy_from = buf;
+	copy_size = size;
+
+	if (bytesused + copy_size > length) {
+		mse_debug("temp buffer overrun %zu/%zu\n",
+			  bytesused + copy_size, temp->length);
+		return -EAGAIN;
+	}
+
+	/* copy stream */
+	memcpy(temp->buf + bytesused, copy_from, copy_size);
+	bytesused += copy_size;
+
+	/* adjust bytesused */
+	pos = bytesused - bytesused % psize;
+	temp->bytesused = pos;
+	temp->prepared = true;
+	vadp_dev->temp_w = (temp_w + 1) % NUM_BUFFERS;
+
+	if (pos == bytesused)
+		return 0;
+
+	/* copy remain data */
+	copy_from = temp->buf + pos;
+	copy_size = bytesused - pos;
+
+	temp = &vadp_dev->temp_buf[vadp_dev->temp_w];
+	memcpy(temp->buf + temp->bytesused, copy_from, copy_size);
+	temp->bytesused += copy_size;
+
+	return 0;
+}
+
+static int temp_buffer_write_mjpeg(struct v4l2_adapter_device *vadp_dev,
+				   unsigned char *buf,
+				   size_t size)
+{
+	struct v4l2_adapter_temp_buffer *temp;
+	unsigned char *copy_from;
+	size_t bytesused, length, pos;
+	size_t copy_size = size;
+	int temp_w = vadp_dev->temp_w;
+	int temp_r = vadp_dev->temp_r;
+
+	temp = &vadp_dev->temp_buf[temp_w];
+
+	if (temp->prepared)
+		return -EAGAIN;
+
+	bytesused = temp->bytesused;
+	length = temp->length;
+
+	mse_debug("temp_w=%d bytesused=%zu buf=%p size=%zu\n",
+		  temp_w, bytesused, buf, size);
+
+	pos = jpeg_search_eoi(buf, size, 0);
+	if (!((temp_w + NUM_BUFFERS - temp_r - 1) % NUM_BUFFERS > 0)) {
+		if (pos != size) {
+			mse_debug("temp buffer has no enough area\n");
+			return -EAGAIN;
+		}
+	}
+
+	copy_from = buf;
+	copy_size = pos;
+
+	if (bytesused + copy_size > length) {
+		mse_debug("temp buffer overrun %zu/%zu\n",
+			  bytesused + copy_size, temp->length);
+		return -EAGAIN;
+	}
+
+	/* copy stream until period position */
+	memcpy(temp->buf + bytesused, copy_from, copy_size);
+	temp->bytesused += copy_size;
+
+	if (jpeg_frame_is_valid(temp->buf, temp->bytesused)) {
+		temp->prepared = true;
+		vadp_dev->temp_w = (temp_w + 1) % NUM_BUFFERS;
+	}
+
+	if (size == pos)
+		return 0;
+
+	/* copy remain data */
+	copy_from = buf + pos;
+	copy_size = size - pos;
+
+	temp = &vadp_dev->temp_buf[vadp_dev->temp_w];
+	memcpy(temp->buf + temp->bytesused, copy_from, copy_size);
+	temp->bytesused += copy_size;
+
+	return 0;
+}
+
+static int temp_buffer_write(struct v4l2_adapter_device *vadp_dev,
+			     unsigned char *buf,
+			     size_t size)
+{
+	if (vadp_dev->format.pixelformat == V4L2_PIX_FMT_MPEG)
+		return temp_buffer_write_mpeg2ts(vadp_dev, buf, size);
+	else if (vadp_dev->format.pixelformat == V4L2_PIX_FMT_MJPEG)
+		return temp_buffer_write_mjpeg(vadp_dev, buf, size);
+	else
+		return 0;
+}
+
 static inline const char *convert_type_to_str(enum MSE_TYPE type)
 {
 	switch (type) {
@@ -761,8 +1099,6 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 {
 	int err;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
-	struct mse_video_config config;
-	struct mse_mpeg2ts_config config_ts;
 
 	mse_debug("START\n");
 
@@ -774,72 +1110,29 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 	err = try_mse_open(vadp_dev, i);
 	if (err) {
 		mse_err("Failed mse_open()\n");
-		goto error_failed_mse_open;
+		return vb2_ioctl_streamoff(filp, priv, i);
 	}
 
-	if (vadp_dev->format.pixelformat == V4L2_PIX_FMT_MPEG) {
-		err = mse_get_mpeg2ts_config(vadp_dev->index_instance,
-					     &config_ts);
-		if (err < 0) {
-			mse_err("Failed mse_get_mpeg2ts_config()\n");
-			goto error_after_mse_opened;
-		}
+	if (V4L2_TYPE_IS_OUTPUT(i)) {
+		if ((vadp_dev->format.pixelformat == V4L2_PIX_FMT_MPEG) ||
+		    (vadp_dev->format.pixelformat == V4L2_PIX_FMT_MJPEG)) {
+			err = temp_buffer_alloc(vadp_dev);
+			if (err < 0) {
+				mse_err("cannnot allocate temp buffer\n");
+				vb2_queue_error(&vadp_dev->q_out);
 
-		/* nothing to set at current version */
-		err = mse_set_mpeg2ts_config(vadp_dev->index_instance,
-					     &config_ts);
-		if (err < 0) {
-			mse_err("Failed mse_set_mpeg2ts_config()\n");
-			goto error_after_mse_opened;
-		}
-	} else {
-		/* video config */
-		err = mse_get_video_config(vadp_dev->index_instance, &config);
-		if (err < 0) {
-			mse_err("Failed mse_get_video_config()\n");
-			goto error_after_mse_opened;
-		}
-
-		switch (vadp_dev->format.pixelformat) {
-		case V4L2_PIX_FMT_H264:
-			config.format = MSE_VIDEO_FORMAT_H264_BYTE_STREAM;
-			break;
-		case V4L2_PIX_FMT_H264_NO_SC:
-			config.format = MSE_VIDEO_FORMAT_H264_AVC;
-			break;
-		case V4L2_PIX_FMT_MJPEG:
-			config.format = MSE_VIDEO_FORMAT_MJPEG;
-			break;
-		default:
-			mse_err("invalid format=%c%c%c%c\n",
-				vadp_dev->format.pixelformat >> 0,
-				vadp_dev->format.pixelformat >> 8,
-				vadp_dev->format.pixelformat >> 16,
-				vadp_dev->format.pixelformat >> 24);
-			goto error_after_mse_opened;
-		}
-
-		if (vadp_dev->frameintervals.numerator > 0 &&
-		    vadp_dev->frameintervals.denominator > 0) {
-			config.fps.denominator = vadp_dev->frameintervals.numerator;
-			config.fps.numerator = vadp_dev->frameintervals.denominator;
-		}
-
-		err = mse_set_video_config(vadp_dev->index_instance, &config);
-		if (err < 0) {
-			mse_err("Failed mse_set_video_config()\n");
-			goto error_after_mse_opened;
+				return err;
+			}
 		}
 	}
+
+	vadp_dev->sequence = 0;
+	vadp_dev->queued = 0;
+	vadp_dev->dequeued = 0;
+	vadp_dev->prev = NULL;
 
 	mse_debug("END\n");
 	return vb2_ioctl_streamon(filp, priv, i);
-
-error_after_mse_opened:
-	try_mse_close(vadp_dev);
-
-error_failed_mse_open:
-	return vb2_ioctl_streamoff(filp, priv, i);
 }
 
 static int mse_adapter_v4l2_g_parm(struct file *filp,
@@ -961,8 +1254,7 @@ static int mse_adapter_v4l2_enum_framesizes(
 	return 0;
 }
 
-static int mse_adapter_v4l2_playback_callback(void *priv, int size);
-static int mse_adapter_v4l2_capture_callback(void *priv, int size);
+static int mse_adapter_v4l2_callback(void *priv, int size);
 
 #if KERNEL_VERSION(4, 7, 0) <= LINUX_VERSION_CODE
 static int mse_adapter_v4l2_queue_setup(struct vb2_queue *vq,
@@ -1002,7 +1294,8 @@ static int mse_adapter_v4l2_queue_setup(struct vb2_queue *vq,
 		sizes[0] = vadp_dev->format.sizeimage;
 	*nplanes = NUM_PLANES;
 
-	mse_debug("END nbuffers=%d\n", *nbuffers);
+	mse_debug("END nbuffers=%d sizeimage=%d\n",
+		  *nbuffers, vadp_dev->format.sizeimage);
 
 	return 0;
 }
@@ -1027,9 +1320,6 @@ static int mse_adapter_v4l2_buf_prepare(struct vb2_buffer *vb)
 		return -EINVAL;
 	}
 
-	vbuf->vb2_buf.planes[0].bytesused =
-				vb2_get_plane_payload(&vbuf->vb2_buf, 0);
-
 	mse_debug("END\n");
 
 	return 0;
@@ -1040,12 +1330,21 @@ static void return_all_buffers(struct v4l2_adapter_device *vadp_dev,
 {
 	unsigned long flags;
 	struct v4l2_adapter_buffer *buf, *node;
+	int count = 0;
 
 	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
-	list_for_each_entry_safe(buf, node, &vadp_dev->buf_list, list) {
-		vb2_buffer_done(&buf->vb.vb2_buf, state);
-		list_del(&buf->list);
+	list_for_each_entry_safe(buf, node, &vadp_dev->stream_buf_list, list) {
+		count++;
+		vadp_buffer_done(vadp_dev, buf, state);
 	}
+	mse_debug("stream_buf_list count=%d\n", count);
+
+	count = 0;
+	list_for_each_entry_safe(buf, node, &vadp_dev->buf_list, list) {
+		count++;
+		vadp_buffer_done(vadp_dev, buf, state);
+	}
+	mse_debug("buf_list count=%d\n", count);
 	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 }
 
@@ -1067,10 +1366,12 @@ static void mse_adapter_v4l2_stop_streaming(struct vb2_queue *vq)
 		return;
 	}
 
-	if (vq == &vadp_dev->q_out)
+	if (V4L2_TYPE_IS_OUTPUT(vq->type) &&
+	    !list_empty(&vadp_dev->stream_buf_list))
 		vb2_wait_for_all_buffers(vq);
 
 	return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
+	temp_buffer_free(vadp_dev);
 
 	mse_debug("END\n");
 }
@@ -1101,125 +1402,253 @@ static void remove_duplicate_buffer(struct v4l2_adapter_device *vadp_dev,
 	if (memcmp(buf_vaddr, buf_next_vaddr, buf_size))
 		return;
 
-	list_del(&buf_next->list);
-	vb2_buffer_done(&buf_next->vb.vb2_buf, VB2_BUF_STATE_DONE);
+	vadp_buffer_done(vadp_dev, buf_next, VB2_BUF_STATE_DONE);
 
 	mse_info("Removed duplicate second buffer.\n");
 	mse_info(" Please set show-preroll-frame=false\n");
 }
 
-static int playback_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
+static void prepare_stream_buffer(struct vb2_queue *vq)
 {
-	struct v4l2_adapter_buffer *new_buf = NULL;
-	void *buf_to_send;
-	long new_buf_size;
-	int err;
+	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
+	struct v4l2_adapter_buffer *vadp_buf;
+	void *buf;
+	long size;
+	int ret = 0;
 
-	if (!list_empty(&vadp_dev->buf_list)) {
-		new_buf = list_first_entry(&vadp_dev->buf_list,
-					   struct v4l2_adapter_buffer,
-					   list);
-	}
-
-	if (!new_buf) {
-		mse_debug("new_buf is NULL\n");
-		return 0;
-	}
-
-	buf_to_send = vb2_plane_vaddr(&new_buf->vb.vb2_buf, 0);
-	mse_debug("buf_to_send=%p\n", buf_to_send);
-
-	if (vadp_dev->prev && vadp_dev->prev == buf_to_send) {
-		mse_debug("prevent from buffer over write. prev=%p curr=%p\n",
-			  vadp_dev->prev, buf_to_send);
-		return 0;
-	}
-	vadp_dev->prev = buf_to_send;
-
-	new_buf_size = vb2_get_plane_payload(&new_buf->vb.vb2_buf, 0);
-	new_buf->vb.vb2_buf.timestamp = ktime_get_ns();
-	new_buf->vb.sequence = vadp_dev->sequence++;
-	new_buf->vb.field = vadp_dev->format.field;
-
-	err = mse_start_transmission(vadp_dev->index_instance,
-				     buf_to_send,
-				     new_buf_size,
-				     vadp_dev,
-				     mse_adapter_v4l2_playback_callback);
-	if (err < 0) {
-		mse_err("Failed mse_start_transmission()\n");
-
-		list_del(&new_buf->list);
-		vb2_buffer_done(&new_buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
-		vb2_queue_error(&vadp_dev->q_out);
-
-		return err;
-	}
-
-	/* Workaround: remove duplicated second buffer */
-	if (vadp_dev->sequence == 1)
-		remove_duplicate_buffer(vadp_dev, new_buf);
-
-	return 0;
-}
-
-static int mse_adapter_v4l2_playback_callback(void *priv, int size)
-{
-	int err;
-	struct v4l2_adapter_device *vadp_dev = priv;
-	unsigned long flags;
-	struct v4l2_adapter_buffer *buf = NULL;
+	mse_debug("START vq=%p, type=%s\n", vq, v4l2_type_stringfy(vq->type));
 
 	if (!vadp_dev) {
+		mse_err("Failed vb2_get_drv_priv()\n");
+		return;
+	}
+
+	vadp_buf = list_first_entry_or_null(&vadp_dev->buf_list,
+					    struct v4l2_adapter_buffer,
+					    list);
+
+	if (!vadp_buf)
+		return;
+
+	if (!V4L2_TYPE_IS_OUTPUT(vq->type)) {
+		list_move_tail(&vadp_buf->list, &vadp_dev->stream_buf_list);
+	} else {
+		buf = vb2_plane_vaddr(&vadp_buf->vb.vb2_buf, 0);
+		size = vb2_get_plane_payload(&vadp_buf->vb.vb2_buf, 0);
+
+		/* Check stream type */
+		if (vadp_dev->sequence == 0) {
+			ret = temp_buffer_check_type(vadp_dev, buf, size);
+			if (ret < 0) {
+				vadp_buffer_done(vadp_dev, vadp_buf,
+						 VB2_BUF_STATE_ERROR);
+				vb2_queue_error(vq);
+				mse_err("Invalid data format\n");
+
+				return;
+			}
+		}
+
+		vadp_buf->vb.vb2_buf.timestamp = ktime_get_ns();
+		vadp_buf->vb.sequence = vadp_dev->sequence++;
+		vadp_buf->vb.field = vadp_dev->format.field;
+
+		/* Workaround: remove duplicated second buffer */
+		if (vadp_dev->sequence == 1)
+			remove_duplicate_buffer(vadp_dev, vadp_buf);
+
+		if (!vadp_dev->use_temp_buffer) {
+			list_move_tail(&vadp_buf->list,
+				       &vadp_dev->stream_buf_list);
+		} else {
+			/* use temp buffer */
+			struct v4l2_adapter_temp_buffer *temp;
+			int temp_w = vadp_dev->temp_w;
+
+			ret = temp_buffer_write(vadp_dev, buf, size);
+			if (ret)
+				return;
+
+			temp = temp_buffer_get_prepared(vadp_dev);
+			if (temp && temp_w != vadp_dev->temp_w) {
+				list_move_tail(&vadp_buf->list,
+					       &vadp_dev->stream_buf_list);
+			} else {
+				vadp_buffer_done(vadp_dev, vadp_buf,
+						 VB2_BUF_STATE_DONE);
+			}
+		}
+	}
+}
+
+static int set_stream_buffer(struct vb2_queue *vq)
+{
+	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
+	struct v4l2_adapter_temp_buffer *temp;
+	struct v4l2_adapter_buffer *vadp_buf;
+	unsigned char *buf = NULL;
+	long size = 0;
+	int err;
+	unsigned long flags;
+
+	mse_debug("START vq=%p, type=%s\n", vq, v4l2_type_stringfy(vq->type));
+
+	if (!vadp_dev) {
+		mse_err("Failed vb2_get_drv_priv()\n");
+		return -EINVAL;
+	}
+
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
+
+	vadp_buf = list_first_entry_or_null(&vadp_dev->stream_buf_list,
+					    struct v4l2_adapter_buffer,
+					    list);
+
+	if (!vadp_buf) {
+		mse_debug("no need to send anything\n");
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
+		return 0;
+	}
+
+	if (!V4L2_TYPE_IS_OUTPUT(vq->type)) {
+		buf = vb2_plane_vaddr(&vadp_buf->vb.vb2_buf, 0);
+		size = vb2_plane_size(&vadp_buf->vb.vb2_buf, 0);
+	} else {
+		if (vadp_dev->use_temp_buffer) {
+			temp = temp_buffer_get_prepared(vadp_dev);
+			if (temp) {
+				buf = temp->buf;
+				size = temp->bytesused;
+			}
+		} else {
+			buf = vb2_plane_vaddr(&vadp_buf->vb.vb2_buf, 0);
+			size = vb2_get_plane_payload(&vadp_buf->vb.vb2_buf, 0);
+		}
+	}
+
+	if (!buf) {
+		mse_debug("buf is NULL\n");
+		vadp_buffer_done(vadp_dev, vadp_buf, VB2_BUF_STATE_DONE);
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
+		return 0;
+	}
+
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
+	if (vadp_dev->prev == buf) {
+		mse_debug("current buffer is already transmissioned. prev=%p curr=%p\n",
+			  vadp_dev->prev, buf);
+		return 0;
+	}
+	vadp_dev->prev = buf;
+
+	mse_debug("buf=%p size=%lu\n", buf, size);
+
+	err = mse_start_transmission(vadp_dev->index_instance,
+				     buf,
+				     size,
+				     vq,
+				     mse_adapter_v4l2_callback);
+
+	if (err < 0) {
+		mse_err("Failed mse_start_transmission()\n");
+		return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
+		vb2_queue_error(vq);
+	}
+
+	mse_debug("END\n");
+
+	return err;
+}
+
+static int mse_adapter_v4l2_callback(void *priv, int size)
+{
+	struct vb2_queue *vq = priv;
+	int err;
+	struct v4l2_adapter_device *vadp_dev;
+	unsigned long flags;
+	struct v4l2_adapter_buffer *vadp_buf;
+	struct v4l2_adapter_temp_buffer *temp;
+
+	mse_debug("START vq=%p, type=%s\n", vq, v4l2_type_stringfy(vq->type));
+
+	if (!vq) {
 		mse_err("Private data is NULL\n");
 		return -EINVAL;
 	}
 
-	mse_debug("START\n");
+	vadp_dev = vb2_get_drv_priv(vq);
 
-	if (size < 0) {
-		vb2_queue_error(&vadp_dev->q_out);
+	if (!vadp_dev) {
+		mse_err("vadp_dev is NULL\n");
+		return -EINVAL;
+	}
+
+	if (size < 0 && size != -EAGAIN) {
+		vb2_queue_error(vq);
 		return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
+		mse_err("priv=%p size=%d", priv, size);
 
 		return size;
 	}
 
 	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
-	if (!list_empty(&vadp_dev->buf_list)) {
-		buf = list_first_entry(&vadp_dev->buf_list,
-				       struct v4l2_adapter_buffer,
-				       list);
-		list_del(&buf->list);
-	}
+	vadp_buf = list_first_entry_or_null(&vadp_dev->stream_buf_list,
+					    struct v4l2_adapter_buffer,
+					    list);
 
-	if (!buf) {
+	if (!vadp_buf) {
 		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
-		mse_debug("buf is NULL\n");
+		mse_debug("vadp_buf is NULL\n");
 
 		return 0;
 	}
 
-	vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
-	err = playback_send_first_buffer(vadp_dev);
+	if (!V4L2_TYPE_IS_OUTPUT(vq->type)) {
+		vb2_set_plane_payload(&vadp_buf->vb.vb2_buf, 0, size);
+		vadp_buf->vb.vb2_buf.timestamp = ktime_get_ns();
+		vadp_buf->vb.sequence = vadp_dev->sequence++;
+		vadp_buf->vb.field = vadp_dev->format.field;
+	} else {
+		if (vadp_dev->use_temp_buffer) {
+			temp = temp_buffer_get_prepared(vadp_dev);
+			if (temp) {
+				temp->prepared = false;
+				temp->bytesused = 0;
+				vadp_dev->temp_r =
+					(vadp_dev->temp_r + 1) % NUM_BUFFERS;
+			}
+		}
+	}
+
+	vadp_buffer_done(vadp_dev, vadp_buf, VB2_BUF_STATE_DONE);
+
+	if (list_empty(&vadp_dev->stream_buf_list) &&
+	    !list_empty(&vadp_dev->buf_list))
+		prepare_stream_buffer(vq);
+
 	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
-	if (err < 0)
-		return err;
+	err = set_stream_buffer(vq);
 
-	mse_debug("END\n");
+	mse_debug("END err=%d\n", err);
 
-	return 0;
+	return err;
 }
 
-static void mse_adapter_v4l2_playback_buf_queue(struct vb2_buffer *vb)
+static void mse_adapter_v4l2_buf_queue(struct vb2_buffer *vb)
 {
 	unsigned long flags;
 	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vb->vb2_queue);
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
-	struct v4l2_adapter_buffer *buf = to_v4l2_adapter_buffer(vbuf);
-	int is_need_send = 0;
+	struct v4l2_adapter_buffer *vadp_buf = to_v4l2_adapter_buffer(vbuf);
+	bool is_need_send = false;
 
-	mse_debug("START vb=%p\n", vb2_plane_vaddr(vb, 0));
+	mse_debug("START vb=%p type=%s\n",
+		  vb2_plane_vaddr(vb, 0),
+		  v4l2_type_stringfy(vb->vb2_queue->type));
 
 	if (!vadp_dev) {
 		mse_err("Failed vb2_get_drv_priv()\n");
@@ -1227,281 +1656,156 @@ static void mse_adapter_v4l2_playback_buf_queue(struct vb2_buffer *vb)
 	}
 
 	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
-	if (list_empty(&vadp_dev->buf_list))
-		is_need_send = 1;
 
-	list_add_tail(&buf->list, &vadp_dev->buf_list);
+	if (list_empty(&vadp_dev->stream_buf_list))
+		is_need_send = true;
+
+	list_add_tail(&vadp_buf->list, &vadp_dev->buf_list);
+	vadp_dev->queued++;
+
+	mse_debug("vb=%p queued=%u dequeued=%u\n",
+		  vb2_plane_vaddr(vb, 0),
+		  vadp_dev->queued,
+		  vadp_dev->dequeued);
 
 	/* start_streaming is not called yet */
-	if (!vb2_start_streaming_called(&vadp_dev->q_out)) {
+	if (!vb2_start_streaming_called(vb->vb2_queue)) {
 		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 		mse_debug("start_streaming is not called yet\n");
 
 		return;
 	}
 
-	/* no need to send anything */
-	if (!is_need_send) {
-		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
-		mse_debug("no need to send anything\n");
-
-		return;
-	}
-
-	playback_send_first_buffer(vadp_dev);
+	prepare_stream_buffer(vb->vb2_queue);
 	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
-	mse_debug("END\n");
+	if (is_need_send)
+		set_stream_buffer(vb->vb2_queue);
 }
 
-static int playback_start_streaming(struct v4l2_adapter_device *vadp_dev,
-				    unsigned int count)
+static int set_media_config_mpeg(struct v4l2_adapter_device *vadp_dev)
 {
-	unsigned long flags;
 	int err;
-	int index = vadp_dev->index_instance;
+	struct mse_mpeg2ts_config config;
 
-	vadp_dev->sequence = 0;
-	vadp_dev->prev = NULL;
-
-	err = mse_start_streaming(index);
+	err = mse_get_mpeg2ts_config(vadp_dev->index_instance, &config);
 	if (err < 0) {
-		mse_err("Failed mse_start_streaming()\n");
+		mse_err("Failed mse_get_mpeg2ts_config()\n");
 		return err;
 	}
 
-	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
-	err = playback_send_first_buffer(vadp_dev);
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+	config.mpeg2ts_type = vadp_dev->mpeg2ts_type;
 
-	if (err < 0)
-		return err;
-
-	return 0;
-}
-
-static int mse_adapter_v4l2_playback_start_streaming(struct vb2_queue *vq,
-						     unsigned int count)
-{
-	int err;
-	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
-
-	mse_debug("START count=%d\n", count);
-
-	if (!vadp_dev) {
-		mse_err("Failed vb2_get_drv_priv()\n");
-		return -EINVAL;
-	}
-
-	err = playback_start_streaming(vadp_dev, count);
-	if (err) {
-		mse_err("Failed start streaming\n");
-		return_all_buffers(vadp_dev, VB2_BUF_STATE_QUEUED);
-		return err;
-	}
-
-	mse_debug("END\n");
-
-	return 0;
-}
-
-static int capture_send_first_buffer(struct v4l2_adapter_device *vadp_dev)
-{
-	struct v4l2_adapter_buffer *new_buf = NULL;
-	void *buf_to_send;
-	long new_buf_size;
-	int err;
-
-	if (!list_empty(&vadp_dev->buf_list))
-		new_buf = list_first_entry(&vadp_dev->buf_list,
-					   struct v4l2_adapter_buffer,
-					   list);
-
-	if (!new_buf) {
-		mse_debug("new_buf is NULL\n");
-		return 0;
-	}
-
-	buf_to_send = vb2_plane_vaddr(&new_buf->vb.vb2_buf, 0);
-	mse_debug("buf_to_send=%p\n", buf_to_send);
-	new_buf_size = vb2_plane_size(&new_buf->vb.vb2_buf, 0);
-
-	err = mse_start_transmission(vadp_dev->index_instance,
-				     buf_to_send,
-				     new_buf_size,
-				     vadp_dev,
-				     mse_adapter_v4l2_capture_callback);
+	err = mse_set_mpeg2ts_config(vadp_dev->index_instance, &config);
 	if (err < 0) {
-		mse_err("Failed mse_start_transmission()\n");
+		mse_err("Failed mse_set_mpeg2ts_config()\n");
 		return err;
 	}
 
 	return 0;
 }
 
-static int mse_adapter_v4l2_capture_callback(void *priv, int size)
+static int set_media_config_video(struct v4l2_adapter_device *vadp_dev)
 {
 	int err;
-	unsigned long flags;
-	struct v4l2_adapter_buffer *buf = NULL;
-	struct v4l2_adapter_device *vadp_dev = priv;
+	struct mse_video_config config;
 
-	if (!vadp_dev) {
-		mse_err("Private data is NULL\n");
+	err = mse_get_video_config(vadp_dev->index_instance, &config);
+	if (err < 0) {
+		mse_err("Failed mse_get_video_config()\n");
+		return err;
+	}
+
+	switch (vadp_dev->format.pixelformat) {
+	case V4L2_PIX_FMT_H264:
+		config.format = MSE_VIDEO_FORMAT_H264_BYTE_STREAM;
+		break;
+	case V4L2_PIX_FMT_H264_NO_SC:
+		config.format = MSE_VIDEO_FORMAT_H264_AVC;
+		break;
+	case V4L2_PIX_FMT_MJPEG:
+		config.format = MSE_VIDEO_FORMAT_MJPEG;
+		break;
+	default:
+		mse_err("invalid format=%c%c%c%c\n",
+			vadp_dev->format.pixelformat >> 0,
+			vadp_dev->format.pixelformat >> 8,
+			vadp_dev->format.pixelformat >> 16,
+			vadp_dev->format.pixelformat >> 24);
 		return -EINVAL;
 	}
 
-	mse_debug("START size=%d\n", size);
-
-	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
-	if (!list_empty(&vadp_dev->buf_list)) {
-		buf = list_first_entry(&vadp_dev->buf_list,
-				       struct v4l2_adapter_buffer,
-				       list);
-		list_del(&buf->list);
+	if (vadp_dev->frameintervals.numerator > 0 &&
+	    vadp_dev->frameintervals.denominator > 0) {
+		config.fps.denominator = vadp_dev->frameintervals.numerator;
+		config.fps.numerator = vadp_dev->frameintervals.denominator;
 	}
 
-	if (!buf) {
-		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
-		mse_debug("buf is NULL\n");
-
-		return 0;
+	err = mse_set_video_config(vadp_dev->index_instance, &config);
+	if (err < 0) {
+		mse_err("Failed mse_set_video_config()\n");
+		return err;
 	}
 
-	if (size < 0) {
-		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
-		vb2_queue_error(&vadp_dev->q_cap);
-		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+	return 0;
+}
 
-		return -EINVAL;
-	}
-
-	vb2_set_plane_payload(&buf->vb.vb2_buf, 0, size);
-	buf->vb.vb2_buf.timestamp = ktime_get_ns();
-	buf->vb.sequence = vadp_dev->sequence++;
-	buf->vb.field = vadp_dev->format.field;
-	if (size == 0)
-		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
+static int set_media_config(struct v4l2_adapter_device *vadp_dev)
+{
+	if (vadp_dev->format.pixelformat == V4L2_PIX_FMT_MPEG)
+		return set_media_config_mpeg(vadp_dev);
 	else
-		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
-
-	err = capture_send_first_buffer(vadp_dev);
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
-
-	if (err < 0)
-		return err;
-
-	mse_debug("END\n");
-	return 0;
+		return set_media_config_video(vadp_dev);
 }
 
-static void mse_adapter_v4l2_capture_buf_queue(struct vb2_buffer *vb)
-{
-	unsigned long flags;
-	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vb->vb2_queue);
-	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
-	struct v4l2_adapter_buffer *buf = to_v4l2_adapter_buffer(vbuf);
-	int is_need_send = 0;
-
-	mse_debug("START\n");
-
-	if (!vadp_dev) {
-		mse_err("Failed vb2_get_drv_priv()\n");
-		return;
-	}
-
-	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
-	if (list_empty(&vadp_dev->buf_list))
-		is_need_send = 1;
-	list_add_tail(&buf->list, &vadp_dev->buf_list);
-
-	/* start_streaming is not called yet */
-	if (!vb2_start_streaming_called(&vadp_dev->q_cap)) {
-		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
-		mse_debug("start_streaming is not called yet\n");
-
-		return;
-	}
-	/* no need to send anything */
-	if (!is_need_send) {
-		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
-		mse_debug("no need to send anything\n");
-
-		return;
-	}
-	capture_send_first_buffer(vadp_dev);
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
-
-	mse_debug("END\n");
-}
-
-static int capture_start_streaming(struct v4l2_adapter_device *vadp_dev,
-				   unsigned int count)
-{
-	unsigned long flags;
-	int err;
-	int index = vadp_dev->index_instance;
-
-	vadp_dev->sequence = 0;
-
-	err = mse_start_streaming(index);
-	if (err < 0) {
-		mse_err("Failed mse_start_streaming()\n");
-		return err;
-	}
-
-	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
-	err = capture_send_first_buffer(vadp_dev);
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
-	if (err < 0)
-		return err;
-
-	return 0;
-}
-
-static int mse_adapter_v4l2_capture_start_streaming(struct vb2_queue *vq,
-						    unsigned int count)
+static int mse_adapter_v4l2_start_streaming(struct vb2_queue *vq,
+					    unsigned int count)
 {
 	int err;
 	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
+	int index = vadp_dev->index_instance;
+	unsigned long flags;
 
-	mse_debug("START count=%d\n", count);
+	mse_debug("START vq=%p, type=%s count=%d\n",
+		  vq, v4l2_type_stringfy(vq->type), count);
 
 	if (!vadp_dev) {
 		mse_err("Failed vb2_get_drv_priv()\n");
 		return -EINVAL;
 	}
 
-	err = capture_start_streaming(vadp_dev, count);
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
+	prepare_stream_buffer(vq);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
+	err = set_media_config(vadp_dev);
 	if (err < 0) {
-		mse_err("Failed start streaming\n");
+		mse_err("Fail to set media config\n");
+		vb2_queue_error(vq);
+
+		return err;
+	}
+
+	err = mse_start_streaming(index);
+	if (err < 0) {
+		mse_err("Failed mse_start_streaming()\n");
 		return_all_buffers(vadp_dev, VB2_BUF_STATE_QUEUED);
 		return err;
 	}
 
-	mse_debug("END\n");
+	err = set_stream_buffer(vq);
 
-	return 0;
+	return err;
 }
 
-static const struct vb2_ops g_mse_adapter_v4l2_capture_queue_ops = {
+static const struct vb2_ops g_mse_adapter_v4l2_queue_ops = {
 	.queue_setup		= mse_adapter_v4l2_queue_setup,
 	.wait_prepare		= vb2_ops_wait_prepare,
 	.wait_finish		= vb2_ops_wait_finish,
 	.buf_prepare		= mse_adapter_v4l2_buf_prepare,
-	.start_streaming	= mse_adapter_v4l2_capture_start_streaming,
+	.start_streaming	= mse_adapter_v4l2_start_streaming,
 	.stop_streaming		= mse_adapter_v4l2_stop_streaming,
-	.buf_queue		= mse_adapter_v4l2_capture_buf_queue,
-};
-
-static const struct vb2_ops g_mse_adapter_v4l2_playback_queue_ops = {
-	.queue_setup		= mse_adapter_v4l2_queue_setup,
-	.wait_prepare		= vb2_ops_wait_prepare,
-	.wait_finish		= vb2_ops_wait_finish,
-	.buf_prepare		= mse_adapter_v4l2_buf_prepare,
-	.start_streaming	= mse_adapter_v4l2_playback_start_streaming,
-	.stop_streaming		= mse_adapter_v4l2_stop_streaming,
-	.buf_queue		= mse_adapter_v4l2_playback_buf_queue,
+	.buf_queue		= mse_adapter_v4l2_buf_queue,
 };
 
 static const struct v4l2_ioctl_ops g_mse_adapter_v4l2_ioctl_ops = {
@@ -1594,7 +1898,7 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	q->io_modes = VB2_MMAP;
 	q->drv_priv = vadp_dev;
 	q->buf_struct_size = sizeof(struct v4l2_adapter_buffer);
-	q->ops = &g_mse_adapter_v4l2_capture_queue_ops;
+	q->ops = &g_mse_adapter_v4l2_queue_ops;
 	q->mem_ops = &vb2_vmalloc_memops;
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	q->lock = &vadp_dev->mutex_vb2;
@@ -1611,7 +1915,7 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	q->io_modes = VB2_MMAP;
 	q->drv_priv = vadp_dev;
 	q->buf_struct_size = sizeof(struct v4l2_adapter_buffer);
-	q->ops = &g_mse_adapter_v4l2_playback_queue_ops;
+	q->ops = &g_mse_adapter_v4l2_queue_ops;
 	q->mem_ops = &vb2_vmalloc_memops;
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	q->lock = &vadp_dev->mutex_vb2;
@@ -1624,6 +1928,7 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	}
 
 	INIT_LIST_HEAD(&vadp_dev->buf_list);
+	INIT_LIST_HEAD(&vadp_dev->stream_buf_list);
 	spin_lock_init(&vadp_dev->lock_buf_list);
 
 	vdev->lock = &vadp_dev->mutex_vb2;
