@@ -166,23 +166,6 @@ static u8 chm_ac_symbols[] = {
 	0xf9, 0xfa,
 };
 
-u8 jpeg_get_marker(const u8 *buf, size_t len, size_t *offset)
-{
-	u8 marker;
-
-	while ((buf[(*offset)++] != JPEG_MARKER) && (*offset < len))
-		;
-
-	if (*offset >= len)
-		return JPEG_MARKER_KIND_NIL;
-
-	marker = buf[(*offset)++];
-
-	mse_debug("found marker=0x%02X offset=%zu\n", marker, *offset - 1);
-
-	return marker;
-}
-
 int jpeg_read_sof(const u8 *buf,
 		  size_t len,
 		  size_t *offset,

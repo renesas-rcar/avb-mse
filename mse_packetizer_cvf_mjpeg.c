@@ -439,7 +439,6 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	struct mjpeg_quant_header qheader;
 	size_t qlen;
 	size_t offset;
-	u8 mk;
 	u8 *buf, *payload;
 	size_t data_len, end_len;
 	size_t payload_size;
@@ -471,12 +470,14 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 			return offset;
 		}
 		header_len = offset;
+	} else {
+		offset = *buffer_processed;
 	}
 
 	/* Search EOI */
-	while (offset < data_len && !jpeg->eoi_f) {
-		mk = jpeg_get_marker(buf, data_len, &offset);
-		if (mk == JPEG_MARKER_KIND_EOI) {
+	if (!jpeg->eoi_f) {
+		offset = jpeg_search_eoi(buf, data_len, offset);
+		if (offset <= data_len) {
 			jpeg->eoi_offset = offset;
 			jpeg->eoi_f = true;
 			mse_debug("Found EOI offset=%zu\n", jpeg->eoi_offset);
