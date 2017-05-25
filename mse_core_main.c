@@ -398,10 +398,7 @@ struct mse_instance {
 	unsigned int device_timestamps[AVTP_TIMESTAMPS_MAX];
 
 	/** @brief video buffer  */
-	bool f_first_vframe;
 	bool f_use_temp_video_buffer;
-	bool f_temp_video_buffer_rewind;
-	bool f_mjpeg_valid;
 	int parsed;
 	int stored;
 	u64 mpeg2ts_pcr_90k;
@@ -1720,10 +1717,6 @@ static void mse_work_packetize(struct work_struct *work)
 
 	if (ret == -EAGAIN) {
 		instance->f_continue = false;
-		if (instance->f_use_temp_video_buffer &&
-		    instance->work_length <= instance->stored)
-			instance->parsed = instance->work_length;
-
 		if (list_empty(&instance->trans_buf_list)) {
 			instance->f_force_flush = false;
 
@@ -1784,36 +1777,10 @@ static void mse_work_packetize(struct work_struct *work)
 		queue_work(instance->wq_stream, &instance->wk_stream);
 	read_unlock_irqrestore(&instance->lock_stream, flags);
 
-	if (instance->f_use_temp_video_buffer) {
-		/* state is STOPPING */
-		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
-			if (!ret) {
-				/* not enough data in temp buffer */
-				instance->f_force_flush = false;
-				instance->f_completion = true;
-				mse_debug("f_completion = true\n");
-				queue_work(instance->wq_packet,
-					   &instance->wk_stop);
-
-				return;
-			}
-		}
-
-		if (instance->work_length <= instance->stored)
-			instance->parsed = instance->work_length;
-
-		if (instance->parsed == instance->stored) {
-			instance->f_temp_video_buffer_rewind = false;
-			instance->stored = 0;
-			instance->parsed = 0;
-		} else {
-			instance->f_temp_video_buffer_rewind = true;
-		}
-	}
-
 	if (instance->f_continue) {
 		queue_work(instance->wq_packet, &instance->wk_packetize);
 	} else {
+		instance->f_force_flush = false;
 		if (ret != -EAGAIN)
 			atomic_inc(&instance->done_buf_cnt);
 
@@ -2037,8 +2004,12 @@ static void mse_work_callback(struct work_struct *work)
 	if (mse_state_test(instance, MSE_STATE_EXECUTE)) {
 		/* state is EXECUTE */
 		/* no processed data */
-		if (!buf_cnt)
+		if (!buf_cnt) {
+			/* retry */
+			queue_work(instance->wq_packet,
+				   &instance->wk_callback);
 			return;
+		}
 
 	} else if (mse_state_test(instance, MSE_STATE_STOPPING)) {
 		/* state is STOPPING */
@@ -2060,19 +2031,11 @@ static void mse_work_callback(struct work_struct *work)
 		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
 			/* state is STOPPING */
 			/* flush temp buffer before stopping */
-			if (instance->f_temp_video_buffer_rewind) {
-				if (list_empty(&instance->trans_buf_list) &&
-				    list_empty(&instance->done_buf_list))
-					instance->f_force_flush = true;
-
+			if (!list_empty(&instance->trans_buf_list) ||
+			    !list_empty(&instance->done_buf_list)) {
+				instance->f_force_flush = true;
 				queue_work(instance->wq_packet,
 					   &instance->wk_start_trans);
-				return;
-			} else {
-				if (!list_empty(&instance->trans_buf_list) ||
-				    !list_empty(&instance->done_buf_list))
-					queue_work(instance->wq_packet,
-						   &instance->wk_start_trans);
 			}
 		} else if (mse_state_test(instance, MSE_STATE_EXECUTE)) {
 			/* state is EXECUTE */
@@ -2098,6 +2061,9 @@ static void mse_work_callback(struct work_struct *work)
 			}
 		}
 		size = instance->work_length;
+		instance->work_length = 0;
+		instance->parsed = 0;
+		instance->stored = 0;
 	} else {
 		if (!IS_MSE_TYPE_AUDIO(adapter->type)) {
 			size = instance->work_length;
@@ -2601,9 +2567,6 @@ static void mse_start_streaming_common(struct mse_instance *instance)
 	instance->f_trans_start = false;
 	instance->f_completion = false;
 	instance->f_force_flush = false;
-	instance->f_temp_video_buffer_rewind = false;
-	instance->f_mjpeg_valid = false;
-	instance->f_first_vframe = true;
 	instance->f_use_silent_data = true;
 	instance->parsed = 0;
 	instance->stored = 0;
@@ -2665,7 +2628,7 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 	u16 pcr_pid = instance->media_config.mpeg2ts.pcr_pid;
 	u64 pcr;
 	int psize, offset;
-	int discard = 0;
+	int skip = 0;
 	bool ret = false;
 
 	psize = mpeg2ts_packet_size(instance);
@@ -2679,14 +2642,14 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 		if (instance->parsed + psize < instance->stored &&
 		    tsp[0] != MPEG2TS_SYNC) {
 			instance->parsed++;
-			discard++;
+			skip++;
 			continue;
 		}
 
-		if (discard) {
-			mse_err("can not find sync byte. discard %d byte\n",
-				discard);
-			discard = 0;
+		if (skip) {
+			mse_debug("check sync byte. skip %d byte\n",
+				  skip);
+			skip = 0;
 		}
 
 		instance->parsed += psize;
@@ -2748,58 +2711,6 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance)
 	return ret;
 }
 
-static bool set_mpeg2ts_type(struct mse_instance *instance, unsigned char *buf)
-{
-	enum MSE_MPEG2TS_TYPE ts_type;
-	struct mse_mpeg2ts_config *mpeg2ts;
-
-	/* check sync byte */
-	if (is_mpeg2ts_ts(buf))
-		ts_type = MSE_MPEG2TS_TYPE_TS;
-	else if (is_mpeg2ts_m2ts(buf))
-		ts_type = MSE_MPEG2TS_TYPE_M2TS;
-	else
-		return false;
-
-	mse_debug("mpeg2ts_type=%d\n", ts_type);
-
-	mpeg2ts = &instance->media_config.mpeg2ts;
-	mpeg2ts->mpeg2ts_type = ts_type;
-	instance->packetizer->set_mpeg2ts_config(instance->index_packetizer,
-						 mpeg2ts);
-
-	return true;
-}
-
-static bool check_mjpeg_soi(unsigned char *buf)
-{
-	/* Check SOI marker */
-	if (buf[0] == 0xFF || buf[1] == 0xD8)
-		return true;
-	else
-		return false;
-}
-
-static bool check_mjpeg_eoi(struct mse_instance *instance)
-{
-	int i;
-	unsigned char *buf = instance->temp_video_buffer;
-
-	for (i = instance->parsed; i < instance->stored - 1; i++) {
-		if (buf[i] == 0xFF && buf[i + 1] == 0xD9) {
-			mse_debug("Found EOI, buf[%d]=%02X buf[%d]=%02X\n",
-				  i, buf[i], i + 1, buf[i + 1]);
-			instance->parsed = i + 2;
-
-			return true;
-		}
-	}
-
-	instance->parsed = instance->stored;
-
-	return false;
-}
-
 static void mse_work_start_transmission(struct work_struct *work)
 {
 	struct mse_instance *instance;
@@ -2819,8 +2730,10 @@ static void mse_work_start_transmission(struct work_struct *work)
 		return;
 
 	/* retry */
-	if (!list_empty(&instance->done_buf_list))
+	if (!list_empty(&instance->done_buf_list)) {
 		queue_work(instance->wq_packet, &instance->wk_start_trans);
+		return;
+	}
 
 	adapter = instance->media;
 
@@ -2854,48 +2767,6 @@ static void mse_work_start_transmission(struct work_struct *work)
 		unsigned char *temp_buf = instance->temp_video_buffer;
 		unsigned int temp_buf_size = MSE_TEMP_VIDEO_BUF_SIZE;
 
-		if (instance->f_temp_video_buffer_rewind) {
-			int rewind_size = instance->stored - instance->parsed;
-
-			if (rewind_size < instance->parsed) {
-				memcpy(temp_buf, temp_buf + instance->parsed,
-				       rewind_size);
-				instance->stored = rewind_size;
-				instance->parsed = 0;
-				instance->work_length = 0;
-			}
-			instance->f_temp_video_buffer_rewind = false;
-		} else {
-			instance->work_length = 0;
-		}
-
-		if (instance->f_first_vframe) {
-			bool valid;
-
-			/* check the start of buffer for validation */
-			if (IS_MSE_TYPE_MPEG2TS(adapter->type))
-				valid = set_mpeg2ts_type(instance, buffer);
-			else
-				valid = check_mjpeg_soi(buffer);
-
-			if (valid) {
-				instance->f_first_vframe = false;
-			} else {
-				/* Illegal data, discard buffer */
-				write_lock_irqsave(&instance->lock_state,
-						   flags);
-				/* if state is EXECUTE, change to IDLE */
-				mse_state_change_if(instance, MSE_STATE_IDLE,
-						    MSE_STATE_EXECUTE);
-				write_unlock_irqrestore(&instance->lock_state,
-							flags);
-
-				mse_trans_complete(instance, 0);
-
-				return;
-			}
-		}
-
 		if (instance->stored + buffer_size <= temp_buf_size) {
 			memcpy(temp_buf + instance->stored,
 			       buffer, buffer_size);
@@ -2918,10 +2789,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 			return;
 		}
 
-		if (IS_MSE_TYPE_MPEG2TS(adapter->type))
-			trans_start = check_mpeg2ts_pcr(instance);
-		else
-			trans_start = check_mjpeg_eoi(instance);
+		trans_start = check_mpeg2ts_pcr(instance);
 
 #ifdef DEBUG
 		if (instance->f_force_flush) {
@@ -2941,15 +2809,10 @@ static void mse_work_start_transmission(struct work_struct *work)
 
 			instance->media_buffer = temp_buf;
 			instance->f_trans_start = true;
-
-			if (buffer_size > 0) {
-				instance->media_buffer_size = instance->parsed;
-			} else {
-				instance->media_buffer_size = instance->stored;
-			}
+			instance->media_buffer_size = instance->stored;
 		} else {
 			/* Not enough data, request next buffer */
-			mse_trans_complete(instance, 0);
+			mse_trans_complete(instance, buffer_size);
 
 			if (!list_empty(&instance->trans_buf_list)) {
 				queue_work(instance->wq_packet,
@@ -3581,6 +3444,8 @@ int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 		return -EBUSY;
 	}
 
+	mse_debug("mpeg2ts_type=%d\n", config->mpeg2ts_type);
+
 	net_config = &instance->net_config;
 	packetizer = instance->packetizer;
 	index_packetizer = instance->index_packetizer;
@@ -3740,10 +3605,8 @@ int mse_open(int index_media, bool tx)
 		goto error_packetizer_is_not_valid;
 	}
 
-	/* if mjpeg or mpeg2ts packetizing */
-	if (tx &&
-	    ((packetizer_id == MSE_PACKETIZER_CVF_MJPEG) ||
-	     (packetizer_id == MSE_PACKETIZER_IEC61883_4))) {
+	/* if mpeg2ts packetizing */
+	if (tx && (packetizer_id == MSE_PACKETIZER_IEC61883_4)) {
 		mse_debug("use temp_video_buffer\n");
 		instance->f_use_temp_video_buffer = true;
 		instance->temp_video_buffer = kmalloc(MSE_TEMP_VIDEO_BUF_SIZE,
