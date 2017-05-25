@@ -144,7 +144,33 @@ struct mjpeg_component {
 	u8 qt;
 };
 
-u8 jpeg_get_marker(const u8 *buf, size_t len, size_t *offset);
+static inline u8 jpeg_get_marker(const u8 *buf, size_t len, size_t *offset)
+{
+	u8 marker;
+
+	while ((buf[(*offset)++] != JPEG_MARKER) && (*offset < len))
+		;
+
+	if (*offset >= len)
+		return JPEG_MARKER_KIND_NIL;
+
+	marker = buf[(*offset)++];
+
+	return marker;
+}
+
+static inline size_t jpeg_search_eoi(const u8 *buf, size_t len,
+				     size_t first_pos)
+{
+	size_t offset = first_pos;
+
+	while (offset < len)
+		if (jpeg_get_marker(buf, len, &offset) ==  JPEG_MARKER_KIND_EOI)
+			break;
+
+	return offset;
+}
+
 int jpeg_read_sof(const u8 *buf,
 		  size_t len,
 		  size_t *offset,
