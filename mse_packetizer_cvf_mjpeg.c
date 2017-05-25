@@ -471,6 +471,8 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 			return offset;
 		}
 		header_len = offset;
+	} else {
+		offset = *buffer_processed;
 	}
 
 	/* Search EOI */
