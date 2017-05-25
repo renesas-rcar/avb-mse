@@ -745,14 +745,15 @@ static int mse_adapter_v4l2_querycap(struct file *filp,
 	return 0;
 }
 
-static int mse_adapter_v4l2_enum_fmt_vid_cap(struct file *filp,
-					     void *priv,
-					     struct v4l2_fmtdesc *fmt)
+static int mse_adapter_v4l2_enum_fmt_vid(struct file *filp,
+					 void *priv,
+					 struct v4l2_fmtdesc *fmt)
 {
 	unsigned int index;
 	const struct v4l2_fmtdesc *fmtdesc;
 	const struct v4l2_fmtdesc *fmtbase;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
+	enum v4l2_buf_type buf_type;
 	int fmt_size;
 
 	mse_debug("START fmt->index=%d\n", fmt->index);
@@ -779,54 +780,7 @@ static int mse_adapter_v4l2_enum_fmt_vid_cap(struct file *filp,
 		return -EINVAL;
 	}
 
-	index = fmt->index;
-	memset(fmt, 0, sizeof(*fmt));
-
-	fmtdesc = &fmtbase[index];
-
-	fmt->index = index;
-	fmt->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	strcpy(fmt->description, fmtdesc->description);
-	fmt->pixelformat = fmtdesc->pixelformat;
-
-	mse_debug("END format: %s\n", fmtdesc->description);
-
-	return 0;
-}
-
-static int mse_adapter_v4l2_enum_fmt_vid_out(struct file *filp,
-					     void *priv,
-					     struct v4l2_fmtdesc *fmt)
-{
-	unsigned int index;
-	const struct v4l2_fmtdesc *fmtdesc;
-	const struct v4l2_fmtdesc *fmtbase;
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
-	int fmt_size;
-
-	mse_debug("START fmt->index=%d\n", fmt->index);
-
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
-
-	if (vadp_dev->type == MSE_TYPE_ADAPTER_VIDEO) {
-		fmtbase = g_formats_video;
-		fmt_size = ARRAY_SIZE(g_formats_video);
-	} else if (vadp_dev->type == MSE_TYPE_ADAPTER_MPEG2TS) {
-		fmtbase = g_formats_mpeg;
-		fmt_size = ARRAY_SIZE(g_formats_mpeg);
-	} else {
-		mse_err("Failed vdev type=%d\n", vadp_dev->type);
-		return -EINVAL;
-	}
-
-	if (fmt->index >= fmt_size) {
-		mse_debug("fmt->index(%d) is equal or bigger than %d\n",
-			  fmt->index, fmt_size);
-		return -EINVAL;
-	}
+	buf_type = fmt->type;
 
 	index = fmt->index;
 	memset(fmt, 0, sizeof(*fmt));
@@ -834,20 +788,13 @@ static int mse_adapter_v4l2_enum_fmt_vid_out(struct file *filp,
 	fmtdesc = &fmtbase[index];
 
 	fmt->index = index;
-	fmt->type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+	fmt->type = buf_type;
 	strcpy(fmt->description, fmtdesc->description);
 	fmt->pixelformat = fmtdesc->pixelformat;
 
 	mse_debug("END format: %s\n", fmtdesc->description);
 
 	return 0;
-}
-
-static const struct v4l2_fmtdesc *get_default_fmtdesc(
-					const struct v4l2_fmtdesc fmtdescs[],
-					int dflt_format)
-{
-	return &fmtdescs[dflt_format];
 }
 
 static const struct v4l2_fmtdesc *get_fmtdesc(
@@ -939,7 +886,7 @@ static int mse_adapter_v4l2_try_fmt_vid(struct file *filp,
 	fmtdesc = get_fmtdesc(fmtbase, fmt_size, fmt);
 	if (!fmtdesc) {
 		mse_info("Unknown fourcc format=(0x%08x)\n", pix->pixelformat);
-		fmtdesc = get_default_fmtdesc(fmtbase, 0);
+		fmtdesc = &fmtbase[0];
 		pix->pixelformat = fmtdesc->pixelformat;
 	}
 
@@ -967,9 +914,9 @@ static int mse_adapter_v4l2_try_fmt_vid(struct file *filp,
 	return 0;
 }
 
-static int mse_adapter_v4l2_g_fmt_vid_cap(struct file *filp,
-					  void *priv,
-					  struct v4l2_format *fmt)
+static int mse_adapter_v4l2_g_fmt_vid(struct file *filp,
+				      void *priv,
+				      struct v4l2_format *fmt)
 {
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
@@ -988,30 +935,9 @@ static int mse_adapter_v4l2_g_fmt_vid_cap(struct file *filp,
 	return 0;
 }
 
-static int mse_adapter_v4l2_g_fmt_vid_out(struct file *filp,
-					  void *priv,
-					  struct v4l2_format *fmt)
-{
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
-	struct v4l2_pix_format *pix = &fmt->fmt.pix;
-
-	mse_debug("START\n");
-
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
-
-	*pix = vadp_dev->format;
-
-	mse_debug("END\n");
-
-	return 0;
-}
-
-static int mse_adapter_v4l2_s_fmt_vid_cap(struct file *filp,
-					  void *priv,
-					  struct v4l2_format *fmt)
+static int mse_adapter_v4l2_s_fmt_vid(struct file *filp,
+				      void *priv,
+				      struct v4l2_format *fmt)
 {
 	int err;
 	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
@@ -1021,11 +947,6 @@ static int mse_adapter_v4l2_s_fmt_vid_cap(struct file *filp,
 
 	if (!vadp_dev) {
 		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
-
-	if (V4L2_TYPE_IS_OUTPUT(fmt->type)) {
-		mse_err("Failed wrong buffer type\n");
 		return -EINVAL;
 	}
 
@@ -1035,53 +956,7 @@ static int mse_adapter_v4l2_s_fmt_vid_cap(struct file *filp,
 		return err;
 	}
 
-	if (vb2_is_busy(&vadp_dev->q_cap)) {
-		mse_err("Failed vb2 is busy\n");
-		return -EBUSY;
-	}
-
-	vadp_dev->format = *pix;
-
-	mse_info("END format=%c%c%c%c, width=%d, height=%d\n",
-		 pix->pixelformat >> 0,
-		 pix->pixelformat >> 8,
-		 pix->pixelformat >> 16,
-		 pix->pixelformat >> 24,
-		 pix->width,
-		 pix->height);
-
-	mse_debug("END\n");
-
-	return 0;
-}
-
-static int mse_adapter_v4l2_s_fmt_vid_out(struct file *filp,
-					  void *priv,
-					  struct v4l2_format *fmt)
-{
-	int err;
-	struct v4l2_adapter_device *vadp_dev = video_drvdata(filp);
-	struct v4l2_pix_format *pix = &fmt->fmt.pix;
-
-	mse_debug("START\n");
-
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
-
-	if (!V4L2_TYPE_IS_OUTPUT(fmt->type)) {
-		mse_err("Failed wrong buffer type\n");
-		return -EINVAL;
-	}
-
-	err = mse_adapter_v4l2_try_fmt_vid(filp, priv, fmt);
-	if (err) {
-		mse_err("Failed playback_try_fmt_vid_out()\n");
-		return err;
-	}
-
-	if (vb2_is_busy(&vadp_dev->q_out)) {
+	if (vb2_is_busy(vadp_dev->vdev.queue)) {
 		mse_err("Failed vb2 is busy\n");
 		return -EBUSY;
 	}
@@ -1810,12 +1685,12 @@ static const struct vb2_ops g_mse_adapter_v4l2_queue_ops = {
 
 static const struct v4l2_ioctl_ops g_mse_adapter_v4l2_ioctl_ops = {
 	.vidioc_querycap		= mse_adapter_v4l2_querycap,
-	.vidioc_enum_fmt_vid_cap	= mse_adapter_v4l2_enum_fmt_vid_cap,
-	.vidioc_enum_fmt_vid_out	= mse_adapter_v4l2_enum_fmt_vid_out,
-	.vidioc_g_fmt_vid_cap		= mse_adapter_v4l2_g_fmt_vid_cap,
-	.vidioc_g_fmt_vid_out		= mse_adapter_v4l2_g_fmt_vid_out,
-	.vidioc_s_fmt_vid_cap		= mse_adapter_v4l2_s_fmt_vid_cap,
-	.vidioc_s_fmt_vid_out		= mse_adapter_v4l2_s_fmt_vid_out,
+	.vidioc_enum_fmt_vid_cap	= mse_adapter_v4l2_enum_fmt_vid,
+	.vidioc_enum_fmt_vid_out	= mse_adapter_v4l2_enum_fmt_vid,
+	.vidioc_g_fmt_vid_cap		= mse_adapter_v4l2_g_fmt_vid,
+	.vidioc_g_fmt_vid_out		= mse_adapter_v4l2_g_fmt_vid,
+	.vidioc_s_fmt_vid_cap		= mse_adapter_v4l2_s_fmt_vid,
+	.vidioc_s_fmt_vid_out		= mse_adapter_v4l2_s_fmt_vid,
 	.vidioc_try_fmt_vid_cap		= mse_adapter_v4l2_try_fmt_vid,
 	.vidioc_try_fmt_vid_out		= mse_adapter_v4l2_try_fmt_vid,
 	.vidioc_reqbufs			= vb2_ioctl_reqbufs,
