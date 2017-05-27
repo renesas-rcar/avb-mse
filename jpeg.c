@@ -191,9 +191,8 @@ int jpeg_read_sof(const u8 *buf,
 
 	header_len = JPEG_GET_HEADER_SIZE(buf, offset_work);
 	if (header_len < JPEG_SOF_LENGTH) {
-		mse_debug("invalid length request next buffer. hlen=%zu\n",
-			  header_len);
-		return -EAGAIN;
+		mse_warn("invalid length. hlen=%zu\n", header_len);
+		return -EPERM;
 	}
 
 	*offset += header_len;
@@ -296,9 +295,8 @@ int jpeg_read_dqt(const u8 *buf,
 
 	header_len = JPEG_GET_HEADER_SIZE(buf, *offset);
 	if (header_len < JPEG_MARKER_SIZE_LENGTH) {
-		mse_debug("invalid length, request next buffer. hlen=%zu\n",
-			  header_len);
-		return -EAGAIN;
+		mse_warn("invalid length. hlen=%zu\n", header_len);
+		return -EPERM;
 	}
 
 	if (*offset + header_len > len) {
@@ -361,10 +359,9 @@ int jpeg_read_dri(const u8 *buf,
 
 	header_len = JPEG_GET_HEADER_SIZE(buf, *offset);
 	if (header_len < JPEG_DRI_LENGTH) {
-		mse_debug("invalid length, request next buffer. hlen=%zu\n",
-			  header_len);
+		mse_warn("invalid length. hlen=%zu\n", header_len);
 		*offset += header_len;
-		return -EAGAIN;
+		return -EPERM;
 	}
 
 	*offset += header_len;
