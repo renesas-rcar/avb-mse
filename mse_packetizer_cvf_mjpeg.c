@@ -314,12 +314,12 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 			cbs);
 }
 
-static int parse_jpeg_headers(struct cvf_mjpeg_packetizer *cvf_mjpeg,
-			      u8 *buf,
-			      size_t data_len)
+static ssize_t parse_jpeg_headers(struct cvf_mjpeg_packetizer *cvf_mjpeg,
+				  u8 *buf,
+				  size_t data_len)
 {
 	struct jpeg_info *jpeg = &cvf_mjpeg->jpeg;
-	size_t offset = 0;
+	ssize_t offset = 0;
 	u8 mk, qid, qlen;
 	int header_len = 0;
 	int ret;
@@ -438,7 +438,7 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	struct mjpeg_quant_table *q;
 	struct mjpeg_quant_header qheader;
 	size_t qlen;
-	size_t offset;
+	ssize_t offset;
 	u8 *buf, *payload;
 	size_t data_len, end_len;
 	size_t payload_size;
