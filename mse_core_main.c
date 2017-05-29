@@ -408,11 +408,10 @@ struct mse_instance {
 	bool f_force_flush;
 	unsigned char *temp_video_buffer;
 	/** @brief audio buffer  */
-	bool f_use_silent_data;
 	int temp_w;
 	int temp_r;
 	unsigned char temp_buffer[MSE_DECODE_BUFFER_NUM][MAX_DECODE_SIZE];
-	unsigned char guard_buffer[8192];
+	size_t temp_len[MSE_DECODE_BUFFER_NUM];
 };
 
 static int mse_instance_max = MSE_INSTANCE_MAX;
@@ -1879,7 +1878,7 @@ static void mse_work_depacketize(struct work_struct *work)
 				&t_stored,
 				dma,
 				instance->packetizer,
-				&instance->work_length);
+				&instance->temp_len[instance->temp_w]);
 
 			if (ret < 0) {
 				if (ret != -EAGAIN) {
@@ -1906,19 +1905,20 @@ static void mse_work_depacketize(struct work_struct *work)
 				instance->f_get_first_packet = true;
 			}
 
-			if (instance->work_length >=
+			if (instance->temp_len[instance->temp_w] >=
 				instance->media_buffer_size) {
 				mse_debug("media_buffer=%p depacketized=%zu ret=%d\n",
 					  instance->media_buffer,
-					  instance->work_length, ret);
+					  instance->temp_len[instance->temp_w],
+					  ret);
 
 				instance->temp_w = (instance->temp_w + 1) %
 					MSE_DECODE_BUFFER_NUM;
 				instance->work_length = 0;
-				instance->f_use_silent_data = false;
 				atomic_inc(&instance->done_buf_cnt);
 				memset(instance->temp_buffer[instance->temp_w],
 				       0, instance->media_buffer_size);
+				instance->temp_len[instance->temp_w] = 0;
 
 				mse_debug("temp_r=%d temp_w=%d\n",
 					  instance->temp_r, instance->temp_w);
@@ -1983,6 +1983,7 @@ static void mse_work_callback(struct work_struct *work)
 	int buf_cnt;
 	int size = 0;
 	unsigned long flags;
+	int temp_r;
 
 	instance = container_of(work, struct mse_instance, wk_callback);
 	adapter = instance->media;
@@ -1990,8 +1991,7 @@ static void mse_work_callback(struct work_struct *work)
 	buf_cnt = atomic_read(&instance->done_buf_cnt);
 
 	/* for capture audio silent data */
-	if (IS_MSE_TYPE_AUDIO(adapter->type) && !instance->tx &&
-	    instance->f_use_silent_data && !buf_cnt)
+	if (IS_MSE_TYPE_AUDIO(adapter->type) && !instance->tx && !buf_cnt)
 		buf_cnt = atomic_inc_return(&instance->done_buf_cnt);
 
 	if (mse_state_test(instance, MSE_STATE_EXECUTE)) {
@@ -2061,16 +2061,22 @@ static void mse_work_callback(struct work_struct *work)
 		if (!IS_MSE_TYPE_AUDIO(adapter->type)) {
 			size = instance->work_length;
 		} else {
-			if (!instance->f_use_silent_data &&
-			    instance->media_buffer &&
-			    instance->temp_w != instance->temp_r &&
+			size = instance->media_buffer_size;
+			temp_r = instance->temp_r;
+			if (instance->media_buffer &&
 			    check_presentation_time(instance)) {
-				size = instance->media_buffer_size;
 				memcpy(instance->media_buffer,
-				       instance->temp_buffer[instance->temp_r],
+				       instance->temp_buffer[temp_r],
 				       size);
-				instance->temp_r = (instance->temp_r + 1) %
-					MSE_DECODE_BUFFER_NUM;
+				if (instance->temp_w != temp_r) {
+					instance->temp_r = (temp_r + 1) %
+						MSE_DECODE_BUFFER_NUM;
+				} else {
+					memset(instance->temp_buffer[temp_r],
+					       0, instance->temp_len[temp_r]);
+					instance->temp_len[temp_r] = 0;
+				}
+
 				mse_debug("temp_r=%d temp_w=%d\n",
 					  instance->temp_r,
 					  instance->temp_w);
@@ -2553,6 +2559,8 @@ static void mse_tstamp_init(struct mse_instance *instance,
 
 static void mse_start_streaming_common(struct mse_instance *instance)
 {
+	int i;
+
 	instance->f_streaming = false;
 	instance->f_continue = false;
 	instance->f_stopping = false;
@@ -2560,7 +2568,6 @@ static void mse_start_streaming_common(struct mse_instance *instance)
 	instance->f_trans_start = false;
 	instance->f_completion = false;
 	instance->f_force_flush = false;
-	instance->f_use_silent_data = true;
 	instance->parsed = 0;
 	instance->stored = 0;
 	instance->mpeg2ts_clock_90k = MPEG2TS_PCR90K_INVALID;
@@ -2574,6 +2581,9 @@ static void mse_start_streaming_common(struct mse_instance *instance)
 	if (instance->temp_video_buffer)
 		memset(instance->temp_video_buffer, 0,
 		       MSE_TEMP_VIDEO_BUF_SIZE);
+
+	for (i = 0; i < MSE_DECODE_BUFFER_NUM; i++)
+		instance->temp_len[i] = 0;
 
 	/* start timer */
 	if (instance->timer_interval) {
