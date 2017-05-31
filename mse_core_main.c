@@ -3860,7 +3860,13 @@ int mse_open(int index_media, bool tx)
 	}
 
 	/* get packet memory */
-	instance->packet_buffer = mse_packet_ctrl_alloc(
+	if (instance->tx)
+		instance->packet_buffer = mse_packet_ctrl_alloc(
+						&mse->pdev->dev,
+						MSE_DMA_MAX_PACKET * 3,
+						MSE_DMA_MAX_PACKET_SIZE);
+	else
+		instance->packet_buffer = mse_packet_ctrl_alloc(
 						&mse->pdev->dev,
 						MSE_DMA_MAX_PACKET * 2,
 						MSE_DMA_MAX_PACKET_SIZE);
