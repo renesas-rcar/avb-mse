@@ -142,7 +142,9 @@ struct v4l2_adapter_device {
 	spinlock_t		lock_buf_list;    /* lock for buf_list */
 	/* list of buffer queued from v4l2 core */
 	struct list_head	buf_list;
-	/* list of buffer for mse transmission */
+	/* list of buffer prepared */
+	struct list_head	prepared_buf_list;
+	/* list of buffer mse processing */
 	struct list_head	stream_buf_list;
 	unsigned int		sequence;
 	/* for buffer management debug */
@@ -156,6 +158,7 @@ struct v4l2_adapter_device {
 	bool			f_mse_open;
 	/* previous trans buffer for checking buffer overwite */
 	void			*prev;
+
 	/* temp video buffer */
 	bool			use_temp_buffer;
 	struct v4l2_adapter_temp_buffer		temp_buf[NUM_BUFFERS];
@@ -1243,6 +1246,39 @@ static int mse_adapter_v4l2_queue_setup(struct vb2_queue *vq,
 	return 0;
 }
 
+static int return_buffers(struct v4l2_adapter_device *vadp_dev,
+			  struct list_head *buf_list,
+			  enum vb2_buffer_state state)
+{
+	struct v4l2_adapter_buffer *buf, *tmp;
+	int count = 0;
+
+	list_for_each_entry_safe(buf, tmp, buf_list, list) {
+		count++;
+		vadp_buffer_done(vadp_dev, buf, state);
+	}
+
+	return count;
+}
+
+static void return_all_buffers(struct v4l2_adapter_device *vadp_dev,
+			       enum vb2_buffer_state state)
+{
+	unsigned long flags;
+	int count = 0;
+
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
+	count = return_buffers(vadp_dev, &vadp_dev->stream_buf_list, state);
+	mse_debug("stream_buf_list count=%d\n", count);
+
+	count = return_buffers(vadp_dev, &vadp_dev->prepared_buf_list, state);
+	mse_debug("prepared_buf_list count=%d\n", count);
+
+	count = return_buffers(vadp_dev, &vadp_dev->buf_list, state);
+	mse_debug("buf_list count=%d\n", count);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+}
+
 static int mse_adapter_v4l2_buf_prepare(struct vb2_buffer *vb)
 {
 	unsigned long plane_size;
@@ -1266,29 +1302,6 @@ static int mse_adapter_v4l2_buf_prepare(struct vb2_buffer *vb)
 	mse_debug("END\n");
 
 	return 0;
-}
-
-static void return_all_buffers(struct v4l2_adapter_device *vadp_dev,
-			       enum vb2_buffer_state state)
-{
-	unsigned long flags;
-	struct v4l2_adapter_buffer *buf, *node;
-	int count = 0;
-
-	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
-	list_for_each_entry_safe(buf, node, &vadp_dev->stream_buf_list, list) {
-		count++;
-		vadp_buffer_done(vadp_dev, buf, state);
-	}
-	mse_debug("stream_buf_list count=%d\n", count);
-
-	count = 0;
-	list_for_each_entry_safe(buf, node, &vadp_dev->buf_list, list) {
-		count++;
-		vadp_buffer_done(vadp_dev, buf, state);
-	}
-	mse_debug("buf_list count=%d\n", count);
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 }
 
 static void mse_adapter_v4l2_stop_streaming(struct vb2_queue *vq)
@@ -1374,7 +1387,7 @@ static void prepare_stream_buffer(struct vb2_queue *vq)
 		return;
 
 	if (!V4L2_TYPE_IS_OUTPUT(vq->type)) {
-		list_move_tail(&vadp_buf->list, &vadp_dev->stream_buf_list);
+		list_move_tail(&vadp_buf->list, &vadp_dev->prepared_buf_list);
 	} else {
 		buf = vb2_plane_vaddr(&vadp_buf->vb.vb2_buf, 0);
 		size = vb2_get_plane_payload(&vadp_buf->vb.vb2_buf, 0);
@@ -1402,7 +1415,7 @@ static void prepare_stream_buffer(struct vb2_queue *vq)
 
 		if (!vadp_dev->use_temp_buffer) {
 			list_move_tail(&vadp_buf->list,
-				       &vadp_dev->stream_buf_list);
+				       &vadp_dev->prepared_buf_list);
 		} else {
 			/* use temp buffer */
 			struct v4l2_adapter_temp_buffer *temp;
@@ -1415,7 +1428,7 @@ static void prepare_stream_buffer(struct vb2_queue *vq)
 			temp = temp_buffer_get_prepared(vadp_dev);
 			if (temp && temp_w != vadp_dev->temp_w) {
 				list_move_tail(&vadp_buf->list,
-					       &vadp_dev->stream_buf_list);
+					       &vadp_dev->prepared_buf_list);
 			} else {
 				vadp_buffer_done(vadp_dev, vadp_buf,
 						 VB2_BUF_STATE_DONE);
@@ -1443,7 +1456,7 @@ static int set_stream_buffer(struct vb2_queue *vq)
 
 	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 
-	vadp_buf = list_first_entry_or_null(&vadp_dev->stream_buf_list,
+	vadp_buf = list_first_entry_or_null(&vadp_dev->prepared_buf_list,
 					    struct v4l2_adapter_buffer,
 					    list);
 
@@ -1478,14 +1491,13 @@ static int set_stream_buffer(struct vb2_queue *vq)
 		return 0;
 	}
 
-	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
-
 	if (vadp_dev->prev == buf) {
 		mse_debug("current buffer is already transmissioned. prev=%p curr=%p\n",
 			  vadp_dev->prev, buf);
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
 		return 0;
 	}
-	vadp_dev->prev = buf;
 
 	mse_debug("buf=%p size=%lu\n", buf, size);
 
@@ -1496,10 +1508,20 @@ static int set_stream_buffer(struct vb2_queue *vq)
 				     mse_adapter_v4l2_callback);
 
 	if (err < 0) {
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+		if (err == -EAGAIN)
+			return err;
+
 		mse_err("Failed mse_start_transmission()\n");
 		return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
 		vb2_queue_error(vq);
+
+		return err;
 	}
+
+	vadp_dev->prev = buf;
+	list_move_tail(&vadp_buf->list, &vadp_dev->stream_buf_list);
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
 	mse_debug("END\n");
 
@@ -1568,9 +1590,7 @@ static int mse_adapter_v4l2_callback(void *priv, int size)
 
 	vadp_buffer_done(vadp_dev, vadp_buf, VB2_BUF_STATE_DONE);
 
-	if (list_empty(&vadp_dev->stream_buf_list) &&
-	    !list_empty(&vadp_dev->buf_list))
-		prepare_stream_buffer(vq);
+	prepare_stream_buffer(vq);
 
 	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
@@ -1587,7 +1607,6 @@ static void mse_adapter_v4l2_buf_queue(struct vb2_buffer *vb)
 	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vb->vb2_queue);
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
 	struct v4l2_adapter_buffer *vadp_buf = to_v4l2_adapter_buffer(vbuf);
-	bool is_need_send = false;
 
 	mse_debug("START vb=%p type=%s\n",
 		  vb2_plane_vaddr(vb, 0),
@@ -1600,8 +1619,6 @@ static void mse_adapter_v4l2_buf_queue(struct vb2_buffer *vb)
 
 	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 
-	if (list_empty(&vadp_dev->stream_buf_list))
-		is_need_send = true;
 
 	list_add_tail(&vadp_buf->list, &vadp_dev->buf_list);
 	vadp_dev->queued++;
@@ -1622,8 +1639,7 @@ static void mse_adapter_v4l2_buf_queue(struct vb2_buffer *vb)
 	prepare_stream_buffer(vb->vb2_queue);
 	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
-	if (is_need_send)
-		set_stream_buffer(vb->vb2_queue);
+	set_stream_buffer(vb->vb2_queue);
 }
 
 static int set_media_config_mpeg(struct v4l2_adapter_device *vadp_dev)
@@ -1708,6 +1724,7 @@ static int mse_adapter_v4l2_start_streaming(struct vb2_queue *vq,
 	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
 	int index = vadp_dev->index_instance;
 	unsigned long flags;
+	int i;
 
 	mse_debug("START vq=%p, type=%s count=%d\n",
 		  vq, v4l2_type_stringfy(vq->type), count);
@@ -1736,9 +1753,22 @@ static int mse_adapter_v4l2_start_streaming(struct vb2_queue *vq,
 		return err;
 	}
 
-	err = set_stream_buffer(vq);
+	for (i = 0; i < count - 1; i++) {
+		spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
+		prepare_stream_buffer(vq);
+		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
 
-	return err;
+		err = set_stream_buffer(vq);
+
+		if (err < 0) {
+			if (err == -EAGAIN)
+				break;
+
+			return err;
+		}
+	}
+
+	return 0;
 }
 
 static const struct vb2_ops g_mse_adapter_v4l2_queue_ops = {
@@ -1871,6 +1901,7 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	}
 
 	INIT_LIST_HEAD(&vadp_dev->buf_list);
+	INIT_LIST_HEAD(&vadp_dev->prepared_buf_list);
 	INIT_LIST_HEAD(&vadp_dev->stream_buf_list);
 	spin_lock_init(&vadp_dev->lock_buf_list);
 
