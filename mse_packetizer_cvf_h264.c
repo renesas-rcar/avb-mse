@@ -406,13 +406,14 @@ static int mse_packetizer_cvf_h264_packetize(int index,
 			if (h264->next_nal >= buf + buffer_size - sizeof(u32))
 				h264->next_nal = buf + buffer_size;
 			cur_nal += sizeof(u32);
+			nal_size = h264->next_nal - cur_nal;
 		} else {
 			memcpy(&nal_header, cur_nal, sizeof(nal_header));
 			nal_size = ntohl(nal_header);
 			cur_nal += sizeof(u32);
 			h264->next_nal = cur_nal + nal_size;
 		}
-		mse_debug("seqnum=%d process=%zu/%zu t=%d nal=%d\n",
+		mse_debug("seqnum=%d process=%zu/%zu t=%u nal=%d\n",
 			  h264->send_seq_num, *buffer_processed,
 			  buffer_size, *timestamp, nal_size);
 
