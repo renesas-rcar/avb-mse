@@ -4120,12 +4120,15 @@ int mse_stop_streaming(int index)
 		err = mse_state_change(instance, MSE_STATE_OPEN);
 	else
 		err = mse_state_change(instance, MSE_STATE_STOPPING);
-	write_unlock_irqrestore(&instance->lock_state, flags);
-	if (err)
-		return err;
 
-	if (mse_state_test(instance, MSE_STATE_OPEN)) {
+	if (err) {
+		write_unlock_irqrestore(&instance->lock_state, flags);
+		return err;
+	}
+
+	if (mse_state_test_nolock(instance, MSE_STATE_OPEN)) {
 		/* state is OPEN */
+		write_unlock_irqrestore(&instance->lock_state, flags);
 		mse_stop_streaming_common(instance);
 
 		if (IS_MSE_TYPE_AUDIO(instance->media->type))
@@ -4134,6 +4137,7 @@ int mse_stop_streaming(int index)
 		/* state is STOPPING */
 		instance->f_stopping = true;
 		init_completion(&instance->completion_stop);
+		write_unlock_irqrestore(&instance->lock_state, flags);
 
 		if (instance->tx) {
 			queue_work(instance->wq_packet,
