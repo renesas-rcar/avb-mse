@@ -324,7 +324,7 @@ static int mse_packetizer_cvf_h264_set_video_config(
 		h264->payload_max = bytes_per_frame;
 	}
 
-	h264->data_len_max = AVTP_PAYLOAD_MAX - FU_HEADER_LEN -
+	h264->data_len_max = h264->payload_max - FU_HEADER_LEN -
 		h264->additional_header_size;
 
 	memcpy(param.dest_addr, h264->net_config.dest_addr, MSE_MAC_LEN_MAX);
