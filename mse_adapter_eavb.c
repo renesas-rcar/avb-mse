@@ -266,14 +266,6 @@ static int mse_adapter_eavb_open(char *name)
 		}
 	}
 
-	eavb->entry = kcalloc(MSE_EAVB_ADAPTER_ENTRY_MAX * 2,
-			      sizeof(struct eavb_entry),
-			      GFP_KERNEL);
-	if (!eavb->entry) {
-		err = -ENOMEM;
-		goto error_eavb_opened;
-	}
-
 	return eavb->index;
 
 error_eavb_opened:
@@ -421,6 +413,12 @@ static int mse_adapter_eavb_send_prepare(int index,
 		return -EINVAL;
 	}
 
+	eavb->entry = kcalloc(num_packets,
+			      sizeof(struct eavb_entry),
+			      GFP_KERNEL);
+	if (!eavb->entry)
+		return -ENOMEM;
+
 	for (i = 0; i < num_packets; i++) {
 		(eavb->entry + i)->seq_no = i;
 		(eavb->entry + i)->vec[0].base = packets[i].paddr;
@@ -561,6 +559,12 @@ static int mse_adapter_eavb_receive_prepare(int index,
 		mse_err("too much packets\n");
 		return -EINVAL;
 	}
+
+	eavb->entry = kcalloc(num_packets,
+			      sizeof(struct eavb_entry),
+			      GFP_KERNEL);
+	if (!eavb->entry)
+		return -ENOMEM;
 
 	for (i = 0; i < num_packets; i++) {
 		(eavb->entry + i)->seq_no = i;
