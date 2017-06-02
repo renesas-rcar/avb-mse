@@ -523,6 +523,7 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 
 		/* adjust paylod size */
 		if (qlen + data_len > JPEG_PAYLOAD_MAX) {
+			payload_size = AVTP_PAYLOAD_MAX;
 			data_len = JPEG_PAYLOAD_MAX - qlen;
 			if (jpeg->dri_f)
 				data_len -= sizeof(jpeg->rheader);
