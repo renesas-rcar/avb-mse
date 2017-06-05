@@ -91,9 +91,6 @@ struct iec61883_6_packetizer {
 	bool piece_f;
 
 	int send_seq_num;
-	int old_seq_num;
-	int seq_num_err;
-
 	int avtp_packet_size;
 	int sample_per_packet;
 	int frame_interval_time;
@@ -109,6 +106,7 @@ struct iec61883_6_packetizer {
 
 	struct mse_network_config net_config;
 	struct mse_audio_config audio_config;
+	struct mse_packetizer_stats stats;
 };
 
 struct iec61883_6_packetizer iec61883_6_packetizer_table[MSE_INSTANCE_MAX];
@@ -219,10 +217,10 @@ static int mse_packetizer_iec61883_6_open(void)
 	iec61883_6->used_f = true;
 	iec61883_6->piece_f = false;
 	iec61883_6->send_seq_num = 0;
-	iec61883_6->old_seq_num = SEQNUM_INIT;
-	iec61883_6->seq_num_err = SEQNUM_INIT;
 	iec61883_6->local_total_samples = 0;
 	iec61883_6->piece_data_len = 0;
+
+	mse_packetizer_stats_init(&iec61883_6->stats);
 
 	mse_debug("index=%d\n", index);
 
@@ -238,6 +236,8 @@ static int mse_packetizer_iec61883_6_release(int index)
 
 	iec61883_6 = &iec61883_6_packetizer_table[index];
 	mse_debug("index=%d\n", index);
+
+	mse_packetizer_stats_report(&iec61883_6->stats);
 
 	memset(iec61883_6, 0, sizeof(*iec61883_6));
 
@@ -256,10 +256,10 @@ static int mse_packetizer_iec61883_6_packet_init(int index)
 
 	iec61883_6->piece_f = false;
 	iec61883_6->send_seq_num = 0;
-	iec61883_6->old_seq_num = SEQNUM_INIT;
-	iec61883_6->seq_num_err = SEQNUM_INIT;
 	iec61883_6->local_total_samples = 0;
 	iec61883_6->piece_data_len = 0;
+
+	mse_packetizer_stats_init(&iec61883_6->stats);
 
 	return 0;
 }
@@ -716,7 +716,6 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 						 size_t packet_size)
 {
 	struct iec61883_6_packetizer *iec61883_6;
-	int seq_num;
 	int payload_size, piece_size = 0;
 	int channels;
 	int data_size;
@@ -762,28 +761,8 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 		buf = buffer + *buffer_processed;
 
 	/* seq_num check */
-	seq_num = avtp_get_sequence_num(packet);
-	if (iec61883_6->old_seq_num != seq_num &&
-	    iec61883_6->old_seq_num != SEQNUM_INIT) {
-		if (iec61883_6->seq_num_err == SEQNUM_INIT) {
-			mse_err("sequence number discontinuity %d->%d=%d\n",
-				iec61883_6->old_seq_num, seq_num,
-				(seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
-				 iec61883_6->old_seq_num) %
-				(AVTP_SEQUENCE_NUM_MAX + 1));
-			iec61883_6->seq_num_err = 1;
-		} else {
-			iec61883_6->seq_num_err++;
-		}
-	} else {
-		if (iec61883_6->seq_num_err != SEQNUM_INIT) {
-			mse_err("sequence number recovery %d count=%d\n",
-				seq_num, iec61883_6->seq_num_err);
-			iec61883_6->seq_num_err = SEQNUM_INIT;
-		}
-	}
-	iec61883_6->old_seq_num = (seq_num + 1 + (AVTP_SEQUENCE_NUM_MAX + 1)) %
-						(AVTP_SEQUENCE_NUM_MAX + 1);
+	mse_packetizer_stats_seqnum(&iec61883_6->stats,
+				    avtp_get_sequence_num(packet));
 
 	ret = check_receive_packet(index, avtp_get_iec61883_dbs(packet),
 				   packet);

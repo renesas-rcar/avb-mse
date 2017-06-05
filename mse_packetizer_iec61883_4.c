@@ -94,8 +94,6 @@ struct iec61883_4_packetizer {
 	bool used_f;
 
 	int send_seq_num;
-	int old_seq_num;
-	int seq_num_err;
 	int payload_max;
 	int packet_size;
 
@@ -110,6 +108,7 @@ struct iec61883_4_packetizer {
 
 	struct mse_network_config net_config;
 	struct mse_mpeg2ts_config mpeg2ts_config;
+	struct mse_packetizer_stats stats;
 };
 
 struct iec61883_4_packetizer iec61883_4_packetizer_table[MSE_INSTANCE_MAX];
@@ -130,9 +129,9 @@ static int mse_packetizer_iec61883_4_open(void)
 
 	iec61883_4->used_f = true;
 	iec61883_4->send_seq_num = 0;
-	iec61883_4->old_seq_num = SEQNUM_INIT;
-	iec61883_4->seq_num_err = SEQNUM_INIT;
 	iec61883_4->dbc = 0;
+
+	mse_packetizer_stats_init(&iec61883_4->stats);
 
 	mse_debug("index=%d\n", index);
 	return index;
@@ -147,6 +146,8 @@ static int mse_packetizer_iec61883_4_release(int index)
 
 	iec61883_4 = &iec61883_4_packetizer_table[index];
 	mse_debug("index=%d\n", index);
+
+	mse_packetizer_stats_report(&iec61883_4->stats);
 
 	memset(iec61883_4, 0, sizeof(*iec61883_4));
 
@@ -164,10 +165,10 @@ static int mse_packetizer_iec61883_4_packet_init(int index)
 	iec61883_4 = &iec61883_4_packetizer_table[index];
 
 	iec61883_4->send_seq_num = 0;
-	iec61883_4->old_seq_num = SEQNUM_INIT;
-	iec61883_4->seq_num_err = SEQNUM_INIT;
 	iec61883_4->dbc = 0;
 	iec61883_4->diff_timestamp = 0;
+
+	mse_packetizer_stats_init(&iec61883_4->stats);
 
 	return 0;
 }
@@ -438,7 +439,6 @@ static int mse_packetizer_iec61883_4_depacketize(int index,
 						 size_t packet_size)
 {
 	struct iec61883_4_packetizer *iec61883_4;
-	int seq_num;
 	int payload_size;
 	int offset;
 	unsigned char *payload;
@@ -461,28 +461,8 @@ static int mse_packetizer_iec61883_4_depacketize(int index,
 	}
 
 	/* seq_num check */
-	seq_num = avtp_get_sequence_num(packet);
-	if (iec61883_4->old_seq_num != seq_num &&
-	    iec61883_4->old_seq_num != SEQNUM_INIT) {
-		if (iec61883_4->seq_num_err == SEQNUM_INIT) {
-			mse_err("sequence number discontinuity %d->%d=%d\n",
-				iec61883_4->old_seq_num, seq_num,
-				(seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
-				 iec61883_4->old_seq_num) %
-				(AVTP_SEQUENCE_NUM_MAX + 1));
-			iec61883_4->seq_num_err = 1;
-		} else {
-			iec61883_4->seq_num_err++;
-		}
-	} else {
-		if (iec61883_4->seq_num_err != SEQNUM_INIT) {
-			mse_err("sequence number recovery %d count=%d\n",
-				seq_num, iec61883_4->seq_num_err);
-			iec61883_4->seq_num_err = SEQNUM_INIT;
-		}
-	}
-	iec61883_4->old_seq_num = (seq_num + 1 + (AVTP_SEQUENCE_NUM_MAX + 1))
-						% (AVTP_SEQUENCE_NUM_MAX + 1);
+	mse_packetizer_stats_seqnum(&iec61883_4->stats,
+				    avtp_get_sequence_num(packet));
 
 	payload_size =
 		avtp_get_stream_data_length(packet) - AVTP_CIP_HEADER_SIZE;

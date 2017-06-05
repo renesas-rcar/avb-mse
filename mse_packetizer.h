@@ -80,6 +80,15 @@ enum MSE_PACKETIZE_STATUS  {
 };
 
 /**
+ * @brief statistics information
+ */
+struct mse_packetizer_stats {
+	s32 seq_num_next;
+	u32 seq_num_err;
+	u64 seq_num_err_total;
+};
+
+/**
  * @brief audio stream information
  */
 struct mse_audio_info {
@@ -181,6 +190,9 @@ int mse_packetizer_calc_cbs_by_bitrate(u32 port_transmit_rate,
 				       u32 payload_bitrate,
 				       u32 payload_size,
 				       struct mse_cbsparam *cbs);
+int mse_packetizer_stats_init(struct mse_packetizer_stats *stats);
+int mse_packetizer_stats_seqnum(struct mse_packetizer_stats *stats, u8 seq_num);
+int mse_packetizer_stats_report(struct mse_packetizer_stats *stats);
 int mse_packetizer_open(enum MSE_PACKETIZER id);
 int mse_packetizer_release(enum MSE_PACKETIZER id, int index);
 

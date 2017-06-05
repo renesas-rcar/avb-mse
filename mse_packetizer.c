@@ -64,6 +64,7 @@
 
 #include "ravb_mse_kernel.h"
 #include "mse_packetizer.h"
+#include "avtp.h"
 
 /* preamble (8) + FCS (4) */
 #define ETHERNET_OVERHEAD             (8 + 4)
@@ -263,6 +264,57 @@ int mse_packetizer_calc_cbs_by_bitrate(u32 port_transmit_rate,
 		  payload_size, ether_size);
 
 	return mse_packetizer_calc_cbs(bw_num, bw_denom, cbs);
+}
+
+int mse_packetizer_stats_init(struct mse_packetizer_stats *stats)
+{
+	stats->seq_num_next = SEQNUM_INIT;
+	stats->seq_num_err = SEQNUM_INIT;
+	stats->seq_num_err_total = 0;
+
+	return 0;
+}
+
+int mse_packetizer_stats_seqnum(struct mse_packetizer_stats *stats, u8 seq_num)
+{
+	int ret = 0;
+
+	if (stats->seq_num_next != seq_num &&
+	    stats->seq_num_next != SEQNUM_INIT) {
+		if (stats->seq_num_err == SEQNUM_INIT) {
+			mse_debug("sequence number discontinuity %u->%u=%u\n",
+				  stats->seq_num_next,
+				  seq_num,
+				  (seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
+				   stats->seq_num_next) %
+				  (AVTP_SEQUENCE_NUM_MAX + 1));
+			stats->seq_num_err = 1;
+		} else {
+			stats->seq_num_err++;
+		}
+		stats->seq_num_err_total++;
+		ret = 1;
+	} else {
+		if (stats->seq_num_err != SEQNUM_INIT) {
+			mse_debug("sequence number recovery %u count=%u\n",
+				  seq_num, stats->seq_num_err);
+			stats->seq_num_err = SEQNUM_INIT;
+		}
+	}
+
+	stats->seq_num_next = (seq_num + 1 + (AVTP_SEQUENCE_NUM_MAX + 1)) %
+			(AVTP_SEQUENCE_NUM_MAX + 1);
+
+	return ret;
+}
+
+int mse_packetizer_stats_report(struct mse_packetizer_stats *stats)
+{
+	if (stats->seq_num_err_total)
+		mse_err("sequence number discontinuity total=%llu\n",
+			stats->seq_num_err_total);
+
+	return 0;
 }
 
 int mse_packetizer_open(enum MSE_PACKETIZER id)
