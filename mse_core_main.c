@@ -647,6 +647,8 @@ static int __mse_state_change(const char *func,
 		 mse_state_stringfy(next));
 #endif
 
+	WARN_ON(err);
+
 	return err;
 }
 
