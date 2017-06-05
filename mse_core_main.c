@@ -138,6 +138,7 @@
 
 #define MSE_MPEG2TS_BUF_NUM  (MSE_TRANS_BUF_NUM)
 #define MSE_MPEG2TS_BUF_SIZE (512U * 1024U)
+#define MSE_MPEG2TS_BUF_THRESH (188U * 192U * 14U)
 
 #define mbit_to_bit(mbit)     (mbit * 1000000)
 
@@ -2851,7 +2852,7 @@ static int mpeg2ts_buffer_write(struct mse_instance *instance,
 	       buffer, buffer_size);
 	mpeg2ts->buffer_size += buffer_size;
 
-	if (request_size + buffer_size >= MSE_MPEG2TS_BUF_SIZE)
+	if (request_size + buffer_size >= MSE_MPEG2TS_BUF_THRESH)
 		instance->f_force_flush = true;
 
 #ifdef DEBUG
