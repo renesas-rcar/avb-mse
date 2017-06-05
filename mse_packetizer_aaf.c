@@ -91,8 +91,6 @@ struct aaf_packetizer {
 	bool piece_f;
 
 	int send_seq_num;
-	int old_seq_num;
-	int seq_num_err;
 
 	int avtp_packet_size;
 	int sample_per_packet;
@@ -111,6 +109,7 @@ struct aaf_packetizer {
 
 	struct mse_network_config net_config;
 	struct mse_audio_config audio_config;
+	struct mse_packetizer_stats stats;
 };
 
 struct aaf_packetizer aaf_packetizer_table[MSE_INSTANCE_MAX];
@@ -277,9 +276,9 @@ static int mse_packetizer_aaf_open(void)
 	aaf->used_f = true;
 	aaf->piece_f = false;
 	aaf->send_seq_num = 0;
-	aaf->old_seq_num = SEQNUM_INIT;
-	aaf->seq_num_err = SEQNUM_INIT;
 	aaf->piece_data_len = 0;
+
+	mse_packetizer_stats_init(&aaf->stats);
 
 	mse_debug("index=%d\n", index);
 
@@ -295,6 +294,8 @@ static int mse_packetizer_aaf_release(int index)
 
 	aaf = &aaf_packetizer_table[index];
 	mse_debug("index=%d\n", index);
+
+	mse_packetizer_stats_report(&aaf->stats);
 
 	memset(aaf, 0, sizeof(*aaf));
 
@@ -313,9 +314,9 @@ static int mse_packetizer_aaf_packet_init(int index)
 
 	aaf->piece_f = false;
 	aaf->send_seq_num = 0;
-	aaf->old_seq_num = SEQNUM_INIT;
-	aaf->seq_num_err = SEQNUM_INIT;
 	aaf->piece_data_len = 0;
+
+	mse_packetizer_stats_init(&aaf->stats);
 
 	return 0;
 }
@@ -706,7 +707,6 @@ static int mse_packetizer_aaf_depacketize(int index,
 					  size_t packet_size)
 {
 	struct aaf_packetizer *aaf;
-	int seq_num;
 	int payload_size, piece_size = 0;
 	char *buf, tmp_buffer[ETHFRAMEMTU_MAX] = {0};
 	int aaf_format;
@@ -758,27 +758,7 @@ static int mse_packetizer_aaf_depacketize(int index,
 		buf = buffer + *buffer_processed;
 
 	/* seq_num check */
-	seq_num = avtp_get_sequence_num(packet);
-	if (aaf->old_seq_num != seq_num && aaf->old_seq_num != SEQNUM_INIT) {
-		if (aaf->seq_num_err == SEQNUM_INIT) {
-			mse_err("sequence number discontinuity %d->%d=%d\n",
-				aaf->old_seq_num, seq_num,
-				(seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
-				 aaf->old_seq_num) %
-				(AVTP_SEQUENCE_NUM_MAX + 1));
-			aaf->seq_num_err = 1;
-		} else {
-			aaf->seq_num_err++;
-		}
-	} else {
-		if (aaf->seq_num_err != SEQNUM_INIT) {
-			mse_err("sequence number recovery %d count=%d\n",
-				seq_num, aaf->seq_num_err);
-			aaf->seq_num_err = SEQNUM_INIT;
-		}
-	}
-	aaf->old_seq_num = (seq_num + 1 + (AVTP_SEQUENCE_NUM_MAX + 1)) %
-						(AVTP_SEQUENCE_NUM_MAX + 1);
+	mse_packetizer_stats_seqnum(&aaf->stats, avtp_get_sequence_num(packet));
 
 	ret = check_receive_packet(index, channels, aaf_sample_rate,
 				   aaf_bit_depth);
