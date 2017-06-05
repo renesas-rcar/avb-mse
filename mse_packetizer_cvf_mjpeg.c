@@ -105,8 +105,6 @@ struct cvf_mjpeg_packetizer {
 	struct jpeg_info jpeg;
 
 	int send_seq_num;
-	int old_seq_num;
-	int seq_num_err;
 	int payload_max;
 
 	enum MJPEG_TYPE type;
@@ -122,6 +120,7 @@ struct cvf_mjpeg_packetizer {
 
 	struct mse_network_config net_config;
 	struct mse_video_config video_config;
+	struct mse_packetizer_stats stats;
 };
 
 struct cvf_mjpeg_packetizer cvf_mjpeg_packetizer_table[MSE_INSTANCE_MAX];
@@ -142,8 +141,8 @@ static int mse_packetizer_cvf_mjpeg_open(void)
 
 	cvf_mjpeg->used_f = true;
 	cvf_mjpeg->send_seq_num = 0;
-	cvf_mjpeg->old_seq_num = SEQNUM_INIT;
-	cvf_mjpeg->seq_num_err = SEQNUM_INIT;
+
+	mse_packetizer_stats_init(&cvf_mjpeg->stats);
 
 	mse_debug("index=%d\n", index);
 
@@ -158,9 +157,11 @@ static int mse_packetizer_cvf_mjpeg_release(int index)
 		return -EPERM;
 
 	cvf_mjpeg = &cvf_mjpeg_packetizer_table[index];
-	memset(cvf_mjpeg, 0, sizeof(*cvf_mjpeg));
-
 	mse_debug("index=%d\n", index);
+
+	mse_packetizer_stats_report(&cvf_mjpeg->stats);
+
+	memset(cvf_mjpeg, 0, sizeof(*cvf_mjpeg));
 
 	return 0;
 }
@@ -185,13 +186,11 @@ static int mse_packetizer_cvf_mjpeg_packet_init(int index)
 	cvf_mjpeg = &cvf_mjpeg_packetizer_table[index];
 
 	cvf_mjpeg->send_seq_num = 0;
-	cvf_mjpeg->old_seq_num = SEQNUM_INIT;
-	cvf_mjpeg->seq_num_err = SEQNUM_INIT;
-
 	cvf_mjpeg->quant = MJPEG_QUANT_DYNAMIC;
 	cvf_mjpeg->type = MJPEG_TYPE_420;
 
 	mse_packetizer_cvf_mjpeg_flag_init(cvf_mjpeg);
+	mse_packetizer_stats_init(&cvf_mjpeg->stats);
 
 	return 0;
 }
@@ -631,7 +630,6 @@ static int mse_packetizer_cvf_mjpeg_depacketize(int index,
 	struct mjpeg_restart_header *rheader;
 	struct mjpeg_quant_header qheader;
 	u8 *data, *qt, tspec;
-	int seq_num;
 	size_t data_len;
 	u16 dri = 0;
 	u32 offset, width, height;
@@ -660,28 +658,8 @@ static int mse_packetizer_cvf_mjpeg_depacketize(int index,
 	}
 
 	/* seq_num check */
-	seq_num = avtp_get_sequence_num(packet);
-	if (cvf_mjpeg->old_seq_num != seq_num &&
-	    cvf_mjpeg->old_seq_num != SEQNUM_INIT) {
-		if (cvf_mjpeg->seq_num_err == SEQNUM_INIT) {
-			mse_err("sequence number discontinuity %d->%d=%d\n",
-				cvf_mjpeg->old_seq_num, seq_num,
-				(seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
-				 cvf_mjpeg->old_seq_num) %
-				(AVTP_SEQUENCE_NUM_MAX + 1));
-			cvf_mjpeg->seq_num_err = 1;
-		} else {
-			cvf_mjpeg->seq_num_err++;
-		}
-	} else {
-		if (cvf_mjpeg->seq_num_err != SEQNUM_INIT) {
-			mse_err("sequence number recovery %d count=%d\n",
-				seq_num, cvf_mjpeg->seq_num_err);
-			cvf_mjpeg->seq_num_err = SEQNUM_INIT;
-		}
-	}
-	cvf_mjpeg->old_seq_num = (seq_num + 1 + (AVTP_SEQUENCE_NUM_MAX + 1)) %
-				 (AVTP_SEQUENCE_NUM_MAX + 1);
+	mse_packetizer_stats_seqnum(&cvf_mjpeg->stats,
+				    avtp_get_sequence_num(packet));
 
 	data = (u8 *)packet + AVTP_CVF_MJPEG_PAYLOAD_OFFSET;
 	data_len = avtp_get_stream_data_length(packet) - AVTP_JPEG_HEADER_SIZE;
@@ -770,8 +748,8 @@ static int mse_packetizer_cvf_mjpeg_depacketize(int index,
 	if (!avtp_get_cvf_m(packet))
 		return MSE_PACKETIZE_STATUS_CONTINUE;
 
-	mse_debug("M bit enable seq=%d size=%zu/%zu\n",
-		  cvf_mjpeg->old_seq_num - 1, *buffer_processed, buffer_size);
+	mse_debug("M bit enable offset=%zu size=%zu/%zu\n",
+		  cvf_mjpeg->jpeg_offset, *buffer_processed, buffer_size);
 
 	return MSE_PACKETIZE_STATUS_COMPLETE;
 }
