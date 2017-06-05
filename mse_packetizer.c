@@ -270,6 +270,7 @@ int mse_packetizer_stats_init(struct mse_packetizer_stats *stats)
 {
 	stats->seq_num_next = SEQNUM_INIT;
 	stats->seq_num_err = SEQNUM_INIT;
+	stats->seq_num_err_total = 0;
 
 	return 0;
 }
@@ -281,21 +282,22 @@ int mse_packetizer_stats_seqnum(struct mse_packetizer_stats *stats, u8 seq_num)
 	if (stats->seq_num_next != seq_num &&
 	    stats->seq_num_next != SEQNUM_INIT) {
 		if (stats->seq_num_err == SEQNUM_INIT) {
-			mse_err("sequence number discontinuity %u->%u=%u\n",
-				stats->seq_num_next,
-				seq_num,
-				(seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
-				 stats->seq_num_next) %
-				(AVTP_SEQUENCE_NUM_MAX + 1));
+			mse_debug("sequence number discontinuity %u->%u=%u\n",
+				  stats->seq_num_next,
+				  seq_num,
+				  (seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
+				   stats->seq_num_next) %
+				  (AVTP_SEQUENCE_NUM_MAX + 1));
 			stats->seq_num_err = 1;
 		} else {
 			stats->seq_num_err++;
 		}
+		stats->seq_num_err_total++;
 		ret = 1;
 	} else {
 		if (stats->seq_num_err != SEQNUM_INIT) {
-			mse_err("sequence number recovery %u count=%u\n",
-				seq_num, stats->seq_num_err);
+			mse_debug("sequence number recovery %u count=%u\n",
+				  seq_num, stats->seq_num_err);
 			stats->seq_num_err = SEQNUM_INIT;
 		}
 	}
@@ -304,6 +306,15 @@ int mse_packetizer_stats_seqnum(struct mse_packetizer_stats *stats, u8 seq_num)
 			(AVTP_SEQUENCE_NUM_MAX + 1);
 
 	return ret;
+}
+
+int mse_packetizer_stats_report(struct mse_packetizer_stats *stats)
+{
+	if (stats->seq_num_err_total)
+		mse_err("sequence number discontinuity total=%llu\n",
+			stats->seq_num_err_total);
+
+	return 0;
 }
 
 int mse_packetizer_open(enum MSE_PACKETIZER id)
