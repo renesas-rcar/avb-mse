@@ -2167,13 +2167,11 @@ static void mse_stop_streaming_audio(struct mse_instance *instance)
 	struct mch_ops *m_ops;
 	enum MSE_CRF_TYPE crf_type = instance->crf_type;
 
-	ret = hrtimer_try_to_cancel(&instance->tstamp_timer);
-	if (ret < 0)
-		mse_err("The tstamp_timer was still in use...\n");
+	/* cancel timestamp timer */
+	hrtimer_cancel(&instance->tstamp_timer);
 
-	ret = hrtimer_try_to_cancel(&instance->crf_timer);
-	if (ret < 0)
-		mse_err("The crf_timer was still in use...\n");
+	/* cancel crf timer */
+	hrtimer_cancel(&instance->crf_timer);
 
 	if (instance->mch_index >= 0) {
 		m_ops = mse->mch_table[instance->mch_index];
@@ -2216,10 +2214,8 @@ static void mse_stop_streaming_common(struct mse_instance *instance)
 				ret);
 	}
 
-	/* timer stop */
-	ret = hrtimer_try_to_cancel(&instance->timer);
-	if (ret < 0)
-		mse_err("The timer was still in use...\n");
+	/* cancel timer */
+	hrtimer_cancel(&instance->timer);
 
 	/* return callback to all transmission request */
 	mse_free_all_trans_buffers(instance, 0);
