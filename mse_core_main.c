@@ -558,7 +558,7 @@ static int __mse_state_change(const char *func,
 	 *           | CLOSE  OPEN   IDLE    EXECUTE STOPPING
 	 * ----------|----------------------------------------
 	 *  CLOSE    | Y      Y      EPERM   EPERM   EPERM
-	 *  OPEN     | Y      Y      Y       EBUSY   EBUSY
+	 *  OPEN     | Y      Y      Y       EPERM   EPERM
 	 *  IDLE     | EBUSY  Y      Y       Y       Y
 	 *  EXECUTE  | EBUSY  EBUSY  Y       Y       Y
 	 *  STOPPING | EBUSY  Y      EBUSY   EBUSY   Y
@@ -579,9 +579,6 @@ static int __mse_state_change(const char *func,
 			    MSE_STATE_OPEN  |
 			    MSE_STATE_IDLE)) {
 			; /* do nothing */
-		} else if (next & (MSE_STATE_EXECUTE |
-				   MSE_STATE_STOPPING)) {
-			err = -EBUSY;
 		} else {
 			err = -EPERM;
 		}
@@ -4282,6 +4279,23 @@ int mse_start_transmission(int index,
 
 	write_lock_irqsave(&instance->lock_state, flags);
 	mse_debug_state(instance);
+
+	/* state is STOPPING */
+	if (mse_state_test_nolock(instance, MSE_STATE_STOPPING)) {
+		write_unlock_irqrestore(&instance->lock_state, flags);
+		mse_err("instance is busy. index=%d\n", index);
+
+		return -EBUSY;
+	}
+
+	/* state is NOT RUNNABLE */
+	if (!mse_state_test_nolock(instance, MSE_STATE_RUNNABLE)) {
+		write_unlock_irqrestore(&instance->lock_state, flags);
+		mse_err("operation is not permitted. index=%d\n", index);
+
+		return -EPERM;
+	}
+
 	err = mse_state_change(instance, MSE_STATE_EXECUTE);
 	write_unlock_irqrestore(&instance->lock_state, flags);
 
