@@ -138,8 +138,6 @@ struct cvf_h264_packetizer {
 	bool f_start_code;
 
 	int send_seq_num;
-	int old_seq_num;
-	int seq_num_err;
 	int header_size;             /* whole header size defined IEEE1722 */
 	int additional_header_size;  /* additional .. defined IEEE1722 H.264 */
 	int data_len_max;
@@ -154,6 +152,7 @@ struct cvf_h264_packetizer {
 
 	struct mse_network_config net_config;
 	struct mse_video_config video_config;
+	struct mse_packetizer_stats stats;
 };
 
 struct cvf_h264_packetizer cvf_h264_packetizer_table[MSE_INSTANCE_MAX];
@@ -173,11 +172,12 @@ static int mse_packetizer_cvf_h264_open(void)
 
 	h264->used_f = true;
 	h264->send_seq_num = 0;
-	h264->old_seq_num = SEQNUM_INIT;
-	h264->seq_num_err = SEQNUM_INIT;
 	h264->header_size = AVTP_CVF_H264_PAYLOAD_OFFSET;
 	h264->additional_header_size =
 		AVTP_CVF_H264_PAYLOAD_OFFSET - AVTP_PAYLOAD_OFFSET;
+
+	mse_packetizer_stats_init(&h264->stats);
+
 	mse_debug("index=%d\n", index);
 	return index;
 }
@@ -197,11 +197,11 @@ static int mse_packetizer_cvf_h264_d13_open(void)
 
 	h264->used_f = true;
 	h264->send_seq_num = 0;
-	h264->old_seq_num = SEQNUM_INIT;
-	h264->seq_num_err = SEQNUM_INIT;
 	h264->header_size = AVTP_CVF_H264_D13_PAYLOAD_OFFSET;
 	h264->additional_header_size =
 		AVTP_CVF_H264_D13_PAYLOAD_OFFSET - AVTP_PAYLOAD_OFFSET;
+
+	mse_packetizer_stats_init(&h264->stats);
 
 	mse_debug("index=%d\n", index);
 	return index;
@@ -216,6 +216,8 @@ static int mse_packetizer_cvf_h264_release(int index)
 
 	h264 = &cvf_h264_packetizer_table[index];
 	mse_debug("index=%d\n", index);
+
+	mse_packetizer_stats_report(&h264->stats);
 
 	memset(h264, 0, sizeof(*h264));
 	return 0;
@@ -232,8 +234,9 @@ static int mse_packetizer_cvf_h264_packet_init(int index)
 	h264 = &cvf_h264_packetizer_table[index];
 
 	h264->send_seq_num = 0;
-	h264->old_seq_num = SEQNUM_INIT;
-	h264->seq_num_err = SEQNUM_INIT;
+
+	mse_packetizer_stats_init(&h264->stats);
+
 	return 0;
 }
 
@@ -559,7 +562,6 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 	size_t data_len = *buffer_processed;
 	u8 nalu_nri;
 	u8 nalu_type;
-	int seq_num;
 	int payload_size;
 	int fu_size;
 	unsigned char *buf = (unsigned char *)buffer;
@@ -589,27 +591,8 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 	}
 
 	/* seq_num check */
-	seq_num = avtp_get_sequence_num(packet);
-	if (h264->old_seq_num != seq_num && h264->old_seq_num != SEQNUM_INIT) {
-		if (h264->seq_num_err == SEQNUM_INIT) {
-			mse_err("sequence number discontinuity %d->%d=%d\n",
-				h264->old_seq_num, seq_num,
-				(seq_num + 1 + AVTP_SEQUENCE_NUM_MAX -
-				 h264->old_seq_num) %
-				(AVTP_SEQUENCE_NUM_MAX + 1));
-			h264->seq_num_err = 1;
-		} else {
-			h264->seq_num_err++;
-		}
-	} else {
-		if (h264->seq_num_err != SEQNUM_INIT) {
-			mse_err("sequence number recovery %d count=%d\n",
-				seq_num, h264->seq_num_err);
-			h264->seq_num_err = SEQNUM_INIT;
-		}
-	}
-	h264->old_seq_num = (seq_num + 1 + (AVTP_SEQUENCE_NUM_MAX + 1))
-		% (AVTP_SEQUENCE_NUM_MAX + 1);
+	mse_packetizer_stats_seqnum(&h264->stats,
+				    avtp_get_sequence_num(packet));
 
 	payload_size = avtp_get_stream_data_length(packet) -
 		h264->additional_header_size;
