@@ -94,6 +94,8 @@
 
 #define NANO_SCALE              (1000000000ul)
 
+#define MSE_TIMEOUT_CLOSE       (msecs_to_jiffies(5000)) /* 5secs */
+
 #define MSE_RADIX_HEXADECIMAL   (16)
 #define MSE_DEFAULT_BITRATE     (50000000) /* 50Mbps */
 
@@ -4096,7 +4098,8 @@ int mse_close(int index)
 	if (mse_state_test_nolock(instance, MSE_STATE_STARTED)) {
 		mse_debug("wait for completion\n");
 		write_unlock_irqrestore(&instance->lock_state, flags);
-		wait_for_completion(&instance->completion_stop);
+		wait_for_completion_timeout(&instance->completion_stop,
+					    MSE_TIMEOUT_CLOSE);
 
 		write_lock_irqsave(&instance->lock_state, flags);
 		mse_debug_state(instance);
