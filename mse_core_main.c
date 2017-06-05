@@ -271,18 +271,16 @@ struct mse_instance {
 	struct work_struct wk_depacketize;
 	/** @brief callback queue */
 	struct work_struct wk_callback;
-	/** @brief stop queue */
-	struct work_struct wk_stop;
 	/** @brief timestamp queue */
 	struct work_struct wk_timestamp;
 	/** @brief crf send queue */
 	struct work_struct wk_crf_send;
 	/** @brief crf receive queue */
 	struct work_struct wk_crf_receive;
-	/** @brief start streaming queue */
-	struct work_struct wk_start_stream;
 	/** @brief start transmission queue */
 	struct work_struct wk_start_trans;
+	/** @brief stop streaming queue */
+	struct work_struct wk_stop_streaming;
 
 	/** @brief stream workqueue */
 	struct workqueue_struct *wq_stream;
@@ -1695,8 +1693,6 @@ static bool check_packet_remain(struct mse_instance *instance)
 	return wait_count > rem;
 }
 
-static void mpeg2ts_buffer_flush(struct mse_instance *instance);
-
 static void mse_work_packetize(struct work_struct *work)
 {
 	struct mse_instance *instance;
@@ -1711,14 +1707,6 @@ static void mse_work_packetize(struct work_struct *work)
 	/* state is NOT RUNNING */
 	if (!mse_state_test(instance, MSE_STATE_RUNNING))
 		return;
-
-	/* state is STOPPING */
-	if (mse_state_test(instance, MSE_STATE_STOPPING)) {
-		/* if using mpeg2ts buffer, flush last data */
-		if (!atomic_read(&instance->trans_buf_cnt))
-			if (instance->mpeg2ts_buffer_base)
-				mpeg2ts_buffer_flush(instance);
-	}
 
 	buf = list_first_entry_or_null(&instance->proc_buf_list,
 				       struct mse_trans_buffer, list);
@@ -1787,28 +1775,25 @@ static void mse_work_packetize(struct work_struct *work)
 		if (!atomic_read(&instance->trans_buf_cnt)) {
 			instance->f_force_flush = false;
 
-			write_lock_irqsave(&instance->lock_state, flags);
-
 			/* state is STOPPING */
-			if (mse_state_test_nolock(instance,
-						  MSE_STATE_STOPPING)) {
+			if (mse_state_test(instance, MSE_STATE_STOPPING)) {
 				mse_debug("discard %zu byte before stopping\n",
 					  buf->buffer_size - buf->work_length);
 
 				instance->f_trans_start = false;
-				instance->f_completion = true;
-				mse_debug("f_completion = true\n");
 				queue_work(instance->wq_packet,
-					   &instance->wk_stop);
+					   &instance->wk_stop_streaming);
 			} else {
 				mse_err("short of data\n");
+
+				write_lock_irqsave(&instance->lock_state,
+						   flags);
+				/* if state is EXECUTE, change to IDLE */
+				mse_state_change_if(instance, MSE_STATE_IDLE,
+						    MSE_STATE_EXECUTE);
+				write_unlock_irqrestore(&instance->lock_state,
+							flags);
 			}
-
-			/* if state is EXECUTE, change to IDLE */
-			mse_state_change_if(instance, MSE_STATE_IDLE,
-					    MSE_STATE_EXECUTE);
-
-			write_unlock_irqrestore(&instance->lock_state, flags);
 
 			mse_trans_complete(instance, ret);
 
@@ -1819,22 +1804,20 @@ static void mse_work_packetize(struct work_struct *work)
 		instance->f_trans_start = false;
 		instance->f_continue = false;
 		instance->f_force_flush = false;
-		instance->f_completion = true;
-		mse_debug("f_completion = true\n");
 
 		mse_trans_complete(instance, ret);
 
-		write_lock_irqsave(&instance->lock_state, flags);
-
-		if (mse_state_test_nolock(instance, MSE_STATE_STOPPING))
-			/* state is STOPPING */
-			queue_work(instance->wq_packet, &instance->wk_stop);
-		else
+		/* state is STOPPING */
+		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
+			queue_work(instance->wq_packet,
+				   &instance->wk_stop_streaming);
+		} else {
+			write_lock_irqsave(&instance->lock_state, flags);
 			/* if state is EXECUTE, change to IDLE */
 			mse_state_change_if(instance, MSE_STATE_IDLE,
 					    MSE_STATE_EXECUTE);
-
-		write_unlock_irqrestore(&instance->lock_state, flags);
+			write_unlock_irqrestore(&instance->lock_state, flags);
+		}
 
 		return;
 	}
@@ -1919,11 +1902,9 @@ static void mse_work_depacketize(struct work_struct *work)
 	/* no buffer to write data */
 	if (!buf) {
 		/* state is STOPPING */
-		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
-			instance->f_completion = true;
-			mse_debug("f_completion = true\n");
-			queue_work(instance->wq_packet, &instance->wk_stop);
-		}
+		if (mse_state_test(instance, MSE_STATE_STOPPING))
+			queue_work(instance->wq_packet,
+				   &instance->wk_stop_streaming);
 
 		return;
 	}
@@ -2146,11 +2127,9 @@ static void mse_work_callback(struct work_struct *work)
 		}
 
 		/* state is STOPPING */
-		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
-			instance->f_completion = true;
-			mse_debug("f_completion = true\n");
-			queue_work(instance->wq_packet, &instance->wk_stop);
-		}
+		if (mse_state_test(instance, MSE_STATE_STOPPING))
+			queue_work(instance->wq_packet,
+				   &instance->wk_stop_streaming);
 	}
 
 	/* complete callback */
@@ -2160,18 +2139,17 @@ static void mse_work_callback(struct work_struct *work)
 			mse_trans_complete(instance, size);
 
 	if (!atomic_read(&instance->trans_buf_cnt)) {
-		write_lock_irqsave(&instance->lock_state, flags);
-		if (mse_state_test_nolock(instance, MSE_STATE_STOPPING)) {
-			/* state is STOPPING */
-			instance->f_completion = true;
-			mse_debug("f_completion = true\n");
-			queue_work(instance->wq_packet, &instance->wk_stop);
+		/* state is STOPPING */
+		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
+			queue_work(instance->wq_packet,
+				   &instance->wk_stop_streaming);
 		} else {
+			write_lock_irqsave(&instance->lock_state, flags);
 			/* if state is EXECUTE, change to IDLE */
 			mse_state_change_if(instance, MSE_STATE_IDLE,
 					    MSE_STATE_EXECUTE);
+			write_unlock_irqrestore(&instance->lock_state, flags);
 		}
-		write_unlock_irqrestore(&instance->lock_state, flags);
 	} else {
 		/* if NOT work queued, then queue it */
 		if (instance->tx && !work_busy(&instance->wk_packetize))
@@ -2182,26 +2160,6 @@ static void mse_work_callback(struct work_struct *work)
 			queue_work(instance->wq_packet,
 				   &instance->wk_depacketize);
 	}
-}
-
-static void mse_stop_streaming_common(struct mse_instance *instance)
-{
-	int ret;
-
-	if (!instance->tx) {
-		ret = instance->network->cancel(instance->index_network);
-		if (ret)
-			mse_err("failed network adapter cancel() ret=%d\n",
-				ret);
-	}
-
-	/* timer stop */
-	ret = hrtimer_try_to_cancel(&instance->timer);
-	if (ret < 0)
-		mse_err("The timer was still in use...\n");
-
-	atomic_set(&instance->trans_buf_cnt, 0);
-	atomic_set(&instance->done_buf_cnt, 0);
 }
 
 static void mse_stop_streaming_audio(struct mse_instance *instance)
@@ -2241,37 +2199,83 @@ static void mse_stop_streaming_audio(struct mse_instance *instance)
 		flush_work(&instance->wk_timestamp);
 }
 
-static void mse_work_stop(struct work_struct *work)
+static void mse_stop_streaming_common(struct mse_instance *instance)
 {
-	struct mse_instance *instance;
+	int ret;
 	unsigned long flags;
 
-	mse_debug("START\n");
+	write_lock_irqsave(&instance->lock_state, flags);
+	ret = mse_state_change(instance, MSE_STATE_OPEN);
+	write_unlock_irqrestore(&instance->lock_state, flags);
+	if (ret)
+		return;
 
-	instance = container_of(work, struct mse_instance, wk_stop);
+	if (!instance->tx) {
+		ret = instance->network->cancel(instance->index_network);
+		if (ret)
+			mse_err("failed network adapter cancel() ret=%d\n",
+				ret);
+	}
 
-	read_lock_irqsave(&instance->lock_state, flags);
-	mse_debug_state(instance);
-	read_unlock_irqrestore(&instance->lock_state, flags);
+	/* timer stop */
+	ret = hrtimer_try_to_cancel(&instance->timer);
+	if (ret < 0)
+		mse_err("The timer was still in use...\n");
 
 	/* return callback to all transmission request */
 	mse_free_all_trans_buffers(instance, 0);
-
-	/* stop streaming */
-	mse_stop_streaming_common(instance);
 
 	/* timestamp timer, crf timer stop */
 	if (IS_MSE_TYPE_AUDIO(instance->media->type))
 		mse_stop_streaming_audio(instance);
 
-	write_lock_irqsave(&instance->lock_state, flags);
+	instance->f_completion = true;
 	instance->f_stopping = false;
-	mse_state_change(instance, MSE_STATE_OPEN);
-	write_unlock_irqrestore(&instance->lock_state, flags);
 
 	complete(&instance->completion_stop);
+}
 
-	mse_debug("END\n");
+static void mse_work_stop_streaming(struct work_struct *work)
+{
+	int ret;
+	struct mse_instance *instance;
+	struct mse_adapter_network_ops *network;
+	unsigned long flags;
+
+	instance = container_of(work, struct mse_instance, wk_stop_streaming);
+	network = instance->network;
+
+	mse_debug_state(instance);
+
+	/* state is NOT STARTED */
+	if (!mse_state_test(instance, MSE_STATE_STARTED))
+		return; /* skip work */
+
+	instance->f_stopping = true;
+
+	/* state is NOT EXECUTE */
+	if (!mse_state_test(instance, MSE_STATE_EXECUTE)) {
+		mse_stop_streaming_common(instance);
+		return;
+	}
+
+	/*
+	 * If state is EXECUTE, state change to STOPPING.
+	 * then wait complete streaming process.
+	 */
+	write_lock_irqsave(&instance->lock_state, flags);
+	mse_state_change(instance, MSE_STATE_STOPPING);
+	write_unlock_irqrestore(&instance->lock_state, flags);
+
+	if (instance->tx) {
+		queue_work(instance->wq_packet, &instance->wk_start_trans);
+	} else {
+		ret = network->cancel(instance->index_network);
+		if (ret)
+			mse_err("failed network adapter cancel() => %d\n", ret);
+
+		queue_work(instance->wq_packet, &instance->wk_depacketize);
+	}
 }
 
 static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
@@ -2612,6 +2616,7 @@ static void mse_start_streaming_common(struct mse_instance *instance)
 {
 	int i;
 
+	reinit_completion(&instance->completion_stop);
 	instance->f_streaming = false;
 	instance->f_continue = false;
 	instance->f_stopping = false;
@@ -2831,13 +2836,11 @@ static int mpeg2ts_buffer_write(struct mse_instance *instance,
 		mse_err("mpeg2ts buffer overrun %zu/%u\n",
 			request_size, MSE_MPEG2TS_BUF_SIZE);
 		mse_trans_complete(instance, -EIO);
+
 		/* state is STOPPING */
-		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
-			mse_debug("f_completion = true\n");
-			instance->f_completion = true;
+		if (mse_state_test(instance, MSE_STATE_STOPPING))
 			queue_work(instance->wq_packet,
-				   &instance->wk_stop);
-		}
+				   &instance->wk_stop_streaming);
 
 		return -1;
 	}
@@ -2910,6 +2913,16 @@ static void mse_work_start_transmission(struct work_struct *work)
 	/* no transmission buffer */
 	if (!buf) {
 		spin_unlock_irqrestore(&instance->lock_buf_list, flags);
+		/* state is STOPPING */
+		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
+			/* if using mpeg2ts buffer, flush last data */
+			if (instance->mpeg2ts_buffer_base) {
+				mpeg2ts_buffer_flush(instance);
+				queue_work(instance->wq_packet,
+					   &instance->wk_packetize);
+			}
+		}
+
 		return;
 	}
 
@@ -3797,6 +3810,8 @@ int mse_open(int index_media, bool tx)
 	instance->state = MSE_STATE_OPEN;
 	instance->used_f = true;
 	instance->trans_idx = 0;
+	init_completion(&instance->completion_stop);
+	complete(&instance->completion_stop);
 	atomic_set(&instance->trans_buf_cnt, 0);
 	atomic_set(&instance->done_buf_cnt, 0);
 	init_waitqueue_head(&instance->wait_wk_stream);
@@ -3919,11 +3934,11 @@ int mse_open(int index_media, bool tx)
 	INIT_WORK(&instance->wk_depacketize, mse_work_depacketize);
 	INIT_WORK(&instance->wk_callback, mse_work_callback);
 	INIT_WORK(&instance->wk_stream, mse_work_stream);
-	INIT_WORK(&instance->wk_stop, mse_work_stop);
 	INIT_WORK(&instance->wk_crf_send, mse_work_crf_send);
 	INIT_WORK(&instance->wk_crf_receive, mse_work_crf_receive);
 	INIT_WORK(&instance->wk_timestamp, mse_work_timestamp);
 	INIT_WORK(&instance->wk_start_trans, mse_work_start_transmission);
+	INIT_WORK(&instance->wk_stop_streaming, mse_work_stop_streaming);
 
 	instance->wq_stream = create_singlethread_workqueue("mse_streamq");
 	instance->wq_packet = create_singlethread_workqueue("mse_packetq");
@@ -4067,6 +4082,7 @@ int mse_close(int index)
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
 	int err = -EINVAL;
+	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
 		mse_err("invalid argument. index=%d\n", index);
@@ -4075,34 +4091,42 @@ int mse_close(int index)
 
 	mse_debug("index=%d\n", index);
 
-	mutex_lock(&mse->mutex_open);
 	instance = &mse->instance_table[index];
 	adapter = instance->media;
 
+	write_lock_irqsave(&instance->lock_state, flags);
 	mse_debug_state(instance);
 
-	/* state is STOPPING */
-	if (mse_state_test(instance, MSE_STATE_STOPPING)) {
-		mse_debug("wait for completion\n");
-		mutex_unlock(&mse->mutex_open);
-		wait_for_completion(&instance->completion_stop);
-		mutex_lock(&mse->mutex_open);
-		mse_debug_state(instance);
-	}
-
 	/* state is STARTED */
-	if (mse_state_test(instance, MSE_STATE_STARTED)) {
-		mutex_unlock(&mse->mutex_open);
-		mse_err("instance is busy. index=%d\n", index);
-		return -EBUSY;
+	if (mse_state_test_nolock(instance, MSE_STATE_STARTED)) {
+		mse_debug("wait for completion\n");
+		write_unlock_irqrestore(&instance->lock_state, flags);
+		wait_for_completion(&instance->completion_stop);
+
+		write_lock_irqsave(&instance->lock_state, flags);
+		mse_debug_state(instance);
+
+		/* state is STARTED */
+		if (mse_state_test_nolock(instance, MSE_STATE_STARTED)) {
+			write_unlock_irqrestore(&instance->lock_state, flags);
+			mse_err("instance is busy. index=%d\n", index);
+			return -EBUSY;
+		}
 	}
 
 	/* state is CLOSE */
-	if (mse_state_test(instance, MSE_STATE_CLOSE)) {
-		mutex_unlock(&mse->mutex_open);
+	if (mse_state_test_nolock(instance, MSE_STATE_CLOSE)) {
+		write_unlock_irqrestore(&instance->lock_state, flags);
 		mse_err("operation is not permitted. index=%d\n", index);
 		return -EPERM;
 	}
+
+	err = mse_state_change(instance, MSE_STATE_CLOSE);
+	write_unlock_irqrestore(&instance->lock_state, flags);
+	if (err)
+		return err;
+
+	mutex_lock(&mse->mutex_open);
 
 	/* flush workqueue */
 	flush_workqueue(instance->wq_packet);
@@ -4136,8 +4160,6 @@ int mse_close(int index)
 		mse_err("cannot mse_ptp_close()\n");
 
 	mpeg2ts_buffer_free(instance);
-
-	mse_state_change(instance, MSE_STATE_CLOSE);
 
 	/* set table */
 	memset(instance, 0, sizeof(*instance));
@@ -4200,66 +4222,29 @@ EXPORT_SYMBOL(mse_start_streaming);
 
 int mse_stop_streaming(int index)
 {
-	int err = -EINVAL, ret;
 	struct mse_instance *instance;
-	struct mse_adapter_network_ops *network;
-	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
 		mse_err("invalid argument. index=%d\n", index);
-		return err;
+		return -EINVAL;
 	}
 
 	mse_debug("index=%d\n", index);
 	instance = &mse->instance_table[index];
-	network = instance->network;
 
 	mse_debug_state(instance);
 
-	/* state is STOPPING */
-	if (mse_state_test(instance, MSE_STATE_STOPPING))
-		return 0;
-
-	write_lock_irqsave(&instance->lock_state, flags);
-	/* state is IDLE */
-	if (mse_state_test_nolock(instance, MSE_STATE_IDLE))
-		err = mse_state_change(instance, MSE_STATE_OPEN);
-	else
-		err = mse_state_change(instance, MSE_STATE_STOPPING);
-
-	if (err) {
-		write_unlock_irqrestore(&instance->lock_state, flags);
-		return err;
+	/* state is CLOSE */
+	if (mse_state_test(instance, MSE_STATE_CLOSE)) {
+		mse_err("operation is not permitted. index=%d\n", index);
+		return -EPERM;
 	}
 
-	if (mse_state_test_nolock(instance, MSE_STATE_OPEN)) {
-		/* state is OPEN */
-		write_unlock_irqrestore(&instance->lock_state, flags);
-		mse_stop_streaming_common(instance);
+	/* state is RUNNABLE */
+	if (mse_state_test(instance, MSE_STATE_RUNNABLE))
+		queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 
-		if (IS_MSE_TYPE_AUDIO(instance->media->type))
-			mse_stop_streaming_audio(instance);
-	} else {
-		/* state is STOPPING */
-		instance->f_stopping = true;
-		init_completion(&instance->completion_stop);
-		write_unlock_irqrestore(&instance->lock_state, flags);
-
-		if (instance->tx) {
-			queue_work(instance->wq_packet,
-				   &instance->wk_packetize);
-		} else {
-			ret = network->cancel(instance->index_network);
-			if (ret)
-				mse_err("failed network adapter cancel() ret=%d\n",
-					ret);
-
-			queue_work(instance->wq_packet,
-				   &instance->wk_depacketize);
-		}
-	}
-
-	return err;
+	return 0;
 }
 EXPORT_SYMBOL(mse_stop_streaming);
 
