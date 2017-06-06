@@ -741,6 +741,7 @@ static int mse_adapter_v4l2_fop_release(struct file *filp)
 	int err;
 	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
 	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
+	struct v4l2_requestbuffers req;
 
 	mse_debug("START\n");
 
@@ -750,6 +751,24 @@ static int mse_adapter_v4l2_fop_release(struct file *filp)
 	}
 
 	if (vadp_owner_is(vadp_fh)) {
+		if (vb2_is_busy(vadp_dev->vdev.queue)) {
+			mse_debug("vb2 is busy, try queue free\n");
+
+			vb2_ioctl_streamoff(filp, filp->private_data,
+					    vadp_dev->vdev.queue->type);
+
+			req.count = 0;
+			req.type = vadp_dev->vdev.queue->type;
+			req.memory = V4L2_MEMORY_MMAP;
+			err = vb2_ioctl_reqbufs(filp,
+						filp->private_data,
+						&req);
+			if (err < 0) {
+				mse_err("Failed vb2_ioctl_reqbufs()\n");
+				return err;
+			}
+		}
+
 		if (vadp_dev->f_mse_open) {
 			err = try_mse_close(vadp_dev);
 			if (err < 0) {
