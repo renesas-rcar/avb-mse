@@ -4453,6 +4453,7 @@ EXPORT_SYMBOL(mse_unregister_ptp);
 static int mse_probe(void)
 {
 	int i;
+	int err;
 
 	/* allocate device data */
 	mse = kzalloc(sizeof(*mse), GFP_KERNEL);
@@ -4465,9 +4466,9 @@ static int mse_probe(void)
 	/* register platform device */
 	mse->pdev = platform_device_register_simple("mse", -1, NULL, 0);
 	if (IS_ERR(mse->pdev)) {
-		mse_err("Failed to register platform device. ret=%p\n",
-			mse->pdev);
-		return -EINVAL;
+		err = PTR_ERR(mse->pdev);
+		mse_err("Failed to register platform device. ret=%d\n", err);
+		goto error;
 	}
 
 	/* W/A for cannot using DMA APIs */
@@ -4487,15 +4488,18 @@ static int mse_probe(void)
 	/* create class */
 	mse->class = class_create(THIS_MODULE, "ravb_mse");
 	if (IS_ERR(mse->class)) {
-		int err = PTR_RET(mse->class);
+		err = PTR_ERR(mse->class);
 		mse_err("failed class_create() ret=%d\n", err);
-		kfree(mse);
-		return err;
+		goto error;
 	}
 #endif
 
 	/* init ioctl device */
 	major = mse_ioctl_init(major, mse_instance_max);
+	if (major < 0) {
+		err = major;
+		goto error;
+	}
 
 	/* init table */
 	for (i = 0; i < ARRAY_SIZE(mse->instance_table); i++) {
@@ -4513,6 +4517,19 @@ static int mse_probe(void)
 	mse_debug("success\n");
 
 	return 0;
+
+error:
+	if (mse) {
+		if (mse->class)
+			class_destroy(mse->class);
+
+		if (mse->pdev)
+			platform_device_unregister(mse->pdev);
+
+		kfree(mse);
+	}
+
+	return err;
 }
 
 /*
