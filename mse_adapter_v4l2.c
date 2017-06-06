@@ -1069,7 +1069,7 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 	err = try_mse_open(vadp_dev, i);
 	if (err) {
 		mse_err("Failed mse_open()\n");
-		return vb2_ioctl_streamoff(filp, priv, i);
+		return err;
 	}
 
 	if (V4L2_TYPE_IS_OUTPUT(i)) {
@@ -1078,7 +1078,7 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 			err = temp_buffer_alloc(vadp_dev);
 			if (err < 0) {
 				mse_err("cannnot allocate temp buffer\n");
-				vb2_queue_error(&vadp_dev->q_out);
+				try_mse_close(vadp_dev);
 
 				return err;
 			}
@@ -1748,7 +1748,6 @@ static int mse_adapter_v4l2_start_streaming(struct vb2_queue *vq,
 {
 	int err;
 	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
-	int index = vadp_dev->index_instance;
 	unsigned long flags;
 	int i;
 
@@ -1767,16 +1766,13 @@ static int mse_adapter_v4l2_start_streaming(struct vb2_queue *vq,
 	err = set_media_config(vadp_dev);
 	if (err < 0) {
 		mse_err("Fail to set media config\n");
-		vb2_queue_error(vq);
-
-		return err;
+		goto error_cannot_start_streaming;
 	}
 
-	err = mse_start_streaming(index);
+	err = mse_start_streaming(vadp_dev->index_instance);
 	if (err < 0) {
 		mse_err("Failed mse_start_streaming()\n");
-		return_all_buffers(vadp_dev, VB2_BUF_STATE_QUEUED);
-		return err;
+		goto error_cannot_start_streaming;
 	}
 
 	for (i = 0; i < count - 1; i++) {
@@ -1790,11 +1786,18 @@ static int mse_adapter_v4l2_start_streaming(struct vb2_queue *vq,
 			if (err == -EAGAIN)
 				break;
 
-			return err;
+			goto error_cannot_start_streaming;
 		}
 	}
 
 	return 0;
+
+error_cannot_start_streaming:
+	return_all_buffers(vadp_dev, VB2_BUF_STATE_QUEUED);
+	vb2_streamoff(vq, vq->type);
+	vb2_queue_error(vq);
+
+	return err;
 }
 
 static const struct vb2_ops g_mse_adapter_v4l2_queue_ops = {
