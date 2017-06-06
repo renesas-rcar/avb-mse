@@ -1871,13 +1871,29 @@ static void mse_adapter_v4l2_cleanup(struct v4l2_adapter_device *vadp_dev)
 	video_unregister_device(&vadp_dev->vdev);
 }
 
+static int vadp_vb2_queue_init(struct v4l2_adapter_device *vadp_dev,
+			       struct vb2_queue *vq,
+			       enum v4l2_buf_type type)
+{
+	vq->type = type;
+	vq->io_modes = VB2_MMAP;
+	vq->drv_priv = vadp_dev;
+	vq->buf_struct_size = sizeof(struct v4l2_adapter_buffer);
+	vq->ops = &g_mse_adapter_v4l2_queue_ops;
+	vq->mem_ops = &vb2_vmalloc_memops;
+	vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
+	vq->lock = &vadp_dev->mutex_vb2;
+	vq->min_buffers_needed = 2;
+
+	return vb2_queue_init(vq);
+}
+
 static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 {
 	int err;
 	struct v4l2_adapter_device *vadp_dev;
 	struct video_device *vdev;
 	struct v4l2_device *v4l2_dev;
-	struct vb2_queue *q;
 
 	mse_debug("START device number=%d\n", dev_num);
 
@@ -1895,38 +1911,18 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 
 	mutex_init(&vadp_dev->mutex_vb2);
 
-	q = &vadp_dev->q_cap;
-	q->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	q->io_modes = VB2_MMAP;
-	q->drv_priv = vadp_dev;
-	q->buf_struct_size = sizeof(struct v4l2_adapter_buffer);
-	q->ops = &g_mse_adapter_v4l2_queue_ops;
-	q->mem_ops = &vb2_vmalloc_memops;
-	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-	q->lock = &vadp_dev->mutex_vb2;
-	q->min_buffers_needed = 2;
-
-	err = vb2_queue_init(q);
+	err = vadp_vb2_queue_init(vadp_dev, &vadp_dev->q_cap,
+				  V4L2_BUF_TYPE_VIDEO_CAPTURE);
 	if (err) {
 		mse_err("Failed vb2_queue_init() Rtn=%d\n", err);
 		return err;
 	}
 
-	q = &vadp_dev->q_out;
-	q->type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-	q->io_modes = VB2_MMAP;
-	q->drv_priv = vadp_dev;
-	q->buf_struct_size = sizeof(struct v4l2_adapter_buffer);
-	q->ops = &g_mse_adapter_v4l2_queue_ops;
-	q->mem_ops = &vb2_vmalloc_memops;
-	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-	q->lock = &vadp_dev->mutex_vb2;
-	q->min_buffers_needed = 2;
-
-	err = vb2_queue_init(q);
+	err = vadp_vb2_queue_init(vadp_dev, &vadp_dev->q_out,
+				  V4L2_BUF_TYPE_VIDEO_OUTPUT);
 	if (err) {
 		mse_err("Failed vb2_queue_init() Rtn=%d\n", err);
-		return -EPERM;
+		return err;
 	}
 
 	INIT_LIST_HEAD(&vadp_dev->buf_list);
