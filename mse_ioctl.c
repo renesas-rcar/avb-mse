@@ -716,6 +716,9 @@ int mse_ioctl_init(int major, int mse_instance_max)
 
 	mse_debug("START\n");
 
+	if (major < 0 || 4094 < major)
+		return -EINVAL;
+
 	ioctl_table = kcalloc(mse_instance_max, sizeof(*ioctl_table),
 			      GFP_KERNEL);
 	if (!ioctl_table)
