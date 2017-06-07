@@ -1783,7 +1783,7 @@ static int mse_adapter_v4l2_start_streaming(struct vb2_queue *vq,
 		goto error_cannot_start_streaming;
 	}
 
-	for (i = 0; i < count - 1; i++) {
+	for (i = 0; i < count; i++) {
 		spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 		prepare_stream_buffer(vq);
 		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
