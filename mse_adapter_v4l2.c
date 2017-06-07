@@ -941,11 +941,6 @@ static int mse_adapter_v4l2_try_fmt_vid(struct file *filp,
 
 	vdev = &vadp_dev->vdev;
 
-	if (V4L2_TYPE_IS_OUTPUT(fmt->type))
-		vdev->queue = &vadp_dev->q_out;
-	else
-		vdev->queue = &vadp_dev->q_cap;
-
 	if (vadp_dev->type == MSE_TYPE_ADAPTER_VIDEO) {
 		fmtbase = g_formats_video;
 		fmt_size = ARRAY_SIZE(g_formats_video);
@@ -1022,6 +1017,7 @@ static int mse_adapter_v4l2_s_fmt_vid(struct file *filp,
 	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
 	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
+	struct vb2_queue *vq;
 
 	mse_debug("START\n");
 
@@ -1030,18 +1026,27 @@ static int mse_adapter_v4l2_s_fmt_vid(struct file *filp,
 		return -EINVAL;
 	}
 
+	if (vadp_owner_get(vadp_fh))
+		return -EBUSY;
+
+	if (V4L2_TYPE_IS_OUTPUT(fmt->type))
+		vq = &vadp_dev->q_out;
+	else
+		vq = &vadp_dev->q_cap;
+
+	if (vb2_is_busy(vq)) {
+		mse_err("Failed vb2 is busy\n");
+		return -EBUSY;
+	}
+
 	err = mse_adapter_v4l2_try_fmt_vid(filp, priv, fmt);
 	if (err < 0) {
 		mse_err("Failed capture_try_fmt_vid_cap()\n");
 		return err;
 	}
 
-	if (vb2_is_busy(vadp_dev->vdev.queue)) {
-		mse_err("Failed vb2 is busy\n");
-		return -EBUSY;
-	}
-
 	vadp_dev->format = *pix;
+	vadp_dev->vdev.queue = vq;
 
 	mse_debug("END\n");
 
@@ -1063,8 +1068,11 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 		return -EINVAL;
 	}
 
-	if (!vadp_owner_is(vadp_fh))
+	if (vadp_owner_get(vadp_fh))
 		return -EBUSY;
+
+	if (i != vadp_dev->vdev.queue->type)
+		return -EINVAL;
 
 	err = try_mse_open(vadp_dev, i);
 	if (err) {
@@ -1908,6 +1916,7 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	vdev->vfl_type = VFL_TYPE_GRABBER;
 	vdev->ioctl_ops = &g_mse_adapter_v4l2_ioctl_ops;
 	vdev->vfl_dir = VFL_DIR_M2M;
+	vdev->queue = &vadp_dev->q_cap; /* default queue is capture */
 
 	mutex_init(&vadp_dev->mutex_vb2);
 
