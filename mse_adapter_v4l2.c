@@ -741,6 +741,7 @@ static int mse_adapter_v4l2_fop_release(struct file *filp)
 	int err;
 	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
 	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
+	struct v4l2_requestbuffers req;
 
 	mse_debug("START\n");
 
@@ -750,6 +751,24 @@ static int mse_adapter_v4l2_fop_release(struct file *filp)
 	}
 
 	if (vadp_owner_is(vadp_fh)) {
+		if (vb2_is_busy(vadp_dev->vdev.queue)) {
+			mse_debug("vb2 is busy, try queue free\n");
+
+			vb2_ioctl_streamoff(filp, filp->private_data,
+					    vadp_dev->vdev.queue->type);
+
+			req.count = 0;
+			req.type = vadp_dev->vdev.queue->type;
+			req.memory = V4L2_MEMORY_MMAP;
+			err = vb2_ioctl_reqbufs(filp,
+						filp->private_data,
+						&req);
+			if (err < 0) {
+				mse_err("Failed vb2_ioctl_reqbufs()\n");
+				return err;
+			}
+		}
+
 		if (vadp_dev->f_mse_open) {
 			err = try_mse_close(vadp_dev);
 			if (err < 0) {
@@ -922,11 +941,6 @@ static int mse_adapter_v4l2_try_fmt_vid(struct file *filp,
 
 	vdev = &vadp_dev->vdev;
 
-	if (V4L2_TYPE_IS_OUTPUT(fmt->type))
-		vdev->queue = &vadp_dev->q_out;
-	else
-		vdev->queue = &vadp_dev->q_cap;
-
 	if (vadp_dev->type == MSE_TYPE_ADAPTER_VIDEO) {
 		fmtbase = g_formats_video;
 		fmt_size = ARRAY_SIZE(g_formats_video);
@@ -1003,6 +1017,7 @@ static int mse_adapter_v4l2_s_fmt_vid(struct file *filp,
 	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
 	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
+	struct vb2_queue *vq;
 
 	mse_debug("START\n");
 
@@ -1011,18 +1026,27 @@ static int mse_adapter_v4l2_s_fmt_vid(struct file *filp,
 		return -EINVAL;
 	}
 
+	if (vadp_owner_get(vadp_fh))
+		return -EBUSY;
+
+	if (V4L2_TYPE_IS_OUTPUT(fmt->type))
+		vq = &vadp_dev->q_out;
+	else
+		vq = &vadp_dev->q_cap;
+
+	if (vb2_is_busy(vq)) {
+		mse_err("Failed vb2 is busy\n");
+		return -EBUSY;
+	}
+
 	err = mse_adapter_v4l2_try_fmt_vid(filp, priv, fmt);
 	if (err < 0) {
 		mse_err("Failed capture_try_fmt_vid_cap()\n");
 		return err;
 	}
 
-	if (vb2_is_busy(vadp_dev->vdev.queue)) {
-		mse_err("Failed vb2 is busy\n");
-		return -EBUSY;
-	}
-
 	vadp_dev->format = *pix;
+	vadp_dev->vdev.queue = vq;
 
 	mse_debug("END\n");
 
@@ -1044,13 +1068,16 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 		return -EINVAL;
 	}
 
-	if (!vadp_owner_is(vadp_fh))
+	if (vadp_owner_get(vadp_fh))
 		return -EBUSY;
+
+	if (i != vadp_dev->vdev.queue->type)
+		return -EINVAL;
 
 	err = try_mse_open(vadp_dev, i);
 	if (err) {
 		mse_err("Failed mse_open()\n");
-		return vb2_ioctl_streamoff(filp, priv, i);
+		return err;
 	}
 
 	if (V4L2_TYPE_IS_OUTPUT(i)) {
@@ -1059,7 +1086,7 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 			err = temp_buffer_alloc(vadp_dev);
 			if (err < 0) {
 				mse_err("cannnot allocate temp buffer\n");
-				vb2_queue_error(&vadp_dev->q_out);
+				try_mse_close(vadp_dev);
 
 				return err;
 			}
@@ -1729,7 +1756,6 @@ static int mse_adapter_v4l2_start_streaming(struct vb2_queue *vq,
 {
 	int err;
 	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
-	int index = vadp_dev->index_instance;
 	unsigned long flags;
 	int i;
 
@@ -1748,19 +1774,16 @@ static int mse_adapter_v4l2_start_streaming(struct vb2_queue *vq,
 	err = set_media_config(vadp_dev);
 	if (err < 0) {
 		mse_err("Fail to set media config\n");
-		vb2_queue_error(vq);
-
-		return err;
+		goto error_cannot_start_streaming;
 	}
 
-	err = mse_start_streaming(index);
+	err = mse_start_streaming(vadp_dev->index_instance);
 	if (err < 0) {
 		mse_err("Failed mse_start_streaming()\n");
-		return_all_buffers(vadp_dev, VB2_BUF_STATE_QUEUED);
-		return err;
+		goto error_cannot_start_streaming;
 	}
 
-	for (i = 0; i < count - 1; i++) {
+	for (i = 0; i < count; i++) {
 		spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 		prepare_stream_buffer(vq);
 		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
@@ -1771,11 +1794,18 @@ static int mse_adapter_v4l2_start_streaming(struct vb2_queue *vq,
 			if (err == -EAGAIN)
 				break;
 
-			return err;
+			goto error_cannot_start_streaming;
 		}
 	}
 
 	return 0;
+
+error_cannot_start_streaming:
+	return_all_buffers(vadp_dev, VB2_BUF_STATE_QUEUED);
+	vb2_streamoff(vq, vq->type);
+	vb2_queue_error(vq);
+
+	return err;
 }
 
 static const struct vb2_ops g_mse_adapter_v4l2_queue_ops = {
@@ -1849,13 +1879,29 @@ static void mse_adapter_v4l2_cleanup(struct v4l2_adapter_device *vadp_dev)
 	video_unregister_device(&vadp_dev->vdev);
 }
 
+static int vadp_vb2_queue_init(struct v4l2_adapter_device *vadp_dev,
+			       struct vb2_queue *vq,
+			       enum v4l2_buf_type type)
+{
+	vq->type = type;
+	vq->io_modes = VB2_MMAP;
+	vq->drv_priv = vadp_dev;
+	vq->buf_struct_size = sizeof(struct v4l2_adapter_buffer);
+	vq->ops = &g_mse_adapter_v4l2_queue_ops;
+	vq->mem_ops = &vb2_vmalloc_memops;
+	vq->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
+	vq->lock = &vadp_dev->mutex_vb2;
+	vq->min_buffers_needed = 2;
+
+	return vb2_queue_init(vq);
+}
+
 static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 {
 	int err;
 	struct v4l2_adapter_device *vadp_dev;
 	struct video_device *vdev;
 	struct v4l2_device *v4l2_dev;
-	struct vb2_queue *q;
 
 	mse_debug("START device number=%d\n", dev_num);
 
@@ -1870,41 +1916,22 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	vdev->vfl_type = VFL_TYPE_GRABBER;
 	vdev->ioctl_ops = &g_mse_adapter_v4l2_ioctl_ops;
 	vdev->vfl_dir = VFL_DIR_M2M;
+	vdev->queue = &vadp_dev->q_cap; /* default queue is capture */
 
 	mutex_init(&vadp_dev->mutex_vb2);
 
-	q = &vadp_dev->q_cap;
-	q->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	q->io_modes = VB2_MMAP;
-	q->drv_priv = vadp_dev;
-	q->buf_struct_size = sizeof(struct v4l2_adapter_buffer);
-	q->ops = &g_mse_adapter_v4l2_queue_ops;
-	q->mem_ops = &vb2_vmalloc_memops;
-	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-	q->lock = &vadp_dev->mutex_vb2;
-	q->min_buffers_needed = 2;
-
-	err = vb2_queue_init(q);
+	err = vadp_vb2_queue_init(vadp_dev, &vadp_dev->q_cap,
+				  V4L2_BUF_TYPE_VIDEO_CAPTURE);
 	if (err) {
 		mse_err("Failed vb2_queue_init() Rtn=%d\n", err);
 		return err;
 	}
 
-	q = &vadp_dev->q_out;
-	q->type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-	q->io_modes = VB2_MMAP;
-	q->drv_priv = vadp_dev;
-	q->buf_struct_size = sizeof(struct v4l2_adapter_buffer);
-	q->ops = &g_mse_adapter_v4l2_queue_ops;
-	q->mem_ops = &vb2_vmalloc_memops;
-	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-	q->lock = &vadp_dev->mutex_vb2;
-	q->min_buffers_needed = 2;
-
-	err = vb2_queue_init(q);
+	err = vadp_vb2_queue_init(vadp_dev, &vadp_dev->q_out,
+				  V4L2_BUF_TYPE_VIDEO_OUTPUT);
 	if (err) {
 		mse_err("Failed vb2_queue_init() Rtn=%d\n", err);
-		return -EPERM;
+		return err;
 	}
 
 	INIT_LIST_HEAD(&vadp_dev->buf_list);
