@@ -2033,9 +2033,14 @@ static void mse_work_depacketize(struct work_struct *work)
 		queue_work(instance->wq_packet, &instance->wk_callback);
 
 	/* state is STOPPING */
-	if (mse_state_test(instance, MSE_STATE_STOPPING))
+	if (mse_state_test(instance, MSE_STATE_STOPPING)) {
+		if (!atomic_read(&instance->trans_buf_cnt))
+			queue_work(instance->wq_packet,
+				   &instance->wk_stop_streaming);
+
 		if (atomic_inc_return(&instance->done_buf_cnt) != 1)
 			atomic_dec(&instance->done_buf_cnt);
+	}
 
 	/* state is NOT EXECUTE */
 	if (!mse_state_test(instance, MSE_STATE_EXECUTE))
