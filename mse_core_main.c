@@ -420,7 +420,6 @@ struct mse_instance {
 	u64 mpeg2ts_clock_90k;
 	int mpeg2ts_pre_pcr_pid;
 	u64 mpeg2ts_pre_pcr_90k;
-	bool f_force_flush;
 	struct mse_trans_buffer mpeg2ts_buffer[MSE_MPEG2TS_BUF_NUM];
 	u8 *mpeg2ts_buffer_base;
 	int mpeg2ts_buffer_idx;
@@ -1722,7 +1721,6 @@ static void mse_work_packetize(struct work_struct *work)
 
 	if (!(trans_size > 0)) {
 		/* no data to process */
-		instance->f_force_flush = false;
 		atomic_inc(&instance->done_buf_cnt);
 
 		if (!instance->timer_interval)
@@ -1775,8 +1773,6 @@ static void mse_work_packetize(struct work_struct *work)
 	if (ret == -EAGAIN) {
 		instance->f_continue = false;
 		if (!atomic_read(&instance->trans_buf_cnt)) {
-			instance->f_force_flush = false;
-
 			/* state is STOPPING */
 			if (mse_state_test(instance, MSE_STATE_STOPPING)) {
 				mse_debug("discard %zu byte before stopping\n",
@@ -1805,7 +1801,6 @@ static void mse_work_packetize(struct work_struct *work)
 		mse_err("error=%d buffer may be corrupted\n", ret);
 		instance->f_trans_start = false;
 		instance->f_continue = false;
-		instance->f_force_flush = false;
 
 		mse_trans_complete(instance, ret);
 
@@ -1827,7 +1822,6 @@ static void mse_work_packetize(struct work_struct *work)
 	if (instance->f_continue) {
 		queue_work(instance->wq_packet, &instance->wk_packetize);
 	} else {
-		instance->f_force_flush = false;
 		if (ret != -EAGAIN)
 			atomic_inc(&instance->done_buf_cnt);
 
@@ -2089,12 +2083,6 @@ static void mse_work_callback(struct work_struct *work)
 		if (IS_MSE_TYPE_MPEG2TS(adapter->type)) {
 			u64 clock_90k = instance->mpeg2ts_clock_90k;
 			u64 pcr_90k = instance->mpeg2ts_pcr_90k;
-
-			if (instance->f_force_flush) {
-				queue_work(instance->wq_packet,
-					&instance->wk_packetize);
-				return;
-			}
 
 			/* state is NOT STOPPING */
 			if (!mse_state_test(instance, MSE_STATE_STOPPING)) {
@@ -2625,7 +2613,6 @@ static void mse_start_streaming_common(struct mse_instance *instance)
 	instance->f_stopping = false;
 	instance->f_trans_start = false;
 	instance->f_completion = false;
-	instance->f_force_flush = false;
 	instance->mpeg2ts_clock_90k = MPEG2TS_PCR90K_INVALID;
 	instance->mpeg2ts_pre_pcr_pid = MPEG2TS_PCR_PID_IGNORE;
 	instance->mpeg2ts_pcr_90k = MPEG2TS_PCR90K_INVALID;
@@ -2792,6 +2779,43 @@ static bool check_mpeg2ts_pcr(struct mse_instance *instance,
 	return ret;
 }
 
+static u64 calc_pcr_progress_by_bitrate(u64 bitrate, size_t size)
+{
+	if (!bitrate)
+		bitrate = MSE_DEFAULT_BITRATE;
+
+	/* (size * 8 * 90kHz) / bitrate */
+	return div64_u64((u64)(size * 8 * 90000), bitrate);
+}
+
+static void mpeg2ts_adjust_pcr(struct mse_instance *instance,
+			       size_t size)
+{
+	u64 bitrate = instance->media_config.mpeg2ts.bitrate;
+	u64 progress;
+
+	if (instance->mpeg2ts_clock_90k == MPEG2TS_PCR90K_INVALID)
+		instance->mpeg2ts_clock_90k = 0;
+
+	if (instance->mpeg2ts_pcr_90k == MPEG2TS_PCR90K_INVALID)
+		instance->mpeg2ts_pcr_90k = 0;
+
+	instance->mpeg2ts_pre_pcr_90k = instance->mpeg2ts_pcr_90k;
+
+	progress = calc_pcr_progress_by_bitrate(bitrate, size);
+
+	instance->mpeg2ts_pcr_90k += progress;
+
+	/* recovery */
+	if (compare_pcr(instance->mpeg2ts_pcr_90k,
+			instance->mpeg2ts_clock_90k))
+		instance->mpeg2ts_pcr_90k =
+			instance->mpeg2ts_clock_90k + progress;
+
+	mse_debug("clock_90k=%llu pcr=%llu\n",
+		  instance->mpeg2ts_clock_90k, instance->mpeg2ts_pcr_90k);
+}
+
 static void mpeg2ts_buffer_flush(struct mse_instance *instance)
 {
 	struct mse_trans_buffer *mpeg2ts;
@@ -2804,9 +2828,7 @@ static void mpeg2ts_buffer_flush(struct mse_instance *instance)
 		return; /* no data */
 
 #ifdef DEBUG
-	if (instance->f_force_flush)
-		mse_debug("flush %zu bytes, before stopping.\n",
-			  mpeg2ts->buffer_size);
+	mse_debug("flush %zu bytes, before stopping.\n", mpeg2ts->buffer_size);
 #endif
 
 	/* add mpeg2ts buffer to proc buffer list*/
@@ -2814,13 +2836,15 @@ static void mpeg2ts_buffer_flush(struct mse_instance *instance)
 	list_add_tail(&mpeg2ts->list, &instance->proc_buf_list);
 	atomic_inc(&instance->trans_buf_cnt);
 	instance->mpeg2ts_buffer_idx = (idx + 1) % MSE_MPEG2TS_BUF_NUM;
-	instance->f_force_flush = true;
+
+	mpeg2ts_adjust_pcr(instance, mpeg2ts->buffer_size);
 }
 
 static int mpeg2ts_buffer_write(struct mse_instance *instance,
 				struct mse_trans_buffer *buf)
 {
 	bool trans_start;
+	bool force_flush = false;
 	unsigned char *buffer = buf->media_buffer;
 	size_t buffer_size = buf->buffer_size;
 	struct mse_trans_buffer *mpeg2ts;
@@ -2858,20 +2882,16 @@ static int mpeg2ts_buffer_write(struct mse_instance *instance,
 	mpeg2ts->buffer_size += buffer_size;
 
 	if (request_size + buffer_size >= MSE_MPEG2TS_BUF_THRESH)
-		instance->f_force_flush = true;
+		force_flush = true;
 
 #ifdef DEBUG
-	if (instance->f_force_flush)
+	if (force_flush)
 		mse_debug("flush %zu bytes.\n", mpeg2ts->buffer_size);
 #endif
 
 	trans_start = check_mpeg2ts_pcr(instance, mpeg2ts);
-	if (trans_start)
-		instance->f_force_flush = false;
-	else
-		trans_start = instance->f_force_flush;
 
-	if (!trans_start) {
+	if (!trans_start && !force_flush) {
 		/* Not enough data, request next buffer */
 		mse_trans_complete(instance, buffer_size);
 
@@ -2890,6 +2910,9 @@ static int mpeg2ts_buffer_write(struct mse_instance *instance,
 	mpeg2ts->work_length = 0;
 	list_add_tail(&mpeg2ts->list, &instance->proc_buf_list);
 	instance->mpeg2ts_buffer_idx = (idx + 1) % MSE_MPEG2TS_BUF_NUM;
+
+	if (force_flush)
+		mpeg2ts_adjust_pcr(instance, mpeg2ts->buffer_size);
 
 	return 0;
 }
@@ -3871,8 +3894,6 @@ int mse_open(int index_media, bool tx)
 			goto error_cannot_alloc_mpeg2ts_buffer;
 		}
 	}
-
-	instance->f_force_flush = false;
 
 	/* ptp open */
 	instance->ptp_index = mse_ptp_get_first_index();
