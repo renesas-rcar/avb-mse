@@ -401,6 +401,8 @@ int mse_packet_ctrl_take_out_packet(int index,
 				       &recv_time,
 				       dma->packet_table[dma->read_p].vaddr,
 				       dma->packet_table[dma->read_p].len);
+		if (ret == MSE_PACKETIZE_STATUS_SKIP)
+			break;
 
 		dma->read_p = (dma->read_p + 1) % dma->size;
 
