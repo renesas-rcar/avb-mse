@@ -66,7 +66,6 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/dma-mapping.h>
-#include <linux/ptp_clock.h>
 #include <linux/if_vlan.h>
 
 #include "ravb_mse_kernel.h"
@@ -215,7 +214,7 @@ int mse_packet_ctrl_make_packet(int index,
 }
 
 int mse_packet_ctrl_make_packet_crf(int index,
-				    struct ptp_clock_time *timestamps,
+				    u64 *timestamps,
 				    int count,
 				    struct mse_packet_ctrl *dma)
 {
@@ -238,7 +237,7 @@ int mse_packet_ctrl_make_packet_crf(int index,
 		dma->packet_table[dma->write_p].vaddr,
 		&packet_size,
 		timestamps,
-		count * sizeof(struct ptp_clock_time),
+		count * sizeof(*timestamps),
 		NULL,
 		NULL);
 

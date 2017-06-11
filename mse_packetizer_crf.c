@@ -67,7 +67,6 @@
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <uapi/linux/if_ether.h>
-#include <linux/ptp_clock.h>
 
 #include "ravb_mse_kernel.h"
 #include "mse_packetizer.h"
@@ -278,7 +277,7 @@ static int mse_packetizer_crf_audio_packetize(int index,
 					      unsigned int *timestamp)
 {
 	struct crf_packetizer *crf;
-	struct ptp_clock_time *ptptimes;
+	u64 *ptptimes;
 	u64 *sample;
 	int i, data_len;
 
@@ -289,13 +288,12 @@ static int mse_packetizer_crf_audio_packetize(int index,
 
 	memcpy(packet, crf->packet_template, AVTP_CRF_PAYLOAD_OFFSET);
 	sample = (u64 *)(packet + AVTP_CRF_PAYLOAD_OFFSET);
-	ptptimes = (struct ptp_clock_time *)buffer;
+	ptptimes = buffer;
 
 	data_len = 0;
-	for (i = 0; i < buffer_size / sizeof(struct ptp_clock_time); i++) {
-		*sample++ = cpu_to_be64(ptptimes[i].sec * NSEC_SCALE +
-			ptptimes[i].nsec);
-		data_len += sizeof(u64);
+	for (i = 0; i < buffer_size / sizeof(*ptptimes); i++) {
+		*sample++ = cpu_to_be64(ptptimes[i]);
+		data_len += sizeof(*sample);
 	}
 
 	/* variable header */
