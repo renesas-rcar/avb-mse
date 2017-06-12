@@ -4225,6 +4225,10 @@ int mse_start_streaming(int index)
 	if (mse_state_test(instance, MSE_STATE_RUNNABLE))
 		return 0;
 
+	/* state is NOT OPEN */
+	if (!mse_state_test(instance, MSE_STATE_OPEN))
+		return -EPERM;
+
 	write_lock_irqsave(&instance->lock_state, flags);
 	err = mse_state_change(instance, MSE_STATE_IDLE);
 	write_unlock_irqrestore(&instance->lock_state, flags);
@@ -4259,8 +4263,8 @@ int mse_stop_streaming(int index)
 
 	mse_debug_state(instance);
 
-	/* state is CLOSE */
-	if (mse_state_test(instance, MSE_STATE_CLOSE)) {
+	/* state is NOT STARTED */
+	if (!mse_state_test(instance, MSE_STATE_STARTED)) {
 		mse_err("operation is not permitted. index=%d\n", index);
 		return -EPERM;
 	}
