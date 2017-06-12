@@ -479,7 +479,7 @@ static int mse_adapter_eavb_send(int index,
 			mse_err("read is short %zd/%d\n",
 				rret, num_dequeue);
 		}
-		eavb->entried = (eavb->entried + rret) % eavb->num_entry;
+		eavb->unentry = (eavb->unentry + rret) % eavb->num_entry;
 		eavb->num_send -= rret;
 	}
 
@@ -523,8 +523,27 @@ static int mse_adapter_eavb_send(int index,
 		mse_err("write is short %zd/%d\n", wret, num_packets);
 	}
 
-	eavb->unentry = (eavb->unentry + wret) % eavb->num_entry;
+	eavb->entried = (eavb->entried + wret) % eavb->num_entry;
 	eavb->num_send += wret;
+
+	/* dequeue */
+	if (wret > 0) {
+		rret = eavb->ravb.read(eavb->ravb.handle, eavb->read_entry,
+				       wret);
+		if (rret != wret) {
+			avb_print_entrynum(eavb);
+
+			if (rret < 0) {
+				mse_err("read error %zd\n", rret);
+				return rret;
+			}
+			mse_err("read is short %zd/%zd\n",
+				rret, wret);
+		}
+		eavb->unentry = (eavb->unentry + rret) % eavb->num_entry;
+		eavb->num_send -= rret;
+	}
+
 	mse_debug("read %zd write %zd\n", rret, wret);
 
 	return wret;
