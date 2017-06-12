@@ -63,17 +63,30 @@
 #ifndef __MSE_PTP_H__
 #define __MSE_PTP_H__
 
+int mse_ptp_get_time_dummy(u64 *ns);
 
-int mse_ptp_open_dummy(int *dev_id);
+void *mse_ptp_open_dummy(void);
 
-int mse_ptp_close_dummy(int dev_id);
+int mse_ptp_close_dummy(void *ptp_handle);
 
-int mse_ptp_get_time_dummy(int dev_id, struct ptp_clock_time *clock_time);
+int mse_ptp_capture_start_dummy(void *ptp_handle,
+				int ch,
+				int max_count);
 
-int mse_ptp_get_timestamps_dummy(int dev_id,
-				 int ch,
-				 int *count,
-				 struct ptp_clock_time timestamps[]);
+int mse_ptp_capture_stop_dummy(void *ptp_handle);
+
+int mse_ptp_get_timestamps_dummy(void *ptp_handle,
+				 int req_count,
+				 u64 *timestamps);
+
+void *mse_ptp_timer_open_dummy(u32 (*handler)(void *),
+			       void *priv);
+
+int mse_ptp_timer_close_dummy(void *timer_handle);
+
+int mse_ptp_timer_start_dummy(void *timer_handle, u32 start);
+
+int mse_ptp_timer_cancel_dummy(void *timer_handle);
 
 #endif /* __MSE_PTP_H__ */
 

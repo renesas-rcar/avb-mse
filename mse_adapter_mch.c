@@ -73,15 +73,22 @@
 static struct mch_ops mch_mse_ops = {
 	.open = mch_open,
 	.close = mch_close,
+	.set_interval = mch_set_interval,
 	.send_timestamps = mch_send_timestamps,
 	.get_recovery_value = mch_get_recovery_value,
 };
 
 static struct mse_ptp_ops ptp_mse_ops = {
+	.get_time = mch_ptp_get_time,
 	.open = mch_ptp_open,
 	.close = mch_ptp_close,
-	.get_time = mch_ptp_get_time,
+	.capture_start = mch_ptp_capture_start,
+	.capture_stop = mch_ptp_capture_stop,
 	.get_timestamps = mch_ptp_get_timestamps,
+	.timer_open = mch_ptp_timer_open,
+	.timer_close = mch_ptp_timer_close,
+	.timer_start = mch_ptp_timer_start,
+	.timer_cancel = mch_ptp_timer_cancel,
 };
 
 static int mch_mse_if_instance_id;

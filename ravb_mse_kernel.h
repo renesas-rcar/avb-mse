@@ -65,6 +65,7 @@
 
 #include <linux/ptp_clock.h>
 #include "ravb_mse.h"
+#include "ravb_mch.h"
 
 /**
  * @brief Message function for MSE
@@ -274,15 +275,13 @@ struct mse_adapter_network_ops {
  * @brief registered operations for mch
  */
 struct mch_ops {
-	int (*open)(int *dev_id);
-	int (*close)(int dev_id);
-	int (*send_timestamps)(int dev_id,
-			       int time_rate_ns,
-			       int master_count,
-			       unsigned int master_timestamps[],
-			       int device_count,
-			       unsigned int device_timestamps[]);
-	int (*get_recovery_value)(int dev_id,
+	void *(*open)(void);
+	int (*close)(void *mch);
+	int (*set_interval)(void *mch, u32 ns);
+	int (*send_timestamps)(void *mch,
+			       struct mch_timestamp *ts,
+			       int count);
+	int (*get_recovery_value)(void *mch,
 				  int *value);
 };
 
@@ -290,11 +289,21 @@ struct mch_ops {
  * @brief registered operations for external ptp
  */
 struct mse_ptp_ops {
-	int (*open)(int *dev_id);
-	int (*close)(int dev_id);
-	int (*get_time)(int dev_id, struct ptp_clock_time *clock_time);
-	int (*get_timestamps)(int dev_id, int ch, int *count,
-			      struct ptp_clock_time timestamps[]);
+	/* PTP Time API */
+	int (*get_time)(u64 *ns);
+
+	/* PTP Capture API */
+	void *(*open)(void);
+	int (*close)(void *ptp_handle);
+	int (*capture_start)(void *ptp_handle, int ch, int max_count);
+	int (*capture_stop)(void *ptp_handle);
+	int (*get_timestamps)(void *ptp_handle, int req_count, u64 *timestamps);
+
+	/* PTP Timer API */
+	void *(*timer_open)(u32 (*handler)(void *), void *priv);
+	int (*timer_close)(void *timer_handle);
+	int (*timer_start)(void *timer_handle, u32 start);
+	int (*timer_cancel)(void *timer_handle);
 };
 
 /**

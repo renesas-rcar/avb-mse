@@ -100,6 +100,7 @@ struct iec61883_6_packetizer {
 	u8 local_total_samples;
 	int piece_data_len;
 	bool f_warned;
+	struct mse_start_time start_time;
 
 	unsigned char packet_template[ETHFRAMELEN_MAX];
 	unsigned char packet_piece[ETHFRAMELEN_MAX];
@@ -111,9 +112,8 @@ struct iec61883_6_packetizer {
 
 struct iec61883_6_packetizer iec61883_6_packetizer_table[MSE_INSTANCE_MAX];
 
-static int check_receive_packet(int index, int channels, void *packet)
+static int check_receive_packet(int index, int channels, int sample_rate)
 {
-	int sample_rate;
 	struct iec61883_6_packetizer *iec61883_6;
 	struct mse_audio_config *audio_config;
 
@@ -126,7 +126,6 @@ static int check_receive_packet(int index, int channels, void *packet)
 		return -EINVAL;
 	}
 
-	sample_rate = avtp_fdf_to_sample_rate(avtp_get_iec61883_fdf(packet));
 	if (sample_rate != audio_config->sample_rate) {
 		mse_err("packet's sample_rate=%d != cfg sample_rate=%d\n",
 			sample_rate, audio_config->sample_rate);
@@ -258,6 +257,9 @@ static int mse_packetizer_iec61883_6_packet_init(int index)
 	iec61883_6->send_seq_num = 0;
 	iec61883_6->local_total_samples = 0;
 	iec61883_6->piece_data_len = 0;
+	iec61883_6->start_time.start_time = 0;
+	iec61883_6->start_time.capture_diff = 0;
+	iec61883_6->start_time.capture_freq = 0;
 
 	mse_packetizer_stats_init(&iec61883_6->stats);
 
@@ -717,10 +719,11 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 {
 	struct iec61883_6_packetizer *iec61883_6;
 	int payload_size, piece_size = 0;
+	u32 offset;
 	int channels;
+	int sample_rate;
 	int data_size;
 	char *buf, tmp_buffer[ETHFRAMEMTU_MAX] = {0};
-	unsigned long value;
 	int ret;
 
 	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
@@ -751,9 +754,38 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 	payload_size = avtp_get_stream_data_length(packet)
 		- AVTP_CIP_HEADER_SIZE;
 	channels = avtp_get_iec61883_dbs(packet);
+	sample_rate = avtp_fdf_to_sample_rate(avtp_get_iec61883_fdf(packet));
 
 	data_size = payload_size / AM824_DATA_SIZE *
 		iec61883_6->audio_config.bytes_per_sample;
+
+	ret = check_receive_packet(index, channels, sample_rate);
+	if (ret < 0)
+		return ret;
+
+	iec61883_6->sample_per_packet =
+			payload_size / (AM824_DATA_SIZE * channels);
+	iec61883_6->frame_interval_time = div_u64(
+			NSEC_SCALE * iec61883_6->sample_per_packet,
+			sample_rate);
+
+	if (iec61883_6->start_time.capture_freq > 0 &&
+	    iec61883_6->stats.seq_num_next == SEQNUM_INIT) {
+		offset = mse_packetizer_calc_audio_offset(
+			avtp_get_timestamp(packet),
+			&iec61883_6->start_time,
+			avtp_fdf_to_sample_rate(avtp_get_iec61883_fdf(packet)),
+			iec61883_6->audio_config.bytes_per_sample,
+			channels,
+			buffer_size);
+		if (offset >= buffer_size) {
+			*buffer_processed = buffer_size;
+			return MSE_PACKETIZE_STATUS_SKIP;
+		}
+
+		*buffer_processed += offset;
+	}
+
 	/* buffer over check */
 	if (*buffer_processed + data_size > buffer_size)
 		buf = tmp_buffer;
@@ -763,11 +795,6 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 	/* seq_num check */
 	mse_packetizer_stats_seqnum(&iec61883_6->stats,
 				    avtp_get_sequence_num(packet));
-
-	ret = check_receive_packet(index, avtp_get_iec61883_dbs(packet),
-				   packet);
-	if (ret < 0)
-		return ret;
 
 	mse_packetizer_iec61883_6_data_convert(index,
 					       data_size - piece_size,
@@ -789,18 +816,25 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 
 	*timestamp = avtp_get_timestamp(packet);
 
-	iec61883_6->sample_per_packet =
-				payload_size / (AM824_DATA_SIZE * channels);
-	value = NSEC_SCALE * iec61883_6->sample_per_packet;
-	do_div(value,
-	       avtp_fdf_to_sample_rate(avtp_get_iec61883_fdf(packet)));
-	iec61883_6->frame_interval_time = value;
-
 	/* buffer over check */
 	if (*buffer_processed >= buffer_size)
 		return MSE_PACKETIZE_STATUS_COMPLETE;
 
 	return MSE_PACKETIZE_STATUS_CONTINUE;
+}
+
+int mse_packetizer_iec61883_6_set_start_time(int index,
+					     struct mse_start_time *start_time)
+{
+	struct iec61883_6_packetizer *iec61883_6;
+
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+		return -EPERM;
+
+	iec61883_6 = &iec61883_6_packetizer_table[index];
+	iec61883_6->start_time = *start_time;
+
+	return 0;
 }
 
 struct mse_packetizer_ops mse_packetizer_iec61883_6_ops = {
@@ -810,6 +844,7 @@ struct mse_packetizer_ops mse_packetizer_iec61883_6_ops = {
 	.set_network_config = mse_packetizer_iec61883_6_set_network_config,
 	.set_audio_config = mse_packetizer_iec61883_6_set_audio_config,
 	.get_audio_info = mse_packetizer_iec61883_6_get_audio_info,
+	.set_start_time = mse_packetizer_iec61883_6_set_start_time,
 	.calc_cbs = mse_packetizer_iec61883_6_calc_cbs,
 	.packetize = mse_packetizer_iec61883_6_packetize,
 	.depacketize = mse_packetizer_iec61883_6_depacketize,

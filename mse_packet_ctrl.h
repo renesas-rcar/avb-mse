@@ -115,7 +115,7 @@ int mse_packet_ctrl_take_out_packet(int index,
 				    struct mse_packetizer_ops *ops,
 				    size_t *processed);
 int mse_packet_ctrl_make_packet_crf(int index,
-				    struct ptp_clock_time *timestamps,
+				    u64 *timestamps,
 				    int count,
 				    struct mse_packet_ctrl *dma);
 int mse_packet_ctrl_take_out_packet_crf(int index,

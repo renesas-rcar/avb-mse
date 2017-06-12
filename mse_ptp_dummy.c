@@ -67,7 +67,6 @@
 #include <linux/slab.h>
 #include <linux/time.h>
 #include <linux/hrtimer.h>
-#include <linux/ptp_clock.h>
 
 #include "ravb_mse_kernel.h"
 
@@ -76,19 +75,24 @@
 
 #define PTP_DUMMY_INTERVAL 3333333  /* 3.33..ms */
 
-#define q_next(n)        (((n) + 1) % MAX_TIMESTAMPS)
+#define q_next(que, pos)        (((que)->pos + 1) % (que)->len)
+#define q_empty(que)            ((que)->head == (que)->tail)
 
 /* structs */
 struct ptp_queue {
 	int head;
 	int tail;
-	struct ptp_clock_time timestamps[MAX_TIMESTAMPS];
+	int len;
+	u64 *timestamps;
 };
 
 struct ptp_device {
-	struct ptp_queue	que;
+	int			index;
+	int			ch;
 	struct			hrtimer timer;
 	int			timer_interval;
+	struct ptp_queue	que;
+	/* timestamp queue lock */
 	spinlock_t		qlock;
 };
 
@@ -97,26 +101,26 @@ static struct ptp_device *g_ptp_devices[MAX_PTP_DEVICES];
 DECLARE_BITMAP(ptp_dummy_device_map, MAX_PTP_DEVICES);
 DEFINE_SPINLOCK(ptp_dummy_lock);
 
-static int enqueue(struct ptp_queue *que, struct ptp_clock_time *clock_time)
+static int enqueue(struct ptp_queue *que, u64 ns)
 {
 	mse_debug("START head=%d, tail=%d\n", que->head, que->tail);
 
-	if (q_next(que->tail) == que->head)
-		que->head = q_next(que->head);
+	if (q_next(que, tail) == que->head)
+		que->head = q_next(que, head);
 
-	que->timestamps[que->tail] = *clock_time;
-	que->tail = q_next(que->tail);
+	que->timestamps[que->tail] = ns;
+	que->tail = q_next(que, tail);
 
 	return 0;
 }
 
-static int dequeue(struct ptp_queue *que, struct ptp_clock_time *clock_time)
+static int dequeue(struct ptp_queue *que, u64 *ns)
 {
-	if (que->head == que->tail)
+	if (q_empty(que))
 		return -1;
 
-	*clock_time = que->timestamps[que->head];
-	que->head = q_next(que->head);
+	*ns = que->timestamps[que->head];
+	que->head = q_next(que, head);
 
 	return 0;
 }
@@ -124,8 +128,7 @@ static int dequeue(struct ptp_queue *que, struct ptp_clock_time *clock_time)
 static enum hrtimer_restart ptp_timestamp_callback(struct hrtimer *arg)
 {
 	struct ptp_device *dev;
-	struct ptp_clock_time clock_time;
-	struct timespec64 time;
+	u64 ns;
 	unsigned long flags;
 
 	dev = container_of(arg, struct ptp_device, timer);
@@ -136,42 +139,155 @@ static enum hrtimer_restart ptp_timestamp_callback(struct hrtimer *arg)
 	hrtimer_add_expires_ns(&dev->timer, dev->timer_interval);
 
 	/* Get time from system timer */
-	getnstimeofday64(&time);
-	clock_time.sec = time.tv_sec;
-	clock_time.nsec = time.tv_nsec;
+	ns = ktime_get_real_ns();
 
 	spin_lock_irqsave(&dev->qlock, flags);
 
 	/* add to queue */
-	enqueue(&dev->que, &clock_time);
+	enqueue(&dev->que, ns);
 
 	spin_unlock_irqrestore(&dev->qlock, flags);
 
 	return HRTIMER_RESTART;
 }
 
-int mse_ptp_open_dummy(int *dev_id)
+static struct ptp_device *mse_ptp_get_dev(void *ptp_handle)
+{
+	struct ptp_device *dev = ptp_handle;
+
+	if (!dev)
+		return NULL;
+
+	if (g_ptp_devices[dev->index] != dev)
+		return NULL;
+
+	return dev;
+}
+
+/*
+ * Public functions
+ */
+int mse_ptp_get_time_dummy(u64 *ns)
+{
+	/* Get time from system timer */
+	*ns = ktime_get_real_ns();
+
+	return 0;
+}
+
+int mse_ptp_capture_stop_dummy(void *ptp_handle)
+{
+	struct ptp_device *dev;
+
+	dev = mse_ptp_get_dev(ptp_handle);
+	if (!dev)
+		return -EINVAL;
+
+	/* if already capture started, return success */
+	if (!dev->timer_interval)
+		return 0;
+
+	/* timer stop */
+	dev->timer_interval = 0;
+	hrtimer_cancel(&dev->timer);
+
+	/* unassing and free timestamp buffer */
+	kfree(dev->que.timestamps);
+	dev->que.timestamps = NULL;
+	dev->que.len = 0;
+
+	return 0;
+}
+
+int mse_ptp_capture_start_dummy(void *ptp_handle,
+				int ch,
+				int max_count)
+{
+	struct ptp_device *dev;
+	void *timestamps;
+	int ret;
+
+	dev = mse_ptp_get_dev(ptp_handle);
+	if (!dev)
+		return -EINVAL;
+
+	/* alloc timestamp buffer */
+	timestamps = kcalloc(max_count + 1, sizeof(u64), GFP_KERNEL);
+	if (!timestamps)
+		return -ENOMEM;
+
+	/* if already capture started, so stop it */
+	if (dev->timer_interval) {
+		ret = mse_ptp_capture_stop_dummy(ptp_handle);
+		if (ret) {
+			kfree(timestamps);
+			return ret;
+		}
+	}
+
+	/* assign timestamp buffer to queue */
+	dev->que.timestamps = timestamps;
+	dev->que.len = max_count + 1;
+
+	/* start timer */
+	dev->timer_interval = PTP_DUMMY_INTERVAL;
+	hrtimer_start(&dev->timer,
+		      ns_to_ktime(dev->timer_interval),
+		      HRTIMER_MODE_REL);
+
+	return 0;
+}
+
+int mse_ptp_get_timestamps_dummy(void *ptp_handle,
+				 int req_count,
+				 u64 *timestamps)
+{
+	struct ptp_device *dev;
+	unsigned long flags;
+	int i;
+
+	dev = mse_ptp_get_dev(ptp_handle);
+	if (!dev)
+		return -EINVAL;
+
+	/* if timer is NOT started */
+	if (!dev->timer_interval)
+		return -EPERM;
+
+	spin_lock_irqsave(&dev->qlock, flags);
+
+	for (i = 0; i < req_count; i++)
+		if (dequeue(&dev->que, &timestamps[i]) < 0)
+			break;
+
+	spin_unlock_irqrestore(&dev->qlock, flags);
+
+	return i;
+}
+
+void *mse_ptp_open_dummy(void)
 {
 	int index;
-	struct ptp_device *dev = NULL;
+	struct ptp_device *dev;
 	unsigned long flags;
 
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev)
-		return -ENOMEM;
+		return NULL;
 
 	spin_lock_irqsave(&ptp_dummy_lock, flags);
 
 	index = find_first_zero_bit(ptp_dummy_device_map, MAX_PTP_DEVICES);
 	if (index >= ARRAY_SIZE(g_ptp_devices)) {
-		mse_err("cannot register ptp dummy device\n");
 		spin_unlock_irqrestore(&ptp_dummy_lock, flags);
+		mse_err("cannot register ptp dummy device\n");
 		kfree(dev);
-		return -EBUSY;
+		return NULL;
 	}
 
-	g_ptp_devices[index] = dev;
 	set_bit(index, ptp_dummy_device_map);
+	g_ptp_devices[index] = dev;
+	dev->index = index;
 
 	spin_unlock_irqrestore(&ptp_dummy_lock, flags);
 
@@ -180,111 +296,60 @@ int mse_ptp_open_dummy(int *dev_id)
 
 	/* init timer */
 	hrtimer_init(&dev->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	dev->timer_interval = PTP_DUMMY_INTERVAL;
+	dev->timer_interval = 0;
 	dev->timer.function = &ptp_timestamp_callback;
 
-	/* start timer */
-	hrtimer_start(&dev->timer,
-		      ns_to_ktime(dev->timer_interval),
-		      HRTIMER_MODE_REL);
+	mse_debug("ptp_handle=%p\n", dev);
 
-	*dev_id = index;
-
-	mse_debug("index=%d\n", index);
-
-	return 0;
+	return dev;
 }
 
-int mse_ptp_close_dummy(int dev_id)
+int mse_ptp_close_dummy(void *ptp_handle)
 {
 	struct ptp_device *dev;
 	unsigned long flags;
+	int ret;
 
-	if ((dev_id < 0) || (dev_id >= MAX_PTP_DEVICES)) {
-		mse_err("invalid argument. index=%d\n", dev_id);
+	dev = mse_ptp_get_dev(ptp_handle);
+	if (!dev)
 		return -EINVAL;
-	}
 
-	mse_debug("index=%d\n", dev_id);
+	/* if already capture started, so stop it */
+	if (dev->timer_interval) {
+		ret = mse_ptp_capture_stop_dummy(ptp_handle);
+		if (ret)
+			return ret;
+	}
 
 	spin_lock_irqsave(&ptp_dummy_lock, flags);
 
-	dev = g_ptp_devices[dev_id];
-	g_ptp_devices[dev_id] = NULL;
-	clear_bit(dev_id, ptp_dummy_device_map);
+	g_ptp_devices[dev->index] = NULL;
+	clear_bit(dev->index, ptp_dummy_device_map);
 
 	spin_unlock_irqrestore(&ptp_dummy_lock, flags);
-
-	/* timer stop */
-	dev->timer_interval = 0;
-	hrtimer_cancel(&dev->timer);
 
 	kfree(dev);
 
 	return 0;
 }
 
-int mse_ptp_get_time_dummy(int dev_id, struct ptp_clock_time *clock_time)
+void *mse_ptp_timer_open_dummy(u32 (*handler)(void *),
+			       void *priv)
 {
-	struct timespec64 time;
-
-	if ((dev_id < 0) || (dev_id >= MAX_PTP_DEVICES)) {
-		mse_err("invalid argument. index=%d\n", dev_id);
-		return -EINVAL;
-	}
-
-	if (!g_ptp_devices[dev_id]) {
-		mse_err("invalid dev_id=%d\n", dev_id);
-		return -EINVAL;
-	}
-
-	/* Get time from system timer */
-	getnstimeofday64(&time);
-	clock_time->sec = time.tv_sec;
-	clock_time->nsec = time.tv_nsec;
-
-	return 0;
+	return NULL;
 }
 
-int mse_ptp_get_timestamps_dummy(int dev_id,
-				 int ch,
-				 int *count,
-				 struct ptp_clock_time timestamps[])
+int mse_ptp_timer_close_dummy(void *timer_handle)
 {
-	struct ptp_device *dev;
-	struct ptp_queue *queue;
-	struct ptp_clock_time clock_time;
-	unsigned long flags;
-	int i;
+	return -EPERM;
+}
 
-	mse_debug("START\n");
+int mse_ptp_timer_start_dummy(void *timer_handle, u32 start)
+{
+	return -EPERM;
+}
 
-	if ((dev_id < 0) || (dev_id >= MAX_PTP_DEVICES)) {
-		mse_err("invalid argument. index=%d\n", dev_id);
-		return -EINVAL;
-	}
-
-	dev = g_ptp_devices[dev_id];
-	if (!dev) {
-		mse_err("invalid dev_id=%d\n", dev_id);
-		return -EINVAL;
-	}
-
-	spin_lock_irqsave(&dev->qlock, flags);
-
-	queue = &dev->que;
-
-	for (i = 0; i < *count; i++) {
-		if (dequeue(queue, &clock_time) < 0)
-			break;
-		timestamps[i] = clock_time;
-	}
-
-	spin_unlock_irqrestore(&dev->qlock, flags);
-
-	*count = i;
-
-	mse_debug("END\n");
-
-	return 0;
+int mse_ptp_timer_cancel_dummy(void *timer_handle)
+{
+	return -EPERM;
 }

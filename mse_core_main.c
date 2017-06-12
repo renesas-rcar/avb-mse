@@ -75,7 +75,6 @@
 #include <linux/time.h>
 #include <linux/hrtimer.h>
 #include <linux/delay.h>
-#include <linux/ptp_clock.h>
 #include <linux/list.h>
 #include <linux/dma-mapping.h>
 #include "avtp.h"
@@ -87,12 +86,11 @@
 #include "mse_ptp.h"
 #include "mse_ioctl_local.h"
 
-#define MSE_DEBUG_TSTAMPS (0)
-#define MSE_DEBUG_STATE   (0)
+#define MSE_DEBUG_TSTAMPS  (0)
+#define MSE_DEBUG_TSTAMPS2 (0) /* very noisy */
+#define MSE_DEBUG_STATE    (0)
 
 #define BUF_SIZE                (32)
-
-#define NANO_SCALE              (1000000000ul)
 
 #define MSE_TIMEOUT_CLOSE       (msecs_to_jiffies(5000)) /* 5secs */
 
@@ -115,17 +113,31 @@
 #define MSE_CRF_TX_RING_SIZE    (MSE_TX_PACKET_NUM_MAX)
 #define MSE_CRF_RX_RING_SIZE    (MSE_RX_PACKET_NUM_MAX * 2)
 
-#define q_next(pos, max)        (((pos) + 1) % max)
+#define q_next(que, pos)        (((pos) + 1) % (que)->len)
+#define q_prev(que, pos)        (((pos) - 1 + (que)->len) % (que)->len)
+#define q_empty(que)            ((que)->head == (que)->tail)
 
 #define PTP_TIMESTAMPS_MAX   (512)
 #define PTP_TIMER_INTERVAL   (20 * 1000000)  /* 1/300 sec * 6 = 20ms */
 
-#define CRF_TIMESTAMPS_MAX   (512)
+/* judge error 5% */
+#define PTP_TIMER_ERROR_THRESHOLD(x)  div64_u64((x) * 5, 100)
+
+/* judge error 2 periods */
+#define PTP_START_ERROR_THRESHOLD(x)  ((x) * 2)
+
+/* judge error 10% capture syncronized */
+#define PTP_SYNC_ERROR_THRESHOLD(x)  div64_u64((x) * 10, 100)
+
+/* judge error 10% valid to mch */
+#define MCH_ERROR_THRESHOLD(x)  div64_u64((x) * 10, 100)
+
+#define PTP_SYNC_LOCK_THRESHOLD (3)
+
 #define CRF_TIMER_INTERVAL   (20 * 1000000)  /* 20ms */
 #define CRF_PTP_TIMESTAMPS   (1)     /* timestamps per CRF packet using ptp */
 #define CRF_AUDIO_TIMESTAMPS (6)     /* audio timestamps per CRF packet */
 
-#define AVTP_TIMESTAMPS_MAX  (512)
 #define CREATE_AVTP_TIMESTAMPS_MAX   (4096)
 
 #define MSE_DECODE_BUFFER_NUM (8)
@@ -199,25 +211,46 @@ enum MSE_STATE {
 			      MSE_STATE_STOPPING,
 };
 
+struct timestamp_set {
+	u64 std;
+	u64 real;
+};
+
 struct timestamp_queue {
+	const char *name;
+	bool f_init;
+	bool f_sync;
+	bool f_32bit;
+	bool f_discont;
+	u32 std_interval;
+	u64 std_counter;
+	int sync_count;
 	int head;
 	int tail;
-	unsigned long std_times[PTP_TIMESTAMPS_MAX];
-	struct ptp_clock_time times[PTP_TIMESTAMPS_MAX];
+	int len;
+	struct timestamp_set timestamps[PTP_TIMESTAMPS_MAX];
 };
 
-struct crf_queue {
-	int head;
-	int tail;
-	unsigned long std_times[CRF_TIMESTAMPS_MAX];
-	u64 times[CRF_TIMESTAMPS_MAX];
+struct timestamp_reader {
+	const char *name;
+	bool f_out_ok;
+	bool f_32bit;
+	u64 out_time;
+	u64 out_std;
+	u64 out_offset;
+	struct timestamp_queue *que;
 };
 
-struct avtp_queue {
-	int head;
-	int tail;
-	unsigned long std_times[AVTP_TIMESTAMPS_MAX];
-	unsigned int times[AVTP_TIMESTAMPS_MAX];
+struct mse_timing_ctrl {
+	u64 start_time;
+	u64 std_start_time;
+	u32 start_time_count;
+	u32 send_count;
+	u64 first_send_time;
+	u64 std_first_send_time;
+	u32 captured_timestamps;
+	u64 last_complete;
+	bool f_ok;
 };
 
 /** @brief transmission buffer */
@@ -329,37 +362,35 @@ struct mse_instance {
 
 	/* @brief crf packetizer index */
 	int crf_index;
-	struct mse_audio_info crf_audio_info;
+	int crf_discont;
 
-	int ptp_dev_id;
-	int mch_dev_id;
+	void *ptp_handle;
+	void *ptp_timer_handle;
+	void *mch_handle;
 	int ptp_index;
 	int mch_index;
-	int mch_revovery_value;
-	bool f_match_ptp_clock;
-	unsigned long mch_std_time;
-	unsigned long std_time_counter;
-	unsigned long add_std_time;
-	unsigned long add_crf_std_time;
-	unsigned long std_time_avtp;
-	unsigned long std_time_crf;
-	unsigned long start_present_time;
 
 	/* @brief timestamp ptp|capture */
 	spinlock_t lock_ques;
 	struct timestamp_queue tstamp_que;
 	struct timestamp_queue tstamp_que_crf;
-	struct crf_queue crf_que;
-	struct avtp_queue avtp_que;
+	struct timestamp_queue crf_que;
+	struct timestamp_queue avtp_que;
+	struct timestamp_reader reader_create_avtp;
+	struct timestamp_reader reader_mch;
+	struct timestamp_reader reader_ptp_start_time;
 
 	/** @brief timestamp(nsec) */
-	unsigned int timestamp;
+	u32 timestamp;
+
+	/** @brief start timing using ptp_timer */
+	u64 ptp_timer_start;
 
 	/** @brief packet buffer */
 	struct mse_packet_ctrl *packet_buffer;
 
 	/** @brief AVTP timestampes */
-	unsigned int avtp_timestamps[CREATE_AVTP_TIMESTAMPS_MAX];
+	u32 avtp_timestamps[CREATE_AVTP_TIMESTAMPS_MAX];
 	int avtp_timestamps_size;
 	int avtp_timestamps_current;
 	/** @brief stopping streaming flag */
@@ -370,11 +401,15 @@ struct mse_instance {
 	bool f_completion;
 	bool f_trans_start;
 	bool f_work_timestamp;
+	bool f_wait_start_transmission;
 
 	/** @brief streaming flag */
 	bool f_streaming;
 	/** @brief spin lock for streaming flag */
 	rwlock_t lock_stream;
+
+	/** @brief timing control */
+	struct mse_timing_ctrl timing_ctrl;
 
 	/** @brief network configuration */
 	struct mse_network_config net_config;
@@ -386,34 +421,31 @@ struct mse_instance {
 		struct mse_video_config video;
 		struct mse_mpeg2ts_config mpeg2ts;
 	} media_config;
-	struct mse_audio_info audio_info;
 
 	/** @brief MCH & CRF Settings **/
-	int ptp_clock;
+	int f_ptp_capture;
+	int f_mch_enable;
 	int ptp_clock_device;
 	int ptp_clock_ch;
 	int ptp_capture_freq;
-	int media_clock_recovery;
 	int media_capture_freq;
 	enum MSE_CRF_TYPE crf_type;
-	int max_transit_time;
-	int talker_delay_time;
-	int listener_delay_time;
+	u32 max_transit_time_ns;
+	u32 delay_time_ns;
 	int remain;
 
 	bool f_present;
 	bool f_get_first_packet;
-	unsigned int first_avtp_timestamp;
+	u32 first_avtp_timestamp;
 
 	/** @brief packet buffer */
 	int crf_index_network;
 	struct mse_packet_ctrl *crf_packet_buffer;
 	bool f_crf_sending;
 
-	/** @brief media clcok recovery work */
-	struct ptp_clock_time timestamps[PTP_TIMESTAMPS_MAX];
-	unsigned int master_timestamps[AVTP_TIMESTAMPS_MAX];
-	unsigned int device_timestamps[AVTP_TIMESTAMPS_MAX];
+	/** @brief media clock recovery work */
+	u64 timestamps[PTP_TIMESTAMPS_MAX];
+	struct mch_timestamp ts[PTP_TIMESTAMPS_MAX];
 
 	/** @brief mpeg2ts buffer  */
 	u64 mpeg2ts_pcr_90k;
@@ -464,6 +496,15 @@ static int major;
 module_param(major, int, 0440);
 
 /*
+ * function prototypes
+ */
+static int mse_get_capture_timestamp(struct mse_instance *instance,
+				     u64 now,
+				     bool is_first);
+static int tstamps_get_last_timestamp(struct timestamp_queue *que,
+				      struct timestamp_set *ts_set);
+
+/*
  * internal functions
  */
 
@@ -502,11 +543,12 @@ static inline char *mse_state_stringfy(enum MSE_STATE state)
 static inline void __mse_debug_state(const char *func,
 				     struct mse_instance *instance)
 {
-	pr_debug("%s: state=%s flags=[%d %d %d %d %d %d]\n",
+	pr_debug("%s: state=%s flags=[%d %d %d %d %d %d %d]\n",
 		 func, mse_state_stringfy(instance->state),
 		 instance->used_f, instance->f_trans_start,
 		 instance->f_continue, instance->f_depacketizing,
-		 instance->f_stopping, instance->f_completion);
+		 instance->f_stopping, instance->f_completion,
+		 instance->f_wait_start_transmission);
 }
 #endif
 
@@ -791,7 +833,7 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 		video->bytes_per_frame = video_config.bytes_per_frame;
 		err = mse_config_get_delay_time(index,
 						&delay_time);
-		instance->max_transit_time = delay_time.max_transit_time_ns;
+		instance->max_transit_time_ns = delay_time.max_transit_time_ns;
 		break;
 
 	case MSE_TYPE_ADAPTER_MPEG2TS:
@@ -807,7 +849,7 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 		mpeg2ts->pcr_pid = mpeg2ts_config.pcr_pid;
 		err = mse_config_get_delay_time(index,
 						&delay_time);
-		instance->max_transit_time = delay_time.max_transit_time_ns;
+		instance->max_transit_time_ns = delay_time.max_transit_time_ns;
 		break;
 
 	case MSE_TYPE_ADAPTER_AUDIO:
@@ -822,13 +864,14 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 		err = mse_config_get_ptp_config(index,
 						&ptp_config);
 		instance->ptp_clock_device = 0;
-		instance->ptp_clock = (ptp_config.type == MSE_PTP_TYPE_CAPTURE);
+		instance->f_ptp_capture =
+			(ptp_config.type == MSE_PTP_TYPE_CAPTURE);
 		instance->ptp_clock_ch = ptp_config.capture_ch;
 		instance->ptp_capture_freq = ptp_config.capture_freq;
 
 		err = mse_config_get_mch_config(index,
 						&mch_config);
-		instance->media_clock_recovery = mch_config.enable;
+		instance->f_mch_enable = mch_config.enable;
 		instance->crf_type = audio_config.crf_type;
 		instance->media_capture_freq =
 			(ptp_config.recovery_capture_freq ==
@@ -851,9 +894,11 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
 
 		err = mse_config_get_delay_time(index,
 						&delay_time);
-		instance->max_transit_time = delay_time.max_transit_time_ns;
-		instance->talker_delay_time = delay_time.tx_delay_time_ns;
-		instance->listener_delay_time = delay_time.rx_delay_time_ns;
+		instance->max_transit_time_ns = delay_time.max_transit_time_ns;
+		if (instance->tx)
+			instance->delay_time_ns = delay_time.tx_delay_time_ns;
+		else
+			instance->delay_time_ns = delay_time.rx_delay_time_ns;
 		break;
 
 	default:
@@ -868,10 +913,16 @@ static int mse_get_default_config(int index, struct mse_instance *instance)
  * PTP related functions
  */
 static struct mse_ptp_ops mse_ptp_ops_dummy = {
+	.get_time = mse_ptp_get_time_dummy,
 	.open = mse_ptp_open_dummy,
 	.close = mse_ptp_close_dummy,
-	.get_time = mse_ptp_get_time_dummy,
+	.capture_start = mse_ptp_capture_start_dummy,
+	.capture_stop = mse_ptp_capture_stop_dummy,
 	.get_timestamps = mse_ptp_get_timestamps_dummy,
+	.timer_open = mse_ptp_timer_open_dummy,
+	.timer_close = mse_ptp_timer_close_dummy,
+	.timer_start = mse_ptp_timer_start_dummy,
+	.timer_cancel = mse_ptp_timer_cancel_dummy,
 };
 
 static int mse_ptp_get_first_index(void)
@@ -893,41 +944,81 @@ static struct mse_ptp_ops *mse_ptp_find_ops(int index)
 		return mse->ptp_table[index];
 }
 
-static int mse_ptp_open(int index, int *dev_id)
+static int mse_ptp_get_time(int index, u64 *ns)
 {
 	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
 
-	return p_ops->open(dev_id);
+	return p_ops->get_time(ns);
 }
 
-static int mse_ptp_close(int index, int dev_id)
+static void *mse_ptp_open(int index)
 {
 	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
 
-	return p_ops->close(dev_id);
+	return p_ops->open();
 }
 
-static int mse_ptp_get_time(int index,
-			    int dev_id,
-			    struct ptp_clock_time *clock_time)
+static int mse_ptp_close(int index, void *ptp_handle)
 {
 	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
 
-	return p_ops->get_time(dev_id, clock_time);
+	return p_ops->close(ptp_handle);
+}
+
+static int mse_ptp_capture_start(int index, void *ptp_handle, int ch,
+				 int max_count)
+{
+	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
+
+	return p_ops->capture_start(ptp_handle, ch, max_count);
+}
+
+static int mse_ptp_capture_stop(int index, void *ptp_handle)
+{
+	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
+
+	return p_ops->capture_stop(ptp_handle);
 }
 
 static int mse_ptp_get_timestamps(int index,
-				  int dev_id,
-				  int ch,
-				  int *count,
-				  struct ptp_clock_time timestamps[])
+				  void *ptp_handle,
+				  int req_count,
+				  u64 *timestamps)
 {
 	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
 
-	return p_ops->get_timestamps(dev_id,
-				     ch,
-				     count,
+	return p_ops->get_timestamps(ptp_handle,
+				     req_count,
 				     timestamps);
+}
+
+static void *mse_ptp_timer_open(int index, u32 (*handler)(void *priv),
+				void *priv)
+{
+	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
+
+	return p_ops->timer_open(handler, priv);
+}
+
+static int mse_ptp_timer_close(int index, void *timer_handle)
+{
+	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
+
+	return p_ops->timer_close(timer_handle);
+}
+
+static int mse_ptp_timer_start(int index, void *timer_handle, u32 start)
+{
+	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
+
+	return p_ops->timer_start(timer_handle, start);
+}
+
+static int mse_ptp_timer_cancel(int index, void *timer_handle)
+{
+	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
+
+	return p_ops->timer_cancel(timer_handle);
 }
 
 static void callback_completion(struct mse_trans_buffer *buf, int size)
@@ -983,7 +1074,7 @@ static void mse_work_stream(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	int index_network;
-	struct mse_packet_ctrl *dma;
+	struct mse_packet_ctrl *packet_buffer;
 	struct mse_adapter_network_ops *network;
 	int err = 0;
 	unsigned long flags;
@@ -1002,14 +1093,15 @@ static void mse_work_stream(struct work_struct *work)
 	write_unlock_irqrestore(&instance->lock_stream, flags);
 
 	index_network = instance->index_network;
-	dma = instance->packet_buffer;
+	packet_buffer = instance->packet_buffer;
 	network = instance->network;
 
 	if (instance->tx) {
 		/* while data is remained */
 		do {
 			/* request send packet */
-			err = mse_packet_ctrl_send_packet(index_network, dma,
+			err = mse_packet_ctrl_send_packet(index_network,
+							  packet_buffer,
 							  network);
 
 			if (err < 0) {
@@ -1018,7 +1110,7 @@ static void mse_work_stream(struct work_struct *work)
 			}
 
 			wake_up_interruptible(&instance->wait_wk_stream);
-		} while (mse_packet_ctrl_check_packet_remain(dma));
+		} while (mse_packet_ctrl_check_packet_remain(packet_buffer));
 	} else {
 		/* while state is RUNNABLE */
 		while (mse_state_test(instance, MSE_STATE_RUNNABLE)) {
@@ -1026,7 +1118,8 @@ static void mse_work_stream(struct work_struct *work)
 			err = mse_packet_ctrl_receive_packet(
 				index_network,
 				MSE_RX_PACKET_NUM,
-				dma, network);
+				packet_buffer,
+				network);
 
 			if (err < 0) {
 				mse_err("receive error %d\n", err);
@@ -1048,399 +1141,519 @@ static void mse_work_stream(struct work_struct *work)
 	mse_debug("END\n");
 }
 
+/*
+ * Timestamps related functions
+ */
+#if (MSE_DEBUG_TSTAMPS)
+#define mse_debug_tstamps(fmt, ...) mse_info(fmt, ## __VA_ARGS__)
+#else
+#define mse_debug_tstamps(fmt, ...) no_printk(fmt, ## __VA_ARGS__)
+#endif
+
+#if (MSE_DEBUG_TSTAMPS2)
+#define mse_debug_tstamps2(fmt, ...) mse_debug(fmt, ## __VA_ARGS__)
+#else
+#define mse_debug_tstamps2(fmt, ...) no_printk(fmt, ## __VA_ARGS__)
+#endif
+
+static void tstamps_init(struct timestamp_queue *que,
+			 const char *name,
+			 bool f_32bit,
+			 u32 std_interval)
+{
+	que->name = name;
+	que->f_init = true;
+	que->head = 0;
+	que->tail = 0;
+	que->f_32bit = f_32bit;
+	que->std_interval = std_interval;
+	que->sync_count = 0;
+	que->f_sync = false;
+	que->f_discont = false;
+	que->len = ARRAY_SIZE(que->timestamps);
+
+	mse_debug_tstamps2("%s: interval %u\n", que->name, que->std_interval);
+}
+
+static void tstamps_reader_init(struct timestamp_reader *reader,
+				struct timestamp_queue *que,
+				const char *name,
+				bool f_32bit)
+{
+	reader->name = name;
+	reader->f_out_ok = false;
+	reader->f_32bit = f_32bit;
+	reader->que = que;
+
+	mse_debug_tstamps2("%s\n", reader->name);
+}
+
 /* calculate timestamp from std_time */
-static int tstamps_calc_tstamp(struct timestamp_queue *que,
-			       unsigned long std_time,
-			       unsigned long *clock_time)
+static int tstamps_calc_tstamp(struct timestamp_reader *reader,
+			       u64 now,
+			       u32 offset,
+			       u64 interval,
+			       u64 *timestamp)
 {
-	int p, p1;
-	u64 std2, std1,  t2, t1, t;
+	struct timestamp_queue *que = reader->que;
+	struct timestamp_set ts_last = { 0 };
+	struct timestamp_set ts1, ts2;
+	int pos1, pos2;
+	u64 t;
+	bool f_first = false;
 
-	if (que->head == que->tail) {
-		mse_debug("time stamp queue is not updated\n");
+	if (!que)
+		return -1;
+
+	if (que->f_discont)
+		reader->f_out_ok = false;
+
+	/* first & not received */
+	if (!que->f_sync) {
+		if (reader->out_time == 0)
+			reader->out_time = now;
+		else
+			reader->out_time += interval;
+
+		*timestamp = reader->out_time;
 		return -1;
 	}
 
-	p1 = que->head;
-	for (p = que->head;
-	     q_next(p, PTP_TIMESTAMPS_MAX) != que->tail;
-	     p1 = p, p = q_next(p, PTP_TIMESTAMPS_MAX)) {
-		if (que->std_times[p] > std_time)
+	/* first sync output */
+	if (!reader->f_out_ok) {
+		tstamps_get_last_timestamp(que, &ts_last);
+		reader->out_std = ts_last.std + now - ts_last.real - offset;
+		reader->out_offset = offset;
+		if (que->timestamps[que->head].std > reader->out_std) {
+			reader->out_std = que->timestamps[que->head].std;
+			reader->out_offset = now -
+				que->timestamps[que->head].real;
+		}
+
+		reader->f_out_ok = true;
+		f_first = true;
+	} else {
+		reader->out_std += interval;
+	}
+
+	pos1 = que->head;
+	for (pos2 = que->head;
+	     q_next(que, pos2) != que->tail;
+	     pos2 = q_next(que, pos2)) {
+		if (que->timestamps[pos2].std > reader->out_std)
 			break;
+
+		pos1 = pos2;
 	}
 
-	if (p == que->head) {
-		mse_debug("std_time %lu is over adjust range %lu - %lu\n",
-			  std_time, que->std_times[que->head],
-			  que->std_times[(que->tail - 1) % PTP_TIMESTAMPS_MAX]);
+	if (pos2 == que->head) {
+		mse_debug_tstamps("ERROR %s std_time %llu(+%llu) is over adjust range %llu - %llu\n",
+				  reader->name,
+				  reader->out_std,
+				  reader->out_offset,
+				  que->timestamps[que->head].std,
+				  que->timestamps[q_prev(que, que->tail)].std);
+
+		reader->f_out_ok = false;
+		reader->out_time += interval;
+		*timestamp = reader->out_time;
+
 		return -1;
 	}
 
-	std1 = que->std_times[p1];
-	std2 = que->std_times[p];
-	t1 = (u64)que->times[p1].sec * NSEC_SCALE + que->times[p1].nsec;
-	t2 = (u64)que->times[p].sec * NSEC_SCALE + que->times[p].nsec;
+	ts1 = que->timestamps[pos1];
+	ts2 = que->timestamps[pos2];
 
-	t = (t2 - t1) * (std_time - std1);
-	do_div(t, std2 - std1);
-	*clock_time = t + t1;
+	t = (ts2.real - ts1.real) * (reader->out_std - ts1.std);
+	*timestamp = div64_u64(t, ts2.std - ts1.std) +
+			ts1.real + reader->out_offset;
+
+	if (f_first) {
+		mse_debug_tstamps2("%s out start %llu ofsset %llu now %llu out %llu prev %llu\n",
+				   reader->name,
+				   reader->out_std,
+				   reader->out_offset,
+				   now,
+				   *timestamp,
+				   reader->out_time);
+	}
+
+	reader->out_time = *timestamp;
 
 	return 0;
 }
 
-static int tstamps_search_tstamp(
-	struct timestamp_queue *que,
-	unsigned long *std_time,
-	unsigned int avtp_time)
+static int tstamps_get_last_timestamp(struct timestamp_queue *que,
+				      struct timestamp_set *ts_set)
 {
-	int p;
-	unsigned int t, t_d;
-
-	if (que->head == que->tail) {
+	if (q_empty(que)) {
 		mse_debug("time stamp queue is not updated\n");
 		return -1;
 	}
-	for (p = que->head; p != que->tail;
-	     p = q_next(p, PTP_TIMESTAMPS_MAX)) {
-		t = (u64)que->times[p].sec * NSEC_SCALE + que->times[p].nsec;
-		t_d = t - avtp_time;
-		if (t_d < UINT_MAX / 2)
+
+	if (!que->f_sync)
+		return -1;
+
+	*ts_set = que->timestamps[q_prev(que, que->tail)];
+
+	return 0;
+}
+
+static int tstamps_get_timestamp_diff_average(struct timestamp_queue *que,
+					      u64 *diff,
+					      int max)
+{
+	struct timestamp_set ts_set;
+	int pos, count = 0;
+	u64 prev, now, diff_sum = 0;
+
+	if (tstamps_get_last_timestamp(que, &ts_set) < 0)
+		return -1;
+
+	prev = ts_set.real;
+	pos = q_prev(que, que->tail);
+
+	/* for each queue reverse */
+	for (pos = q_prev(que, pos);
+	     pos != que->head;
+	     pos = q_prev(que, pos)) {
+		if (count >= max)
+			break;
+
+		now = que->timestamps[pos].real;
+		diff_sum += prev - now;
+		prev = now;
+		count++;
+	}
+
+	*diff = div64_u64(diff_sum, count);
+
+	return 0;
+}
+
+static int tstamps_search_tstamp32(struct timestamp_reader *reader,
+				   u32 avtp_time,
+				   u32 offset,
+				   u32 interval)
+{
+	struct timestamp_queue *que = reader->que;
+	struct timestamp_set ts_set;
+	int pos;
+	u32 delta_ts;
+
+	if (reader->f_out_ok && que->f_sync)
+		return 0;
+
+	if (q_empty(que)) {
+		mse_debug("time stamp queue is not updated\n");
+		return -1;
+	}
+
+	if (!que->f_sync)
+		return -1;
+
+	avtp_time -= offset;
+
+	/* for each queue forward */
+	for (pos = que->head;
+	     pos != que->tail;
+	     pos = q_next(que, pos)) {
+		ts_set = que->timestamps[pos];
+		delta_ts = (u32)ts_set.real - avtp_time;
+		if (delta_ts < U32_MAX / 2)
 			break;
 	}
 
-	if (p == que->tail || p == que->head)
+	if (pos == que->tail || pos == que->head)
 		return -1;
-	*std_time = que->std_times[p];
-	if (t_d < NSEC_SCALE)
-		*std_time -= t_d;
+
+	reader->out_std = ts_set.std;
+
+	if (delta_ts < NSEC_SCALE)
+		reader->out_std -= delta_ts;
 	else
-		mse_info("not precision offset capture %u", t_d);
+		mse_info("not precision offset capture %u", delta_ts);
 
-#if (MSE_DEBUG_TSTAMPS)
-	mse_debug("found %lu t= %u avtp= %u\n", *std_time, t, avtp_time);
-#endif
+	reader->out_std -= interval;
+	reader->out_offset = offset;
+	reader->f_out_ok = true;
+
+	mse_debug_tstamps2("found %llu(%llu) avtp=%u offset=%u out_std %llu\n",
+			   ts_set.real,
+			   ts_set.std,
+			   avtp_time,
+			   offset,
+			   reader->out_std);
 
 	return 0;
 }
 
-static int tstamps_enq_tstamps(struct timestamp_queue *que,
-			       unsigned long std_time,
-			       struct ptp_clock_time *clock_time)
+static bool tstamps_continuity_check(struct timestamp_queue *que,
+				     u64 timestamp)
 {
-#if (MSE_DEBUG_TSTAMPS)
-	mse_debug("START head=%d, tail=%d\n", que->head, que->tail);
-#endif
+	struct timestamp_set ts_set;
+	s64 diff;
 
-	que->std_times[que->tail] = std_time;
-	que->times[que->tail] = *clock_time;
-	que->tail = q_next(que->tail, PTP_TIMESTAMPS_MAX);
+	ts_set = que->timestamps[q_prev(que, que->tail)];
+
+	diff = timestamp - ts_set.real - que->std_interval;
+	if (que->f_32bit)
+		diff = (s64)(s32)diff;
+
+	if (abs(diff) < PTP_SYNC_ERROR_THRESHOLD(que->std_interval)) {
+		if (!que->f_sync) {
+			que->sync_count++;
+			if (que->sync_count >= PTP_SYNC_LOCK_THRESHOLD) {
+				que->f_sync = true;
+				mse_debug_tstamps("OK: %s sync\n", que->name);
+			}
+		}
+
+		return true;
+	}
+
+	if (que->f_sync) {
+		mse_debug_tstamps("NG: %s discontinuous %llu %llu std %u diff %llu\n",
+				  que->name,
+				  ts_set.real,
+				  timestamp,
+				  que->std_interval,
+				  diff);
+		que->f_discont = true;
+	}
+
+	que->f_sync = false;
+	que->sync_count = 0;
+	que->head = 0;
+	que->tail = 0;
+
+	return false;
+}
+
+static int tstamps_enq_tstamp(struct timestamp_queue *que,
+			      u64 timestamp)
+{
+	struct timestamp_set timestamp_set;
+
+	mse_debug_tstamps2("START head=%d, tail=%d\n", que->head, que->tail);
+
+	if (!que->f_init)
+		return -1;
+
+	if (!q_empty(que))
+		if (!tstamps_continuity_check(que, timestamp))
+			return 0;
+
+	timestamp_set.real = timestamp;
+	timestamp_set.std = que->std_counter;
+
+	que->std_counter += que->std_interval;
+	que->timestamps[que->tail] = timestamp_set;
+	que->tail = q_next(que, que->tail);
 
 	/* if tail equal head, push out head */
 	if (que->tail == que->head)
-		que->head = q_next(que->head, PTP_TIMESTAMPS_MAX);
+		que->head = q_next(que, que->head);
 
 	return 0;
 }
 
-static int tstamps_deq_tstamps(struct timestamp_queue *que,
-			       unsigned long *std_time,
-			       struct ptp_clock_time *clock_time)
+static int tstamps_deq_tstamp(struct timestamp_queue *que,
+			      u64 *timestamp)
 {
-	if (que->head == que->tail)
+	if (q_empty(que))
 		return -1;
 
-	*std_time = que->std_times[que->head];
-	*clock_time = que->times[que->head];
-	que->head = q_next(que->head, PTP_TIMESTAMPS_MAX);
+	if (q_next(que, que->head) == que->tail)
+		return -1;
+
+	if (!que->f_sync)
+		return -1;
+
+	*timestamp = que->timestamps[que->head].real;
+
+	que->head = q_next(que, que->head);
 
 	return 0;
 }
 
 static int tstamps_get_tstamps_size(struct timestamp_queue *que)
 {
+	if (q_empty(que))
+		return 0;
+
 	if (que->tail >= que->head)
-		return que->tail - que->head;
+		return que->tail - que->head - 1;
 	else
-		return (que->tail + PTP_TIMESTAMPS_MAX) - que->head;
+		return (que->tail + PTP_TIMESTAMPS_MAX) - que->head - 1;
 }
 
-static int tstamps_clear_tstamps(struct timestamp_queue *que)
+static bool media_clock_recovery_calc_ts(struct timestamp_reader *reader,
+					 struct timestamp_queue *que,
+					 u64 timestamp,
+					 u32 interval,
+					 u32 offset,
+					 struct mch_timestamp *output_ts)
 {
-	que->tail = 0;
-	que->head = 0;
-	return 0;
-}
+	u64 device_time;
+	s32 diff;
+	bool f_out_ok_pre;
 
-static int tstamps_enq_avtp(struct avtp_queue *que, unsigned long std_time,
-			    unsigned int clock_time)
-{
-#if (MSE_DEBUG_TSTAMPS)
-	mse_debug("START head=%d, tail=%d\n", que->head, que->tail);
-#endif
+	f_out_ok_pre = reader->f_out_ok;
 
-	que->std_times[que->tail] = std_time;
-	que->times[que->tail] = clock_time;
-	que->tail = q_next(que->tail, AVTP_TIMESTAMPS_MAX);
-
-	/* if tail equal head, push out head */
-	if (que->tail == que->head)
-		que->head = q_next(que->head, AVTP_TIMESTAMPS_MAX);
-
-	return 0;
-}
-
-static int tstamps_get_avtp_size(struct avtp_queue *que)
-{
-	if (que->tail >= que->head)
-		return que->tail - que->head;
-	else
-		return (que->tail + PTP_TIMESTAMPS_MAX) - que->head;
-}
-
-static int tstamps_deq_avtp(struct avtp_queue *que,
-			    unsigned long *std_time,
-			    unsigned int *clock_time)
-{
-	if (que->head == que->tail)
-		return -1;
-
-	*std_time = que->std_times[que->head];
-	*clock_time = que->times[que->head];
-	que->head = q_next(que->head, AVTP_TIMESTAMPS_MAX);
-
-	return 0;
-}
-
-static int tstamps_enq_crf(struct crf_queue *que,
-			   unsigned long *std_times,
-			   u64 *clock_time)
-{
-#if (MSE_DEBUG_TSTAMPS)
-	mse_debug("START head=%d, tail=%d\n", que->head, que->tail);
-#endif
-
-	que->std_times[que->tail] = *std_times;
-	que->times[que->tail] = *clock_time;
-	que->tail = q_next(que->tail, CRF_TIMESTAMPS_MAX);
-
-	/* if tail equal head, push out head */
-	if (que->tail == que->head)
-		que->head = q_next(que->head, CRF_TIMESTAMPS_MAX);
-
-	return 0;
-}
-
-static int tstamps_get_crf_size(struct crf_queue *que)
-{
-	if (que->tail >= que->head)
-		return que->tail - que->head;
-	else
-		return (que->tail + CRF_TIMESTAMPS_MAX) - que->head;
-}
-
-static int tstamps_deq_crf(struct crf_queue *que,
-			   unsigned long *std_times,
-			   u64 *clock_time)
-{
-	if (que->head == que->tail)
-		return -1;
-
-	*std_times  = que->std_times[que->head];
-	*clock_time = que->times[que->head];
-	que->head = q_next(que->head, CRF_TIMESTAMPS_MAX);
-
-	return 0;
-}
-
-static int media_clock_recovery_avtp(struct mse_instance *instance,
-				     unsigned int d_t,
-				     int *count_out)
-{
-	unsigned long flags;
-	int i, count, out;
-	unsigned int avtp_time;
-	unsigned int search_time;
-	unsigned long device_time;
-	unsigned long std_time;
-	int ret;
-
-	spin_lock_irqsave(&instance->lock_ques, flags);
-
-	out = 0;
-	count = tstamps_get_avtp_size(&instance->avtp_que);
-	for (i = 0; i < count; i++) {
-		ret = tstamps_deq_avtp(&instance->avtp_que, &std_time,
-				       &avtp_time);
-		if (ret < 0)
-			continue;
-
-		if (instance->f_match_ptp_clock) {
-			instance->mch_std_time += d_t;
-		} else {
-			search_time = avtp_time;
-
-			if (instance->ptp_clock)
-				search_time -= instance->listener_delay_time;
-
-			ret = tstamps_search_tstamp(
-				&instance->tstamp_que,
-				&instance->mch_std_time,
-				search_time);
-			if (ret < 0)
-				continue;
-
-			instance->f_match_ptp_clock = true;
-		}
-
-		ret = tstamps_calc_tstamp(&instance->tstamp_que,
-					  instance->mch_std_time,
-					  &device_time);
-		if (ret < 0)
-			continue;
-
-		if (instance->ptp_clock)
-			device_time += instance->listener_delay_time;
-
-		instance->master_timestamps[out] = avtp_time;
-		instance->device_timestamps[out] = device_time;
-		out++;
-
-		if (out >= ARRAY_SIZE(instance->master_timestamps))
-			break;
+	if (tstamps_search_tstamp32(reader,
+				    (u32)timestamp,
+				    offset,
+				    interval) < 0) {
+		mse_debug_tstamps2("NG: tstamps_search_tstamp32\n");
+		reader->f_out_ok = false;
+		return false;
 	}
 
-	spin_unlock_irqrestore(&instance->lock_ques, flags);
-
-	*count_out = out;
-
-	return ret;
-}
-
-static int media_clock_recovery_crf(struct mse_instance *instance,
-				    unsigned int d_t,
-				    int *count_out)
-{
-	unsigned long flags;
-	int i, count, out;
-	unsigned int search_time;
-	unsigned long device_time;
-	unsigned long std_time;
-	u64 crf_time;
-	int ret;
-
-	spin_lock_irqsave(&instance->lock_ques, flags);
-
-	out = 0;
-	count = tstamps_get_crf_size(&instance->crf_que);
-	for (i = 0; i < count; i++) {
-		ret = tstamps_deq_crf(&instance->crf_que, &std_time,
-				      &crf_time);
-		if (ret < 0)
-			continue;
-
-		if (instance->f_match_ptp_clock) {
-			instance->mch_std_time += d_t;
-		} else {
-			search_time = crf_time - instance->max_transit_time;
-
-			if (instance->ptp_clock)
-				search_time -= instance->talker_delay_time;
-
-			ret = tstamps_search_tstamp(
-				&instance->tstamp_que,
-				&instance->mch_std_time,
-				search_time);
-			if (ret < 0)
-				continue;
-
-			instance->f_match_ptp_clock = true;
-		}
-
-		ret = tstamps_calc_tstamp(&instance->tstamp_que,
-					  instance->mch_std_time,
-					  &device_time);
-		if (ret < 0)
-			continue;
-
-		device_time += instance->max_transit_time;
-		if (instance->ptp_clock)
-			device_time += instance->talker_delay_time;
-
-		instance->master_timestamps[out] = (unsigned int)crf_time;
-		instance->device_timestamps[out] = device_time;
-		out++;
-
-		if (out >= ARRAY_SIZE(instance->master_timestamps))
-			break;
+	if (tstamps_calc_tstamp(reader,
+				0,
+				offset,
+				interval,
+				&device_time) < 0) {
+		mse_debug_tstamps("NG: tstamps_calc_tstamp\n");
+		reader->f_out_ok = false;
+		return false;
 	}
 
-	spin_unlock_irqrestore(&instance->lock_ques, flags);
+	diff = (s32)((u32)timestamp - (u32)device_time);
+	if (abs(diff) > MCH_ERROR_THRESHOLD(interval)) {
+		mse_debug_tstamps("NG: mch diff error m=%u d=%u (%d) interval=%u\n",
+				  (u32)timestamp, (u32)device_time, diff,
+				  interval);
 
-	*count_out = out;
+		reader->f_out_ok = false;
+		return false;
+	}
 
-	return ret;
+	output_ts->master = timestamp;
+	output_ts->device = device_time;
+
+	if (!f_out_ok_pre && reader->f_out_ok)
+		mse_debug_tstamps("OK: media clock recovery m %u d %u (%d)",
+				  (u32)timestamp, (u32)device_time, diff);
+
+	return true;
 }
 
 static int media_clock_recovery(struct mse_instance *instance)
 {
 	struct mch_ops *m_ops;
-	int ret, out;
-	unsigned int d_t;
+	struct timestamp_queue *que;
+	struct mse_audio_info audio_info;
+	struct mse_packetizer_ops *packetizer;
+	struct timestamp_reader *reader_mch = &instance->reader_mch;
+	struct mch_timestamp ts;
+	int index_packetizer;
+	u64 timestamp;
+	u32 delta_ts, offset;
+	int out;
+	int recovery_value;
+	u64 recovery_capture_freq;
+	bool f_out_ok_pre;
+	unsigned long flags;
+	int calc_error = 0;
 
 	if (instance->crf_type != MSE_CRF_TYPE_RX) {
-		d_t = instance->audio_info.frame_interval_time;
-		ret = media_clock_recovery_avtp(instance, d_t, &out);
+		packetizer = instance->packetizer;
+		index_packetizer = instance->index_packetizer;
+		que = &instance->avtp_que;
+		offset = 0;
 	} else {
-		d_t = instance->crf_audio_info.frame_interval_time;
-		ret = media_clock_recovery_crf(instance, d_t, &out);
+		packetizer = &mse_packetizer_crf_tstamp_audio_ops;
+		index_packetizer = instance->crf_index;
+		que = &instance->crf_que;
+		offset = instance->max_transit_time_ns;
 	}
 
+	packetizer->get_audio_info(index_packetizer, &audio_info);
+	delta_ts = audio_info.frame_interval_time;
+	if (instance->f_ptp_capture)
+		offset += instance->delay_time_ns;
+
+	/* if timestamps queue continuity broken */
+	if (!que->f_sync || !instance->tstamp_que.f_sync)
+		return 0;
+
+	f_out_ok_pre = reader_mch->f_out_ok;
+
+	/* fill master/device timestamps */
+	spin_lock_irqsave(&instance->lock_ques, flags);
+	for (out = 0; out < ARRAY_SIZE(instance->ts); out++) {
+		if (tstamps_deq_tstamp(que, &timestamp) < 0)
+			break;
+
+		if (!media_clock_recovery_calc_ts(reader_mch,
+						  que,
+						  timestamp,
+						  delta_ts,
+						  offset,
+						  &ts)) {
+			calc_error++;
+			continue;
+		}
+
+		instance->ts[out] = ts;
+	}
+	/* could not get master timestamps */
+	spin_unlock_irqrestore(&instance->lock_ques, flags);
 	if (out <= 0) {
-		mse_debug("could not get master timestamps\n");
-		return ret;
+		/* if CRF Rx, accept for one period which not get timestamp */
+		if (instance->crf_type == MSE_CRF_TYPE_RX &&
+		    instance->crf_discont < 1)
+			instance->crf_discont++;
+		else
+			reader_mch->f_out_ok = false;
+	} else {
+		/* reset CRF discontinuity counter */
+		instance->crf_discont = 0;
+
+		/* get mch ops */
+		m_ops = mse->mch_table[instance->mch_index];
+		m_ops->set_interval(instance->mch_handle, delta_ts);
+		m_ops->send_timestamps(instance->mch_handle, instance->ts, out);
+
+		if (instance->media_capture_freq && instance->f_ptp_capture) {
+			m_ops->get_recovery_value(instance->mch_handle,
+						  &recovery_value);
+
+			recovery_capture_freq = instance->ptp_capture_freq *
+				(u64)(NSEC_SCALE + recovery_value);
+
+			instance->tstamp_que.std_interval =
+				div64_u64((u64)NSEC_SCALE * (u64)NSEC_SCALE,
+					  recovery_capture_freq);
+
+			mse_debug("recover %u\n",
+				  instance->tstamp_que.std_interval);
+		}
 	}
 
-	/* not mch ops registered */
-	if (instance->mch_index < 0) {
-		mse_err("mch is not initialized.\n");
-		return -1;
+	if (f_out_ok_pre != reader_mch->f_out_ok) {
+		if (!f_out_ok_pre)
+			mse_info("Good! m %u d %u\n", ts.master, ts.device);
+		else
+			mse_info("Bad! %d calc error %d\n", out, calc_error);
 	}
 
-	/* get mch ops */
-	m_ops = mse->mch_table[instance->mch_index];
-	m_ops->send_timestamps(instance->mch_dev_id,
-			d_t,
-			out,
-			instance->master_timestamps,
-			out,
-			instance->device_timestamps);
-
-	if (instance->media_capture_freq && instance->ptp_clock) {
-		u64 value = (u64)NSEC_SCALE * NANO_SCALE;
-		int div;
-
-		m_ops->get_recovery_value(instance->mch_dev_id,
-					  &instance->mch_revovery_value);
-		div = NANO_SCALE + instance->mch_revovery_value;
-		do_div(value, instance->ptp_capture_freq);
-		do_div(value, div);
-		instance->add_std_time = value;
-		mse_debug("recover %lu\n", instance->add_std_time);
-	}
-
-	return 0;
+	return out;
 }
 
 static void mse_work_timestamp(struct work_struct *work)
 {
 	struct mse_instance *instance;
-	int count;
-	int ret;
-	int i;
+	struct mse_timing_ctrl *timing_ctrl;
+	u64 now;
+	int captured;
 
 	mse_debug("START\n");
 
 	instance = container_of(work, struct mse_instance, wk_timestamp);
+	timing_ctrl = &instance->timing_ctrl;
 
 	/* state is NOT RUNNABLE */
 	if (!mse_state_test(instance, MSE_STATE_RUNNABLE)) {
@@ -1450,157 +1663,81 @@ static void mse_work_timestamp(struct work_struct *work)
 	}
 
 	/* capture timestamps */
-	if (instance->ptp_clock == 1) {
-		unsigned long flags;
-
-		/* get timestamps */
-		count = ARRAY_SIZE(instance->timestamps);
-		ret = mse_ptp_get_timestamps(instance->ptp_index,
-					     instance->ptp_dev_id,
-					     instance->ptp_clock_ch,
-					     &count,
-					     instance->timestamps);
-		if (ret) {
-			mse_warn("could not get timestamps ret=%d\n", ret);
-			instance->f_work_timestamp = false;
-			return;
-		}
-
-		/* store timestamps */
-		spin_lock_irqsave(&instance->lock_ques, flags);
-		for (i = 0; i < count; i++) {
-			tstamps_enq_tstamps(&instance->tstamp_que,
-					    instance->std_time_counter,
-					    &instance->timestamps[i]);
-			tstamps_enq_tstamps(&instance->tstamp_que_crf,
-					    instance->std_time_counter,
-					    &instance->timestamps[i]);
-			instance->std_time_counter += instance->add_std_time;
-		}
-		spin_unlock_irqrestore(&instance->lock_ques, flags);
+	if (instance->f_ptp_capture) {
+		mse_ptp_get_time(instance->ptp_index, &now);
+		captured = mse_get_capture_timestamp(
+				instance,
+				now,
+				!timing_ctrl->captured_timestamps);
+		timing_ctrl->captured_timestamps += captured;
 	}
 
-	if (instance->media_clock_recovery == 1) {
+	if (instance->f_mch_enable) {
 		/* mch */
 		media_clock_recovery(instance);
+	}
+
+	if (instance->f_wait_start_transmission) {
+		queue_work(instance->wq_packet, &instance->wk_start_trans);
+		instance->f_wait_start_transmission = false;
 	}
 
 	instance->f_work_timestamp = false;
 }
 
-static int get_timestamps(struct timestamp_queue *que,
-			  int count,
-			  struct ptp_clock_time timestamps[])
-{
-	int i;
-	struct ptp_clock_time clock_time;
-	unsigned long std_time;
-
-	if (tstamps_get_tstamps_size(que) < count)
-		return -1;
-
-#if (MSE_DEBUG_TSTAMPS)
-	mse_debug("total=%d\n", count);
-#endif
-
-	for (i = 0; i < count; i++) {
-		tstamps_deq_tstamps(que, &std_time, &clock_time);
-		timestamps[i] = clock_time;
-	}
-
-	return 0;
-}
-
-static int tstamps_store_ptp_timestamp(struct mse_instance *instance,
-				       struct ptp_clock_time *now)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&instance->lock_ques, flags);
-
-	tstamps_enq_tstamps(&instance->tstamp_que,
-			    instance->std_time_counter, now);
-	tstamps_enq_tstamps(&instance->tstamp_que_crf,
-			    instance->std_time_counter, now);
-
-	spin_unlock_irqrestore(&instance->lock_ques, flags);
-
-	instance->std_time_counter += instance->add_std_time;
-
-	return 0;
-}
-
 static int create_avtp_timestamps(struct mse_instance *instance)
 {
 	int i;
-	int num_t, size;
-	unsigned int d_t;
+	int create_size;
 	struct mse_audio_config *audio = &instance->media_config.audio;
-	unsigned int offset;
+	struct mse_audio_info audio_info;
+	u64 now = 0;
+	u64 avtp_timestamp = 0;
+	u32 delta_ts;
+	u32 offset;
 	unsigned long flags;
 
 	instance->packetizer->get_audio_info(
 		instance->index_packetizer,
-		&instance->audio_info);
+		&audio_info);
 
 	instance->avtp_timestamps_current = 0;
 
-	offset = instance->max_transit_time;
-	if (instance->ptp_clock)
-		offset += instance->talker_delay_time;
+	offset = instance->f_ptp_capture ? instance->delay_time_ns : 0;
 
-	num_t = audio->period_size / instance->audio_info.sample_per_packet;
+	create_size = audio->period_size / audio_info.sample_per_packet;
 
 	instance->remain +=
 		audio->period_size -
-		num_t * instance->audio_info.sample_per_packet;
+		create_size * audio_info.sample_per_packet;
 
-	if (instance->remain >= instance->audio_info.sample_per_packet) {
-		instance->remain -= instance->audio_info.sample_per_packet;
-		num_t++;
+	if (instance->remain >= audio_info.sample_per_packet) {
+		instance->remain -= audio_info.sample_per_packet;
+		create_size++;
 	}
 
-	if (num_t > CREATE_AVTP_TIMESTAMPS_MAX) {
+	if (create_size > CREATE_AVTP_TIMESTAMPS_MAX) {
 		mse_err("too much packet, cannot create %d timestamps\n",
-			num_t);
+			create_size);
 		return -EPERM;
 	}
 
-	mse_debug("create %d\n", num_t);
-	d_t = instance->audio_info.frame_interval_time;
-	spin_lock_irqsave(&instance->lock_ques, flags);
-	size = tstamps_get_tstamps_size(&instance->tstamp_que);
-	spin_unlock_irqrestore(&instance->lock_ques, flags);
-	if (size < 2) {
-		struct ptp_clock_time now;
-		u64 t;
+	delta_ts = audio_info.frame_interval_time;
 
-		/* no data (ptp_clock + std_time) */
-		mse_ptp_get_time(instance->ptp_index,
-				 instance->ptp_dev_id, &now);
-		t = (u64)now.sec * NSEC_SCALE + now.nsec;
-		for (i = 0; i < num_t; i++)
-			instance->avtp_timestamps[i] = t + d_t * i + offset;
-
-		instance->avtp_timestamps_size = num_t;
-		instance->std_time_avtp += d_t * num_t;
-
-		return 0;
-	}
 	/* get timestamps from private table */
+	mse_ptp_get_time(instance->ptp_index, &now);
 	spin_lock_irqsave(&instance->lock_ques, flags);
-
-	for (i = 0; i < num_t; i++) {
-		unsigned long avtp_timestamp = 0;
-
-		tstamps_calc_tstamp(&instance->tstamp_que,
-				    instance->std_time_avtp,
+	for (i = 0; i < create_size; i++) {
+		tstamps_calc_tstamp(&instance->reader_create_avtp,
+				    now,
+				    offset,
+				    delta_ts,
 				    &avtp_timestamp);
-		instance->avtp_timestamps[i] = avtp_timestamp + offset;
-		instance->std_time_avtp += d_t;
-	}
-	instance->avtp_timestamps_size = num_t;
 
+		instance->avtp_timestamps[i] =
+			avtp_timestamp + instance->max_transit_time_ns;
+	}
+	instance->avtp_timestamps_size = create_size;
 	spin_unlock_irqrestore(&instance->lock_ques, flags);
 
 	return 0;
@@ -1630,7 +1767,7 @@ static int mse_initialize_crf_packetizer(struct mse_instance *instance)
 	/* base_frequency */
 	config.sample_rate = audio->sample_rate;
 	/* timestamp_interval */
-	if (!instance->ptp_clock) {
+	if (!instance->f_ptp_capture) {
 		config.samples_per_frame = audio->period_size;
 	} else {
 		config.samples_per_frame = audio->sample_rate /
@@ -1734,7 +1871,7 @@ static void mse_work_packetize(struct work_struct *work)
 		instance->avtp_timestamps_current = 0;
 		instance->avtp_timestamps_size = 1;
 		instance->avtp_timestamps[0] =
-			instance->timestamp + instance->max_transit_time;
+			instance->timestamp + instance->max_transit_time_ns;
 	}
 
 	while (buf->work_length < buf->buffer_size) {
@@ -1748,7 +1885,7 @@ static void mse_work_packetize(struct work_struct *work)
 					instance->index_packetizer,
 					buf->buffer,
 					buf->buffer_size,
-					instance->ptp_clock,
+					instance->f_ptp_capture,
 					&instance->avtp_timestamps_current,
 					instance->avtp_timestamps_size,
 					instance->avtp_timestamps,
@@ -1830,61 +1967,140 @@ static void mse_work_packetize(struct work_struct *work)
 	}
 }
 
-static int tstamps_store_avtp_timestamp(struct mse_instance *instance,
-					unsigned long std_time,
-					unsigned int timestamp)
+static void mse_inc_send_count(struct mse_timing_ctrl *timing_ctrl)
 {
-	unsigned long flags;
-
-	/* save avtp timestamp */
-	spin_lock_irqsave(&instance->lock_ques, flags);
-	tstamps_enq_avtp(&instance->avtp_que, std_time, timestamp);
-	spin_unlock_irqrestore(&instance->lock_ques, flags);
-
-	return 0;
+	if (timing_ctrl->start_time_count == timing_ctrl->send_count)
+		timing_ctrl->send_count++;
 }
 
-static bool check_presentation_time(struct mse_instance *instance)
+static void mse_update_first_send_time(struct mse_instance *instance)
 {
-	struct ptp_clock_time now;
-	unsigned int t = 0, t_d = 0;
+	struct mse_timing_ctrl *timing_ctrl = &instance->timing_ctrl;
+	struct timestamp_set ts_last = { 0 };
+	u64 now;
+	unsigned long flags;
+	int ret;
 
-	if (instance->f_present)
-		return true;
+	mse_ptp_get_time(instance->ptp_index, &now);
 
-	if (!instance->media_clock_recovery) {
-		if (instance->temp_w < MSE_DECODE_BUFFER_NUM_START_MIN)
-			return false;
-	} else {
-		mse_ptp_get_time(instance->ptp_index,
-				 instance->ptp_dev_id, &now);
-		t = (unsigned long)now.sec * NSEC_SCALE + now.nsec;
-		t_d = instance->first_avtp_timestamp - t;
-		if (t_d < UINT_MAX / 2 &&
-		    instance->temp_w < MSE_DECODE_BUFFER_NUM_START_MAX)
-			return false;
-		mse_debug("start present avtp %u ptp %u q %d\n",
-			  instance->timestamp, t, instance->temp_w);
+	spin_lock_irqsave(&instance->lock_ques, flags);
+	ret = tstamps_get_last_timestamp(&instance->tstamp_que,
+					 &ts_last);
+	spin_unlock_irqrestore(&instance->lock_ques, flags);
+
+	if (ret < 0) {
+		mse_err("timestamp not ready\n");
+		instance->timing_ctrl.std_first_send_time = 0;
+		return;
 	}
-	instance->f_present = true;
-	instance->start_present_time = instance->timestamp;
-	mse_debug("start present listener avtp %u ptp %u q %d\n",
-		  instance->timestamp, t, instance->temp_w);
-	return true;
+
+	timing_ctrl->first_send_time = now;
+	timing_ctrl->std_first_send_time = ts_last.std + now - ts_last.real;
+}
+
+static void mse_set_start_time_recovery(struct mse_instance *instance)
+{
+	struct mse_timing_ctrl *timing_ctrl = &instance->timing_ctrl;
+	struct mse_packetizer_ops *packetizer = instance->packetizer;
+	struct mse_start_time start_time;
+	u64 now;
+
+	timing_ctrl->f_ok = false;
+
+	start_time.start_time = timing_ctrl->last_complete;
+	start_time.capture_diff = NSEC_SCALE / instance->ptp_capture_freq;
+	start_time.capture_freq = instance->ptp_capture_freq;
+
+	packetizer->set_start_time(instance->index_packetizer,
+				   &start_time);
+
+	mse_ptp_get_time(instance->ptp_index, &now);
+	mse_debug_tstamps("NG: use start time recover mode %u now %u\n",
+			  start_time.start_time, (u32)now);
+}
+
+static void mse_set_start_time(struct mse_instance *instance)
+{
+	struct mse_timing_ctrl *timing_ctrl = &instance->timing_ctrl;
+	struct mse_packetizer_ops *packetizer = instance->packetizer;
+	struct mse_start_time start_time;
+	struct timestamp_set ts_last = { 0 };
+	u64 std_start, diff = 0;
+	u64 offset_time;
+	u64 now = 0;
+	unsigned long flags;
+
+	/* invalid timestamp, do reset start time */
+	if (!timing_ctrl->std_first_send_time ||
+	    instance->tstamp_que.f_discont) {
+		mse_set_start_time_recovery(instance);
+		return;
+	}
+
+	/* start normal sequence */
+	timing_ctrl->start_time_count = timing_ctrl->send_count;
+
+	std_start = timing_ctrl->std_first_send_time +
+		(timing_ctrl->start_time_count - 1) * instance->timer_interval;
+
+	spin_lock_irqsave(&instance->lock_ques, flags);
+	tstamps_get_last_timestamp(&instance->tstamp_que, &ts_last);
+	tstamps_get_timestamp_diff_average(&instance->tstamp_que, &diff, 10);
+	spin_unlock_irqrestore(&instance->lock_ques, flags);
+
+	offset_time = abs(std_start - ts_last.std) * diff *
+		instance->ptp_capture_freq;
+	offset_time = div64_u64(offset_time, NSEC_SCALE);
+	if (std_start > ts_last.std)
+		timing_ctrl->start_time = ts_last.real + offset_time;
+	else
+		timing_ctrl->start_time = ts_last.real - offset_time;
+
+	if (!instance->f_get_first_packet) {
+		mse_ptp_get_time(instance->ptp_index, &now);
+		if (abs(timing_ctrl->start_time - now) >
+		    PTP_START_ERROR_THRESHOLD(instance->timer_interval)) {
+			if (timing_ctrl->f_ok) {
+				mse_err("NG: diff error now %llu calc %llu\n",
+					now, timing_ctrl->start_time);
+			}
+			timing_ctrl->start_time = now;
+			timing_ctrl->f_ok = false;
+		} else {
+			if (!timing_ctrl->f_ok) {
+				mse_info("OK: diff now %llu calc %llu\n",
+					 now, timing_ctrl->start_time);
+			}
+			timing_ctrl->f_ok = true;
+		}
+	}
+
+	start_time.start_time = timing_ctrl->start_time;
+	start_time.capture_diff = diff;
+	start_time.capture_freq = instance->ptp_capture_freq;
+
+	packetizer->set_start_time(instance->index_packetizer, &start_time);
+
+	mse_ptp_get_time(instance->ptp_index, &now);
+	mse_debug_tstamps2("set start time %u now %u diff %lld count %d\n",
+			   (u32)timing_ctrl->start_time,
+			   (u32)now,
+			   (s64)timing_ctrl->start_time - now,
+			   timing_ctrl->start_time_count);
 }
 
 static void mse_work_depacketize(struct work_struct *work)
 {
 	struct mse_instance *instance;
-	int received, ret = 0;
-	unsigned int timestamps[128];
-	int t_stored, i;
-	unsigned int d_t;
+	struct mse_packet_ctrl *packet_buffer;
 	struct mse_audio_config *audio;
-	struct mse_packet_ctrl *dma;
-	unsigned long flags;
+	struct mse_audio_info audio_info;
 	struct mse_trans_buffer *buf;
+	int received, ret = 0;
+	u32 timestamps[128];
+	int t_stored, i;
 	int buf_cnt;
+	unsigned long flags;
 
 	instance = container_of(work, struct mse_instance, wk_depacketize);
 
@@ -1911,14 +2127,18 @@ static void mse_work_depacketize(struct work_struct *work)
 	read_unlock_irqrestore(&instance->lock_stream, flags);
 	instance->f_depacketizing = true;
 
-	dma = instance->packet_buffer;
-	received = mse_packet_ctrl_check_packet_remain(dma);
+	packet_buffer = instance->packet_buffer;
+	received = mse_packet_ctrl_check_packet_remain(packet_buffer);
 
 	switch (instance->media->type) {
 	case MSE_TYPE_ADAPTER_AUDIO:
 		/* get AVTP packet payload */
 		audio = &instance->media_config.audio;
 		while (received) {
+			/* set start time of period in media clock recovery */
+			if (instance->ptp_timer_handle && !buf->work_length)
+				mse_set_start_time(instance);
+
 			/* get AVTP packet payload */
 			ret = mse_packet_ctrl_take_out_packet(
 				instance->index_packetizer,
@@ -1927,10 +2147,9 @@ static void mse_work_depacketize(struct work_struct *work)
 				timestamps,
 				ARRAY_SIZE(timestamps),
 				&t_stored,
-				dma,
+				packet_buffer,
 				instance->packetizer,
 				&instance->temp_len[instance->temp_w]);
-
 			if (ret < 0) {
 				if (ret != -EAGAIN) {
 					instance->f_trans_start = false;
@@ -1942,15 +2161,22 @@ static void mse_work_depacketize(struct work_struct *work)
 			/* samples per packet */
 			instance->packetizer->get_audio_info(
 				instance->index_packetizer,
-				&instance->audio_info);
-			d_t = instance->audio_info.frame_interval_time;
-			for (i = 0; i < t_stored; i++) {
-				tstamps_store_avtp_timestamp(
-					instance,
-					instance->std_time_avtp,
-					timestamps[i]);
-				instance->std_time_avtp += d_t;
+				&audio_info);
+
+			/* store avtp timestamp */
+			spin_lock_irqsave(&instance->lock_ques, flags);
+			if (!instance->avtp_que.f_init && t_stored > 0) {
+				tstamps_init(&instance->avtp_que,
+					     "AVTP",
+					     true,
+					     audio_info.frame_interval_time);
 			}
+			for (i = 0; i < t_stored; i++) {
+				tstamps_enq_tstamp(&instance->avtp_que,
+						   timestamps[i]);
+			}
+			spin_unlock_irqrestore(&instance->lock_ques, flags);
+
 			if (!instance->f_get_first_packet && t_stored > 0) {
 				instance->first_avtp_timestamp = timestamps[0];
 				instance->f_get_first_packet = true;
@@ -1968,15 +2194,19 @@ static void mse_work_depacketize(struct work_struct *work)
 					MSE_DECODE_BUFFER_NUM;
 				atomic_inc(&instance->done_buf_cnt);
 				memset(instance->temp_buffer[instance->temp_w],
-				       0, buf->buffer_size);
+				       0,
+				       buf->buffer_size);
 				instance->temp_len[instance->temp_w] = 0;
 
 				mse_debug("temp_r=%d temp_w=%d\n",
 					  instance->temp_r, instance->temp_w);
+
+				mse_inc_send_count(&instance->timing_ctrl);
 			}
 
 			/* update received count */
-			received = mse_packet_ctrl_check_packet_remain(dma);
+			received = mse_packet_ctrl_check_packet_remain(
+				packet_buffer);
 
 			/* state is STOPPING */
 			if (!received &&
@@ -1995,7 +2225,7 @@ static void mse_work_depacketize(struct work_struct *work)
 						timestamps,
 						ARRAY_SIZE(timestamps),
 						&t_stored,
-						dma,
+						packet_buffer,
 						instance->packetizer,
 						&buf->work_length);
 
@@ -2045,10 +2275,12 @@ static void mse_work_callback(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
-	int size;
-	unsigned long flags;
-	int temp_r;
 	struct mse_trans_buffer *buf;
+	struct mse_timing_ctrl *timing_ctrl;
+	bool has_valid_data;
+	int size;
+	int temp_r;
+	unsigned long flags;
 
 	instance = container_of(work, struct mse_instance, wk_callback);
 
@@ -2057,6 +2289,7 @@ static void mse_work_callback(struct work_struct *work)
 		return; /* skip work */
 
 	adapter = instance->media;
+	timing_ctrl = &instance->timing_ctrl;
 
 	buf = list_first_entry_or_null(&instance->proc_buf_list,
 				       struct mse_trans_buffer, list);
@@ -2074,7 +2307,6 @@ static void mse_work_callback(struct work_struct *work)
 	if (!atomic_read(&instance->done_buf_cnt))
 		return;
 
-	mse_debug("START\n");
 	mse_debug_state(instance);
 
 	size = buf->work_length;
@@ -2101,23 +2333,44 @@ static void mse_work_callback(struct work_struct *work)
 		} else {
 			size = buf->buffer_size;
 			temp_r = instance->temp_r;
+
+			if (instance->ptp_timer_handle) {
+				if (!timing_ctrl->send_count)
+					mse_update_first_send_time(instance);
+
+				if (!timing_ctrl->start_time_count)
+					timing_ctrl->send_count++;
+			}
+
+			has_valid_data = false;
 			if (buf->media_buffer &&
-			    check_presentation_time(instance)) {
+			    instance->temp_w != temp_r) {
+				if (instance->ptp_timer_handle) {
+					has_valid_data = true;
+				} else {
+					if (instance->f_present ||
+					    instance->temp_w >= MSE_DECODE_BUFFER_NUM_START_MIN) {
+						instance->f_present = true;
+						has_valid_data = true;
+					}
+				}
+			}
+
+			if (has_valid_data) {
 				memcpy(buf->media_buffer,
 				       instance->temp_buffer[temp_r],
 				       size);
+
 				if (instance->temp_w != temp_r) {
 					instance->temp_r = (temp_r + 1) %
 						MSE_DECODE_BUFFER_NUM;
 				} else {
+					/* clear temp buffer to use next timing */
 					memset(instance->temp_buffer[temp_r],
-					       0, instance->temp_len[temp_r]);
+					       0,
+					       instance->temp_len[temp_r]);
 					instance->temp_len[temp_r] = 0;
 				}
-
-				mse_debug("temp_r=%d temp_w=%d\n",
-					  instance->temp_r,
-					  instance->temp_w);
 			}
 		}
 
@@ -2129,9 +2382,13 @@ static void mse_work_callback(struct work_struct *work)
 
 	/* complete callback */
 	instance->f_trans_start = false;
-	if (instance->tx || size)
-		if (atomic_dec_not_zero(&instance->done_buf_cnt))
+	if (instance->tx || size) {
+		if (atomic_dec_not_zero(&instance->done_buf_cnt)) {
+			mse_ptp_get_time(instance->ptp_index,
+					 &timing_ctrl->last_complete);
 			mse_trans_complete(instance, size);
+		}
+	}
 
 	if (!atomic_read(&instance->trans_buf_cnt)) {
 		/* state is STOPPING */
@@ -2160,7 +2417,6 @@ static void mse_work_callback(struct work_struct *work)
 static void mse_stop_streaming_audio(struct mse_instance *instance)
 {
 	int ret;
-	struct mch_ops *m_ops;
 	enum MSE_CRF_TYPE crf_type = instance->crf_type;
 
 	/* cancel timestamp timer */
@@ -2168,13 +2424,6 @@ static void mse_stop_streaming_audio(struct mse_instance *instance)
 
 	/* cancel crf timer */
 	hrtimer_cancel(&instance->crf_timer);
-
-	if (instance->mch_index >= 0) {
-		m_ops = mse->mch_table[instance->mch_index];
-		ret = m_ops->close(instance->mch_dev_id);
-		if (ret < 0)
-			mse_err("mch close error(%d).\n", ret);
-	}
 
 	if (crf_type == MSE_CRF_TYPE_RX) {
 		ret = instance->network->cancel(
@@ -2211,7 +2460,13 @@ static void mse_stop_streaming_common(struct mse_instance *instance)
 	}
 
 	/* cancel timer */
-	hrtimer_cancel(&instance->timer);
+	if (instance->ptp_timer_handle) {
+		if (mse_ptp_timer_cancel(instance->ptp_index,
+					 instance->ptp_timer_handle) < 0)
+			mse_err("The timer was still in use...\n");
+	} else {
+		hrtimer_cancel(&instance->timer);
+	}
 
 	/* return callback to all transmission request */
 	mse_free_all_trans_buffers(instance, 0);
@@ -2295,11 +2550,27 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 	return HRTIMER_RESTART;
 }
 
+static u32 mse_ptp_timer_callback(void *arg)
+{
+	struct mse_instance *instance = arg;
+
+	/* state is NOT STARTED */
+	if (!mse_state_test(instance, MSE_STATE_STARTED)) {
+		mse_debug("stopping ...\n");
+		return 0;
+	}
+
+	queue_work(instance->wq_packet, &instance->wk_callback);
+
+	return 0;
+}
+
 static void mse_work_crf_send(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	int err, tsize, size, i;
-	struct ptp_clock_time timestamps[6];
+	u64 timestamp;
+	u64 timestamps[6];
 	unsigned long flags;
 
 	mse_debug("START\n");
@@ -2312,33 +2583,35 @@ static void mse_work_crf_send(struct work_struct *work)
 		return;
 	}
 
-	tsize = instance->ptp_clock == 0 ?
+	tsize = (!instance->f_ptp_capture) ?
 		CRF_PTP_TIMESTAMPS : CRF_AUDIO_TIMESTAMPS;
-	spin_lock_irqsave(&instance->lock_ques, flags);
-	size = tstamps_get_tstamps_size(&instance->tstamp_que_crf);
-	spin_unlock_irqrestore(&instance->lock_ques, flags);
+	timestamp = 0;
 
-	while (size >= tsize) {
+	do {
+		spin_lock_irqsave(&instance->lock_ques, flags);
+		size = tstamps_get_tstamps_size(&instance->tstamp_que_crf);
+
 		/* get Timestamps */
 		mse_debug("size %d tsize %d\n", size, tsize);
-		spin_lock_irqsave(&instance->lock_ques, flags);
-		get_timestamps(&instance->tstamp_que_crf, tsize, timestamps);
-		spin_unlock_irqrestore(&instance->lock_ques, flags);
-		for (i = 0; i < tsize; i++) {
-			u64 t;
 
-			t = timestamps[i].sec * NSEC_SCALE + timestamps[i].nsec;
-			if (instance->tx)
-				t += instance->max_transit_time;
-			if (instance->ptp_clock) {
-				if (instance->tx)
-					t += instance->talker_delay_time;
-				else
-					t += instance->listener_delay_time;
-			}
-			timestamps[i].sec = div_s64_rem(t, NSEC_SCALE,
-							&timestamps[i].nsec);
+		if (size < tsize) {
+			spin_unlock_irqrestore(&instance->lock_ques, flags);
+			break;
 		}
+
+		for (i = 0; i < tsize; i++) {
+			tstamps_deq_tstamp(&instance->tstamp_que_crf,
+					   &timestamp);
+
+			if (instance->tx)
+				timestamp += instance->max_transit_time_ns;
+
+			if (instance->f_ptp_capture)
+				timestamp += instance->delay_time_ns;
+
+			timestamps[i] = timestamp;
+		}
+		spin_unlock_irqrestore(&instance->lock_ques, flags);
 
 		/* create CRF packets */
 		err = mse_packet_ctrl_make_packet_crf(
@@ -2353,14 +2626,8 @@ static void mse_work_crf_send(struct work_struct *work)
 			instance->crf_packet_buffer,
 			instance->network);
 
-		/* state is NOT RUNNABLE */
-		if (!mse_state_test(instance, MSE_STATE_RUNNABLE))
-			break;
-
-		spin_lock_irqsave(&instance->lock_ques, flags);
-		size = tstamps_get_tstamps_size(&instance->tstamp_que_crf);
-		spin_unlock_irqrestore(&instance->lock_ques, flags);
-	}
+		/* state is RUNNABLE */
+	} while (mse_state_test(instance, MSE_STATE_RUNNABLE));
 
 	instance->f_crf_sending = false;
 }
@@ -2369,6 +2636,7 @@ static void mse_work_crf_receive(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
+	struct mse_audio_info audio_info;
 	int err, count, i;
 	u64 ptimes[6];
 	unsigned long flags;
@@ -2399,18 +2667,19 @@ static void mse_work_crf_receive(struct work_struct *work)
 
 		mse_debug("crf receive %d timestamp\n", count);
 
-		crf->get_audio_info(
-			instance->crf_index,
-			&instance->crf_audio_info);
+		crf->get_audio_info(instance->crf_index, &audio_info);
 
 		spin_lock_irqsave(&instance->lock_ques, flags);
-		for (i = 0; i < count; i++) {
-			tstamps_enq_crf(&instance->crf_que,
-					&instance->std_time_crf,
-					&ptimes[i]);
-			instance->std_time_crf +=
-				instance->crf_audio_info.frame_interval_time;
-		}
+
+		if (!instance->crf_que.f_init)
+			tstamps_init(&instance->crf_que,
+				     "CRF",
+				     true,
+				     audio_info.frame_interval_time);
+
+		for (i = 0; i < count; i++)
+			tstamps_enq_tstamp(&instance->crf_que, ptimes[i]);
+
 		spin_unlock_irqrestore(&instance->lock_ques, flags);
 
 	/* while state is RUNNABLE */
@@ -2469,81 +2738,70 @@ static enum hrtimer_restart mse_timestamp_collect_callback(struct hrtimer *arg)
 	return HRTIMER_RESTART;
 }
 
-static s64 calc_diff_ptp_clock_time(struct ptp_clock_time *a,
-				    struct ptp_clock_time *b)
+static int mse_get_capture_timestamp(struct mse_instance *instance,
+				     u64 now,
+				     bool is_first)
 {
-	s64 a_nsec, b_nsec;
-
-	a_nsec = a->sec * NSEC_SCALE + a->nsec;
-	b_nsec = b->sec * NSEC_SCALE + b->nsec;
-
-	return a_nsec - b_nsec;
-}
-
-static void mse_get_capture_timestamp_first(struct mse_instance *instance,
-					    struct ptp_clock_time *now)
-{
-	int ret = 0;
-	unsigned long flags;
+	int ret;
 	int count, i;
-	s64 delay, diff;
+	s64 diff;
+	unsigned long flags;
 
 	/* get timestamps */
-	count = ARRAY_SIZE(instance->timestamps);
 	ret = mse_ptp_get_timestamps(instance->ptp_index,
-				     instance->ptp_dev_id,
-				     instance->ptp_clock_ch,
-				     &count,
+				     instance->ptp_handle,
+				     ARRAY_SIZE(instance->timestamps),
 				     instance->timestamps);
-	if (ret) {
+	if (ret <= 0) {
 		mse_warn("could not get timestamps ret=%d\n", ret);
-		return;
+		return 0;
+	}
+
+	count = ret;
+	mse_debug("mse_ptp_get_timestamps %d %llu - %llu\n",
+		  count,
+		  instance->timestamps[0],
+		  instance->timestamps[count - 1]);
+
+	if (is_first) {
+		/* skip older timestamp */
+		for (i = 0; i < count; i++) {
+			diff = (s64)(now - instance->timestamps[i]) -
+				(s64)instance->delay_time_ns;
+			if (diff <= 0)
+				break;
+		}
+
+		if (i) {
+			i--;
+		} else {
+			/* not enough timestamps */
+			instance->delay_time_ns += diff;
+		}
+	} else {
+		i = 0;
 	}
 
 	/* store timestamps */
-	if (instance->tx)
-		delay = instance->talker_delay_time;
-	else
-		delay = instance->listener_delay_time;
-
 	spin_lock_irqsave(&instance->lock_ques, flags);
 
-	diff = 0;
-	/* skip older timestamp */
-	for (i = 0; i < count; i++) {
-		diff = calc_diff_ptp_clock_time(now, &instance->timestamps[i]);
-		diff -= delay;
-		if (diff <= 0)
-			break;
-		instance->std_time_avtp = diff;
-	}
-	if (i != 0) {
-		i--;
-	} else {
-		/* not enough timestamps */
-		if (instance->tx)
-			instance->talker_delay_time += diff;
-		else
-			instance->listener_delay_time += diff;
-	}
-
 	for (; i < count; i++) {
-		tstamps_enq_tstamps(&instance->tstamp_que,
-				    instance->std_time_counter,
-				    &instance->timestamps[i]);
-		tstamps_enq_tstamps(&instance->tstamp_que_crf,
-				    instance->std_time_counter,
-				    &instance->timestamps[i]);
-		instance->std_time_counter += instance->add_std_time;
+		tstamps_enq_tstamp(&instance->tstamp_que,
+				   instance->timestamps[i]);
+		tstamps_enq_tstamp(&instance->tstamp_que_crf,
+				   instance->timestamps[i]);
 	}
 
 	spin_unlock_irqrestore(&instance->lock_ques, flags);
+
+	return count;
 }
 
-static void mse_start_streaming_audio(struct mse_instance *instance,
-				      struct ptp_clock_time *now)
+static void mse_start_streaming_audio(struct mse_instance *instance, u64 now)
 {
+	struct mse_timing_ctrl *timing_ctrl = &instance->timing_ctrl;
 	int i;
+	int captured;
 
 	if (!instance->tx) {
 		instance->temp_w = 0;
@@ -2552,13 +2810,17 @@ static void mse_start_streaming_audio(struct mse_instance *instance,
 			instance->temp_len[i] = 0;
 	}
 
-	/* ptp_clock is capture, capture timestamps */
-	if (instance->ptp_clock == 1)
-		mse_get_capture_timestamp_first(instance, now);
+	/* f_ptp_capture is true, capture timestamps */
+	if (instance->f_ptp_capture) {
+		captured = mse_get_capture_timestamp(
+				instance,
+				now,
+				!timing_ctrl->captured_timestamps);
+		timing_ctrl->captured_timestamps += captured;
+	}
 
-	/* ptp_clock is capture or media_clock_recovery is enable */
-	if (instance->ptp_clock == 1 ||
-	    instance->media_clock_recovery == 1) {
+	/* f_ptp_capture is true or f_mch_enable is enable */
+	if (instance->f_ptp_capture || instance->f_mch_enable) {
 		hrtimer_start(&instance->tstamp_timer,
 			      ns_to_ktime(instance->tstamp_timer_interval),
 			      HRTIMER_MODE_REL);
@@ -2571,32 +2833,22 @@ static void mse_start_streaming_audio(struct mse_instance *instance,
 			      HRTIMER_MODE_REL);
 	}
 
-	/* receive clcok using CRF */
+	/* receive clock using CRF */
 	if (instance->crf_type == MSE_CRF_TYPE_RX) {
 		queue_work(instance->wq_crf_packet,
 			   &instance->wk_crf_receive);
 	}
+
+	/* initialize timestamp reader for create_avtp */
+	tstamps_reader_init(&instance->reader_create_avtp,
+			    &instance->tstamp_que,
+			    "CREATE_AVTP",
+			    true);
 }
 
-static void mse_tstamp_init(struct mse_instance *instance,
-			    struct ptp_clock_time *now)
+static void mse_tstamp_init(struct mse_instance *instance, u64 now)
 {
-	instance->timestamp = (unsigned long)now->sec * NSEC_SCALE + now->nsec;
-
-	/* prepare std clock time */
-	if (instance->ptp_clock) {
-		instance->add_std_time =
-			NSEC_SCALE / instance->ptp_capture_freq;
-		instance->add_crf_std_time =
-			NSEC_SCALE / instance->ptp_capture_freq;
-	} else {
-		instance->add_std_time = instance->timer_interval;
-		instance->add_crf_std_time = instance->timer_interval;
-	}
-
-	instance->std_time_counter = 0;
-	instance->std_time_avtp = 0;
-	instance->std_time_crf = 0;
+	instance->timestamp = now;
 
 	instance->f_present = false;
 	instance->f_get_first_packet = false;
@@ -2628,7 +2880,7 @@ static void mse_start_streaming_common(struct mse_instance *instance)
 	}
 
 	/* start timer */
-	if (instance->timer_interval) {
+	if (instance->timer_interval && !instance->ptp_timer_handle) {
 		hrtimer_start(&instance->timer,
 			      ns_to_ktime(instance->timer_interval),
 			      HRTIMER_MODE_REL);
@@ -2917,13 +3169,56 @@ static int mpeg2ts_buffer_write(struct mse_instance *instance,
 	return 0;
 }
 
+static u64 ptp_timer_update_start_timing(struct mse_instance *instance, u64 now)
+{
+	u64 ptp_timer_start, next_time;
+	s64 diff, update;
+	u64 error_thresh;
+	u32 interval, offset;
+	int ret;
+	unsigned long flags;
+
+	ptp_timer_start = instance->ptp_timer_start;
+	offset = instance->delay_time_ns;
+	interval = instance->timer_interval;
+	error_thresh = PTP_TIMER_ERROR_THRESHOLD(interval);
+
+	/* if NOT set ptp_timer_start, then init ptp_timer_start */
+	if (!ptp_timer_start)
+		ptp_timer_start = now;
+
+	spin_lock_irqsave(&instance->lock_ques, flags);
+	ret = tstamps_calc_tstamp(&instance->reader_ptp_start_time,
+				  now,
+				  offset,
+				  interval,
+				  &next_time);
+	spin_unlock_irqrestore(&instance->lock_ques, flags);
+
+	update = now - next_time;
+	diff = ptp_timer_start - next_time;
+
+	/* check 'update' and 'diff' within error threshold */
+	if ((abs(update) < error_thresh) && (abs(diff) < error_thresh))
+		ptp_timer_start = next_time;
+
+	ptp_timer_start += interval;
+
+	mse_debug_tstamps2("start %u next %llu now %llu update %llu diff %lld\n",
+			   (u32)ptp_timer_start, next_time, now, update, diff);
+
+	instance->ptp_timer_start = ptp_timer_start;
+
+	return ptp_timer_start;
+}
+
 static void mse_work_start_transmission(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
 	struct mse_trans_buffer *buf;
 	int ret;
-	struct ptp_clock_time now;
+	u64 now, ptp_timer_start;
 	unsigned long flags;
 
 	instance = container_of(work, struct mse_instance, wk_start_trans);
@@ -2931,6 +3226,12 @@ static void mse_work_start_transmission(struct work_struct *work)
 	/* state is NOT RUNNING */
 	if (!mse_state_test(instance, MSE_STATE_RUNNING))
 		return;
+
+	if (instance->ptp_timer_handle &&
+	    instance->timing_ctrl.captured_timestamps < PTP_SYNC_LOCK_THRESHOLD) {
+		instance->f_wait_start_transmission = true;
+		return;
+	}
 
 	spin_lock_irqsave(&instance->lock_buf_list, flags);
 	buf = list_first_entry_or_null(&instance->trans_buf_list,
@@ -2960,12 +3261,27 @@ static void mse_work_start_transmission(struct work_struct *work)
 		  buf->buffer_size);
 
 	/* update timestamp(nsec) */
-	mse_ptp_get_time(instance->ptp_index,
-			 instance->ptp_dev_id, &now);
-	instance->timestamp = (unsigned long)now.sec * NSEC_SCALE + now.nsec;
+	mse_ptp_get_time(instance->ptp_index, &now);
+	instance->timestamp = now;
 
-	if (instance->ptp_clock == 0)
-		tstamps_store_ptp_timestamp(instance, &now);
+	if (!instance->f_ptp_capture) {
+		spin_lock_irqsave(&instance->lock_ques, flags);
+		/* store ptp timestamp to AVTP and CRF */
+		tstamps_enq_tstamp(&instance->tstamp_que, now);
+		tstamps_enq_tstamp(&instance->tstamp_que_crf, now);
+		spin_unlock_irqrestore(&instance->lock_ques, flags);
+	} else if (instance->ptp_timer_handle) {
+		ptp_timer_start = ptp_timer_update_start_timing(instance, now);
+		mse_debug("mse_ptp_timer_start %u now %u\n",
+			  (u32)ptp_timer_start,
+			  (u32)now);
+		if (mse_ptp_timer_start(instance->ptp_index,
+					instance->ptp_timer_handle,
+					(u32)ptp_timer_start) < 0) {
+			mse_err("mse_ptp_timer_start error\n");
+			return;
+		}
+	}
 
 	buf->buffer = buf->media_buffer;
 
@@ -3627,11 +3943,10 @@ EXPORT_SYMBOL(mse_set_mpeg2ts_config);
 
 static int check_mch_config(struct mse_instance *instance)
 {
-	bool mch_enable = instance->media_clock_recovery;
 	bool tx = instance->tx;
 	enum MSE_CRF_TYPE crf_type = instance->crf_type;
 
-	if (!mch_enable) {
+	if (!instance->f_mch_enable) {
 		if (crf_type == MSE_CRF_TYPE_RX)
 			return 1;
 	} else {
@@ -3794,10 +4109,10 @@ int mse_open(int index_media, bool tx)
 	struct mse_adapter *adapter;
 	struct mse_adapter_network_ops *network;
 	struct mse_packetizer_ops *packetizer;
-	int ret, i, index, err;
+	void *ptp_timer_handle;
+	int ret, i, index, err = 0;
 	long link_speed;
 	struct mch_ops *m_ops = NULL;
-	unsigned long flags;
 	struct mse_network_device *network_device;
 	enum MSE_PACKETIZER packetizer_id;
 	char *dev_name;
@@ -3832,6 +4147,7 @@ int mse_open(int index_media, bool tx)
 	}
 
 	instance = &mse->instance_table[index];
+
 	mse_debug_state(instance);
 	instance->state = MSE_STATE_OPEN;
 	instance->used_f = true;
@@ -3895,16 +4211,6 @@ int mse_open(int index_media, bool tx)
 		}
 	}
 
-	/* ptp open */
-	instance->ptp_index = mse_ptp_get_first_index();
-	ret = mse_ptp_open(instance->ptp_index, &instance->ptp_dev_id);
-	if (ret < 0) {
-		mse_err("cannot mse_ptp_open()\n");
-		err = ret;
-
-		goto error_cannot_open_ptp;
-	}
-
 	/* open network adapter */
 	if (tx)
 		dev_name = network_device->device_name_tx;
@@ -3934,7 +4240,7 @@ int mse_open(int index_media, bool tx)
 	instance->net_config.port_transmit_rate = mbit_to_bit(link_speed);
 	instance->crf_net_config.port_transmit_rate = mbit_to_bit(link_speed);
 
-	/* open paketizer */
+	/* open packetizer */
 	ret = mse_packetizer_open(packetizer_id);
 	if (ret < 0) {
 		mse_err("cannot open packetizer ret=%d\n", ret);
@@ -3966,18 +4272,14 @@ int mse_open(int index_media, bool tx)
 
 	instance->wq_stream = create_singlethread_workqueue("mse_streamq");
 	instance->wq_packet = create_singlethread_workqueue("mse_packetq");
+	/* for timestamp */
+	instance->wq_tstamp = create_singlethread_workqueue("mse_tstampq");
+
 	hrtimer_init(&instance->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	instance->timer_interval = 0;
 	instance->timer.function = &mse_timer_callback;
 
-	/* for timestamp */
-	instance->wq_tstamp = create_singlethread_workqueue("mse_tstampq");
 	if (IS_MSE_TYPE_AUDIO(adapter->type)) {
-		spin_lock_irqsave(&instance->lock_ques, flags);
-		tstamps_clear_tstamps(&instance->tstamp_que);
-		tstamps_clear_tstamps(&instance->tstamp_que_crf);
-		spin_unlock_irqrestore(&instance->lock_ques, flags);
-
 		hrtimer_init(&instance->tstamp_timer,
 			     CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 		instance->tstamp_timer_interval = PTP_TIMER_INTERVAL;
@@ -3994,16 +4296,65 @@ int mse_open(int index_media, bool tx)
 	}
 
 	ret = mse_get_default_config(index_media, instance);
-	if (ret < 0)
+	if (ret < 0) {
 		mse_err("cannot get configurations\n");
+		err = ret;
+
+		goto error_cannot_get_default_config;
+	}
+
+	instance->ptp_index = mse_ptp_get_first_index();
+
+	/* open PTP capture and PTP Timer */
+	if (instance->f_ptp_capture) {
+		/* ptp open */
+		instance->ptp_handle = mse_ptp_open(instance->ptp_index);
+		if (!instance->ptp_handle) {
+			mse_err("cannot mse_ptp_open()\n");
+			err = -ENODEV;
+
+			goto error_cannot_open_ptp;
+		}
+
+		mse_info("mse_ptp_capture_start %d %p %d %zu\n",
+			 instance->ptp_index,
+			 instance->ptp_handle,
+			 instance->ptp_clock_ch,
+			 ARRAY_SIZE(instance->timestamps));
+
+		ret = mse_ptp_capture_start(instance->ptp_index,
+					    instance->ptp_handle,
+					    instance->ptp_clock_ch,
+					    ARRAY_SIZE(instance->timestamps));
+		if (ret < 0) {
+			mse_err("cannot mse_ptp_capture_start()\n");
+			err = ret;
+
+			goto error_cannot_ptp_capture_start;
+		}
+
+		ptp_timer_handle = mse_ptp_timer_open(instance->ptp_index,
+						      mse_ptp_timer_callback,
+						      instance);
+		if (!ptp_timer_handle) {
+			mse_warn("cannot open ptp_timer, fallback using hires timer\n");
+		} else {
+			tstamps_reader_init(&instance->reader_ptp_start_time,
+					    &instance->tstamp_que,
+					    "PERIOD",
+					    false);
+		}
+
+		instance->ptp_timer_handle = ptp_timer_handle;
+	}
 
 	if (check_mch_config(instance)) {
 		mse_err("media clock recovery config is invalid mch_config.enable=%d media_audio_config.crf_type=%d\n",
-			instance->media_clock_recovery, instance->crf_type);
+			instance->f_mch_enable, instance->crf_type);
 		goto error_mch_config_invalid;
 	}
 
-	if (instance->media_clock_recovery == 1) {
+	if (instance->f_mch_enable) {
 		for (i = 0; i < MSE_MCH_MAX; i++) {
 			m_ops = mse->mch_table[i];
 			if (m_ops) {
@@ -4018,14 +4369,18 @@ int mse_open(int index_media, bool tx)
 			goto error_mch_not_found;
 		}
 
-		ret = m_ops->open(&instance->mch_dev_id);
-		if (ret < 0) {
-			mse_err("mch open error(%d).\n", ret);
-			instance->mch_index = MSE_INDEX_UNDEFINED;
+		instance->mch_handle = m_ops->open();
+		if (!instance->mch_handle) {
+			mse_err("mch open error.\n");
 			err = -EINVAL;
 
 			goto error_mch_cannot_open;
 		}
+
+		tstamps_reader_init(&instance->reader_mch,
+				    &instance->tstamp_que,
+				    "MCH",
+				    true);
 	}
 
 	/* allocate packet buffer */
@@ -4049,7 +4404,7 @@ int mse_open(int index_media, bool tx)
 	if (err)
 		goto error_cannot_crf_network_setup;
 
-	/* init paketizer */
+	/* init packetizer */
 	err = instance->packetizer->init(instance->index_packetizer);
 
 	if (err)
@@ -4066,11 +4421,27 @@ error_packet_buffer_prepare:
 
 error_packet_buffer_alloc:
 	if (m_ops)
-		m_ops->close(instance->mch_dev_id);
+		m_ops->close(instance->mch_handle);
 
 error_mch_cannot_open:
 error_mch_not_found:
 error_mch_config_invalid:
+	if (instance->ptp_timer_handle)
+		mse_ptp_timer_close(instance->ptp_index,
+				    instance->ptp_timer_handle);
+	instance->ptp_timer_handle = NULL;
+
+	if (instance->ptp_handle)
+		mse_ptp_capture_stop(instance->ptp_index,
+				     instance->ptp_handle);
+
+error_cannot_ptp_capture_start:
+	if (instance->ptp_handle)
+		mse_ptp_close(instance->ptp_index, instance->ptp_handle);
+	instance->ptp_handle = NULL;
+
+error_cannot_open_ptp:
+error_cannot_get_default_config:
 	if (instance->wq_crf_packet)
 		destroy_workqueue(instance->wq_crf_packet);
 
@@ -4085,9 +4456,6 @@ error_network_interface_is_link_down:
 	network->release(instance->index_network);
 
 error_cannot_open_network_adapter:
-	mse_ptp_close(instance->ptp_index, instance->ptp_dev_id);
-
-error_cannot_open_ptp:
 	mpeg2ts_buffer_free(instance);
 
 error_cannot_alloc_mpeg2ts_buffer:
@@ -4105,7 +4473,9 @@ int mse_close(int index)
 {
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
+	struct mch_ops *m_ops;
 	int err = -EINVAL;
+	int ret;
 	unsigned long flags;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
@@ -4180,9 +4550,32 @@ int mse_close(int index)
 	/* cleanup crf tx*/
 	crf_network_cleanup(instance);
 
-	err = mse_ptp_close(instance->ptp_index, instance->ptp_dev_id);
-	if (err < 0)
-		mse_err("cannot mse_ptp_close()\n");
+	if (instance->ptp_timer_handle) {
+		if (mse_ptp_timer_close(instance->ptp_index,
+					instance->ptp_timer_handle) < 0)
+			mse_err("cannot mse_ptp_timer_close()\n");
+
+		instance->ptp_timer_handle = NULL;
+	}
+
+	if (instance->ptp_handle) {
+		if (mse_ptp_capture_stop(instance->ptp_index,
+					 instance->ptp_handle) < 0)
+			mse_err("cannot mse_ptp_capture_stop()\n");
+
+		if (mse_ptp_close(instance->ptp_index,
+				  instance->ptp_handle) < 0)
+			mse_err("cannot mse_ptp_close()\n");
+
+		instance->ptp_handle = NULL;
+	}
+
+	if (instance->mch_index >= 0) {
+		m_ops = mse->mch_table[instance->mch_index];
+		ret = m_ops->close(instance->mch_handle);
+		if (ret < 0)
+			mse_err("mch close error(%d).\n", ret);
+	}
 
 	mpeg2ts_buffer_free(instance);
 
@@ -4207,8 +4600,9 @@ int mse_start_streaming(int index)
 {
 	int err = -EINVAL;
 	struct mse_instance *instance;
-	struct ptp_clock_time now;
+	u64 now = 0;
 	unsigned long flags;
+	u32 std;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
 		mse_err("invalid argument. index=%d\n", index);
@@ -4236,12 +4630,20 @@ int mse_start_streaming(int index)
 		return err;
 
 	/* get timestamp(nsec) */
-	mse_ptp_get_time(instance->ptp_index,
-			 instance->ptp_dev_id, &now);
-	mse_tstamp_init(instance, &now);
+	mse_ptp_get_time(instance->ptp_index, &now);
+	mse_tstamp_init(instance, now);
 
 	if (IS_MSE_TYPE_AUDIO(instance->media->type))
-		mse_start_streaming_audio(instance, &now);
+		mse_start_streaming_audio(instance, now);
+
+	/* initialize timestamp queues */
+	if (instance->f_ptp_capture)
+		std = NSEC_SCALE / instance->ptp_capture_freq;
+	else
+		std = instance->timer_interval;
+
+	tstamps_init(&instance->tstamp_que, "TSTAMP_AVTP", false, std);
+	tstamps_init(&instance->tstamp_que_crf, "TSTAMP_CRF", false, std);
 
 	mse_start_streaming_common(instance);
 
