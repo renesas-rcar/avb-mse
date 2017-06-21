@@ -4585,6 +4585,7 @@ int mse_close(int index)
 	instance->state = MSE_STATE_CLOSE;
 	instance->index_media = MSE_INDEX_UNDEFINED;
 	instance->index_network = MSE_INDEX_UNDEFINED;
+	instance->crf_index_network = MSE_INDEX_UNDEFINED;
 	instance->index_packetizer = MSE_INDEX_UNDEFINED;
 	instance->mch_index = MSE_INDEX_UNDEFINED;
 	instance->ptp_index = MSE_INDEX_UNDEFINED;
@@ -4938,6 +4939,7 @@ static int mse_probe(void)
 		mse->instance_table[i].state = MSE_STATE_CLOSE;
 		mse->instance_table[i].index_media = MSE_INDEX_UNDEFINED;
 		mse->instance_table[i].index_network = MSE_INDEX_UNDEFINED;
+		mse->instance_table[i].crf_index_network = MSE_INDEX_UNDEFINED;
 		mse->instance_table[i].index_packetizer = MSE_INDEX_UNDEFINED;
 		mse->instance_table[i].mch_index = MSE_INDEX_UNDEFINED;
 		mse->instance_table[i].ptp_index = MSE_INDEX_UNDEFINED;
