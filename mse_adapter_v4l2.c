@@ -1351,14 +1351,18 @@ static void mse_adapter_v4l2_stop_streaming(struct vb2_queue *vq)
 		return;
 	}
 
-	if (V4L2_TYPE_IS_OUTPUT(vq->type)) {
-		spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
-		wait_for_buffers = !list_empty(&vadp_dev->stream_buf_list);
-		spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
-
-		if (wait_for_buffers)
-			vb2_wait_for_all_buffers(vq);
+	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
+	wait_for_buffers = !list_empty(&vadp_dev->stream_buf_list);
+	if (!V4L2_TYPE_IS_OUTPUT(vq->type)) {
+		return_buffers(vadp_dev, &vadp_dev->prepared_buf_list,
+			       VB2_BUF_STATE_QUEUED);
+		return_buffers(vadp_dev, &vadp_dev->buf_list,
+			       VB2_BUF_STATE_QUEUED);
 	}
+	spin_unlock_irqrestore(&vadp_dev->lock_buf_list, flags);
+
+	if (wait_for_buffers)
+		vb2_wait_for_all_buffers(vq);
 
 	return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
 	temp_buffer_free(vadp_dev);
