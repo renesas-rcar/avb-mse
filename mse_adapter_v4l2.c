@@ -2020,7 +2020,7 @@ static int __init mse_adapter_v4l2_init(void)
 	}
 
 	if (v4l2_mpeg2ts_devices < 0) {
-		mse_err("Invalid devices mpeg2ts=%d\n", v4l2_video_devices);
+		mse_err("Invalid devices mpeg2ts=%d\n", v4l2_mpeg2ts_devices);
 		return -EINVAL;
 	}
 
