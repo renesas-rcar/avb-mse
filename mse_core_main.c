@@ -4351,6 +4351,7 @@ int mse_open(int index_media, bool tx)
 	if (check_mch_config(instance)) {
 		mse_err("media clock recovery config is invalid mch_config.enable=%d media_audio_config.crf_type=%d\n",
 			instance->f_mch_enable, instance->crf_type);
+		err = -EINVAL;
 		goto error_mch_config_invalid;
 	}
 
