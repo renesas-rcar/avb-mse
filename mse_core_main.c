@@ -3163,7 +3163,10 @@ static int mpeg2ts_buffer_write(struct mse_instance *instance,
 	list_add_tail(&mpeg2ts->list, &instance->proc_buf_list);
 	instance->mpeg2ts_buffer_idx = (idx + 1) % MSE_MPEG2TS_BUF_NUM;
 
-	if (force_flush)
+	if (!force_flush)
+		return 0;
+
+	if (instance->mpeg2ts_clock_90k != MPEG2TS_PCR90K_INVALID)
 		mpeg2ts_adjust_pcr(instance, mpeg2ts->buffer_size);
 
 	return 0;
