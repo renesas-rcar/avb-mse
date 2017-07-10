@@ -1635,9 +1635,9 @@ static int media_clock_recovery(struct mse_instance *instance)
 
 	if (f_out_ok_pre != reader_mch->f_out_ok) {
 		if (!f_out_ok_pre)
-			mse_info("Good! m %u d %u\n", ts.master, ts.device);
+			mse_debug("Good! m %u d %u\n", ts.master, ts.device);
 		else
-			mse_info("Bad! %d calc error %d\n", out, calc_error);
+			mse_debug("Bad! %d calc error %d\n", out, calc_error);
 	}
 
 	return out;
