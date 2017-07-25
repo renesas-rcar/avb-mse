@@ -4904,6 +4904,7 @@ static int mse_probe(void)
 	mse->pdev = platform_device_register_simple("mse", -1, NULL, 0);
 	if (IS_ERR(mse->pdev)) {
 		err = PTR_ERR(mse->pdev);
+		mse->pdev = NULL;
 		mse_err("Failed to register platform device. ret=%d\n", err);
 		goto error;
 	}
@@ -4926,6 +4927,7 @@ static int mse_probe(void)
 	mse->class = class_create(THIS_MODULE, "ravb_mse");
 	if (IS_ERR(mse->class)) {
 		err = PTR_ERR(mse->class);
+		mse->class = NULL;
 		mse_err("failed class_create() ret=%d\n", err);
 		goto error;
 	}
