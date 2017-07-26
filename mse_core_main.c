@@ -94,6 +94,7 @@
 #define BUF_SIZE                (32)
 
 #define MSE_TIMEOUT_CLOSE       (msecs_to_jiffies(5000)) /* 5secs */
+#define MSE_TIMEOUT_PACKETIZE   (msecs_to_jiffies(16))   /* 16 msecs */
 
 #define MSE_RADIX_HEXADECIMAL   (16)
 #define MSE_DEFAULT_BITRATE     (50000000) /* 50Mbps */
@@ -1134,6 +1135,12 @@ static void mse_work_stream(struct work_struct *work)
 				queue_work(instance->wq_packet,
 					   &instance->wk_depacketize);
 		}
+
+		/* if NOT work queued, then queue it to process last data */
+		if (mse_state_test(instance, MSE_STATE_STOPPING))
+			if (!work_busy(&instance->wk_depacketize))
+				queue_work(instance->wq_packet,
+					   &instance->wk_depacketize);
 	}
 
 	write_lock_irqsave(&instance->lock_stream, flags);
@@ -1187,6 +1194,9 @@ static void tstamps_reader_init(struct timestamp_reader *reader,
 	reader->f_out_ok = false;
 	reader->f_32bit = f_32bit;
 	reader->que = que;
+	reader->out_time = 0;
+	reader->out_std = 0;
+	reader->out_offset = 0;
 
 	mse_debug_tstamps2("%s\n", reader->name);
 }
@@ -1554,7 +1564,7 @@ static int media_clock_recovery(struct mse_instance *instance)
 	int index_packetizer;
 	u64 timestamp;
 	u32 delta_ts, offset;
-	int out;
+	int out = 0;
 	int recovery_value;
 	u64 recovery_capture_freq;
 	bool f_out_ok_pre;
@@ -1586,7 +1596,7 @@ static int media_clock_recovery(struct mse_instance *instance)
 
 	/* fill master/device timestamps */
 	spin_lock_irqsave(&instance->lock_ques, flags);
-	for (out = 0; out < ARRAY_SIZE(instance->ts); out++) {
+	while (out < ARRAY_SIZE(instance->ts)) {
 		if (tstamps_deq_tstamp(que, &timestamp) < 0)
 			break;
 
@@ -1597,10 +1607,10 @@ static int media_clock_recovery(struct mse_instance *instance)
 						  offset,
 						  &ts)) {
 			calc_error++;
-			continue;
+		} else {
+			instance->ts[out] = ts;
+			out++;
 		}
-
-		instance->ts[out] = ts;
 	}
 	/* could not get master timestamps */
 	spin_unlock_irqrestore(&instance->lock_ques, flags);
@@ -1678,11 +1688,6 @@ static void mse_work_timestamp(struct work_struct *work)
 	if (instance->f_mch_enable) {
 		/* mch */
 		media_clock_recovery(instance);
-	}
-
-	if (instance->f_wait_start_transmission) {
-		queue_work(instance->wq_packet, &instance->wk_start_trans);
-		instance->f_wait_start_transmission = false;
 	}
 
 	instance->f_work_timestamp = false;
@@ -1828,7 +1833,7 @@ static void mse_release_crf_packetizer(struct mse_instance *instance)
 
 static bool check_packet_remain(struct mse_instance *instance)
 {
-	int wait_count = MSE_TX_PACKET_NUM / 2;
+	int wait_count = MSE_TX_RING_SIZE - MSE_TX_PACKET_NUM;
 	int rem = mse_packet_ctrl_check_packet_remain(instance->packet_buffer);
 
 	return wait_count > rem;
@@ -1879,10 +1884,24 @@ static void mse_work_packetize(struct work_struct *work)
 
 	while (buf->work_length < buf->buffer_size) {
 		/* state is EXECUTE */
-		if (mse_state_test(instance, MSE_STATE_EXECUTE))
+		if (mse_state_test(instance, MSE_STATE_EXECUTE)) {
 			/* wait for packet buffer processed */
-			wait_event_interruptible(instance->wait_wk_stream,
-						 check_packet_remain(instance));
+			if (!check_packet_remain(instance)) {
+				read_lock_irqsave(&instance->lock_stream,
+						  flags);
+				if (!instance->f_streaming)
+					queue_work(instance->wq_stream,
+						   &instance->wk_stream);
+				read_unlock_irqrestore(&instance->lock_stream,
+						       flags);
+
+				if (!wait_event_interruptible_timeout(
+						instance->wait_wk_stream,
+						check_packet_remain(instance),
+						MSE_TIMEOUT_PACKETIZE))
+					mse_debug("wait event timeouted\n");
+			}
+		}
 
 		ret = mse_packet_ctrl_make_packet(
 					instance->index_packetizer,
@@ -2261,7 +2280,8 @@ static void mse_work_depacketize(struct work_struct *work)
 
 	/* state is STOPPING */
 	if (mse_state_test(instance, MSE_STATE_STOPPING)) {
-		if (!atomic_read(&instance->trans_buf_cnt))
+		if (instance->ptp_timer_handle ||
+		    !atomic_read(&instance->trans_buf_cnt))
 			queue_work(instance->wq_packet,
 				   &instance->wk_stop_streaming);
 
@@ -2739,6 +2759,11 @@ static enum hrtimer_restart mse_timestamp_collect_callback(struct hrtimer *arg)
 	instance->f_work_timestamp = true;
 	queue_work(instance->wq_tstamp, &instance->wk_timestamp);
 
+	if (instance->f_wait_start_transmission) {
+		queue_work(instance->wq_packet, &instance->wk_start_trans);
+		instance->f_wait_start_transmission = false;
+	}
+
 	return HRTIMER_RESTART;
 }
 
@@ -2806,6 +2831,7 @@ static void mse_start_streaming_audio(struct mse_instance *instance, u64 now)
 	struct mse_timing_ctrl *timing_ctrl = &instance->timing_ctrl;
 	int i;
 	int captured;
+	struct mse_delay_time delay_time;
 
 	if (!instance->tx) {
 		instance->temp_w = 0;
@@ -2814,14 +2840,43 @@ static void mse_start_streaming_audio(struct mse_instance *instance, u64 now)
 			instance->temp_len[i] = 0;
 	}
 
+	/* Initialize delay time */
+	mse_config_get_delay_time(instance->media->index, &delay_time);
+	if (instance->tx)
+		instance->delay_time_ns = delay_time.tx_delay_time_ns;
+	else
+		instance->delay_time_ns = delay_time.rx_delay_time_ns;
+
+	/* Initialize timing control parameters */
+	memset(timing_ctrl, 0, sizeof(*timing_ctrl));
+	instance->f_wait_start_transmission = false;
+
 	/* f_ptp_capture is true, capture timestamps */
 	if (instance->f_ptp_capture) {
 		captured = mse_get_capture_timestamp(
 				instance,
 				now,
-				!timing_ctrl->captured_timestamps);
+				true);
 		timing_ctrl->captured_timestamps += captured;
 	}
+
+	/* initialize timestamp readers */
+	if (instance->ptp_timer_handle)
+		tstamps_reader_init(&instance->reader_ptp_start_time,
+				    &instance->tstamp_que,
+				    "PERIOD",
+				    false);
+
+	if (instance->f_mch_enable)
+		tstamps_reader_init(&instance->reader_mch,
+				    &instance->tstamp_que,
+				    "MCH",
+				    true);
+
+	tstamps_reader_init(&instance->reader_create_avtp,
+			    &instance->tstamp_que,
+			    "CREATE_AVTP",
+			    true);
 
 	/* f_ptp_capture is true or f_mch_enable is enable */
 	if (instance->f_ptp_capture || instance->f_mch_enable) {
@@ -2842,12 +2897,6 @@ static void mse_start_streaming_audio(struct mse_instance *instance, u64 now)
 		queue_work(instance->wq_crf_packet,
 			   &instance->wk_crf_receive);
 	}
-
-	/* initialize timestamp reader for create_avtp */
-	tstamps_reader_init(&instance->reader_create_avtp,
-			    &instance->tstamp_que,
-			    "CREATE_AVTP",
-			    true);
 }
 
 static void mse_tstamp_init(struct mse_instance *instance, u64 now)
@@ -2884,10 +2933,13 @@ static void mse_start_streaming_common(struct mse_instance *instance)
 	}
 
 	/* start timer */
-	if (instance->timer_interval && !instance->ptp_timer_handle) {
-		hrtimer_start(&instance->timer,
-			      ns_to_ktime(instance->timer_interval),
-			      HRTIMER_MODE_REL);
+	if (instance->ptp_timer_handle) {
+		instance->ptp_timer_start = 0;
+	} else {
+		if (instance->timer_interval)
+			hrtimer_start(&instance->timer,
+				      ns_to_ktime(instance->timer_interval),
+				      HRTIMER_MODE_REL);
 	}
 }
 
@@ -3224,6 +3276,7 @@ static void mse_work_start_transmission(struct work_struct *work)
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
 	struct mse_trans_buffer *buf;
+	struct mse_timing_ctrl *timing_ctrl;
 	int ret;
 	u64 now, ptp_timer_start;
 	unsigned long flags;
@@ -3233,12 +3286,6 @@ static void mse_work_start_transmission(struct work_struct *work)
 	/* state is NOT RUNNING */
 	if (!mse_state_test(instance, MSE_STATE_RUNNING))
 		return;
-
-	if (instance->ptp_timer_handle &&
-	    instance->timing_ctrl.captured_timestamps < PTP_SYNC_LOCK_THRESHOLD) {
-		instance->f_wait_start_transmission = true;
-		return;
-	}
 
 	spin_lock_irqsave(&instance->lock_buf_list, flags);
 	buf = list_first_entry_or_null(&instance->trans_buf_list,
@@ -3255,7 +3302,27 @@ static void mse_work_start_transmission(struct work_struct *work)
 				queue_work(instance->wq_packet,
 					   &instance->wk_packetize);
 			}
+
+			queue_work(instance->wq_packet,
+				   &instance->wk_stop_streaming);
 		}
+
+		return;
+	} else if (instance->ptp_timer_handle) {
+		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
+			spin_unlock_irqrestore(&instance->lock_buf_list,
+					       flags);
+			queue_work(instance->wq_packet,
+				   &instance->wk_stop_streaming);
+			return;
+		}
+	}
+
+	timing_ctrl = &instance->timing_ctrl;
+	if (instance->ptp_timer_handle &&
+	    timing_ctrl->captured_timestamps < PTP_SYNC_LOCK_THRESHOLD) {
+		spin_unlock_irqrestore(&instance->lock_buf_list, flags);
+		instance->f_wait_start_transmission = true;
 
 		return;
 	}
@@ -4669,9 +4736,6 @@ int mse_start_streaming(int index)
 	mse_ptp_get_time(instance->ptp_index, &now);
 	mse_tstamp_init(instance, now);
 
-	if (IS_MSE_TYPE_AUDIO(instance->media->type))
-		mse_start_streaming_audio(instance, now);
-
 	/* initialize timestamp queues */
 	if (instance->f_ptp_capture)
 		std = NSEC_SCALE / instance->ptp_capture_freq;
@@ -4680,6 +4744,9 @@ int mse_start_streaming(int index)
 
 	tstamps_init(&instance->tstamp_que, "TSTAMP_AVTP", false, std);
 	tstamps_init(&instance->tstamp_que_crf, "TSTAMP_CRF", false, std);
+
+	if (IS_MSE_TYPE_AUDIO(instance->media->type))
+		mse_start_streaming_audio(instance, now);
 
 	mse_start_streaming_common(instance);
 
