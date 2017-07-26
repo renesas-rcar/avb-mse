@@ -77,6 +77,7 @@
 #include <linux/delay.h>
 #include <linux/list.h>
 #include <linux/dma-mapping.h>
+#include <linux/semaphore.h>
 #include "avtp.h"
 #include "ravb_mse_kernel.h"
 #include "mse_packetizer.h"
@@ -285,6 +286,8 @@ struct mse_instance {
 	enum MSE_STATE state;
 	/** @brief spin lock for state */
 	rwlock_t lock_state;
+	/** @brief semaphore for stopping process */
+	struct semaphore sem_stopping;
 
 	/** @brief media adapter IDs */
 	int index_media;
@@ -2502,6 +2505,7 @@ static void mse_work_stop_streaming(struct work_struct *work)
 	/* state is NOT EXECUTE */
 	if (!mse_state_test(instance, MSE_STATE_EXECUTE)) {
 		mse_stop_streaming_common(instance);
+		up(&instance->sem_stopping);
 		return;
 	}
 
@@ -3611,17 +3615,23 @@ int mse_set_audio_config(int index, struct mse_audio_config *config)
 
 	mse_debug_state(instance);
 
+	down(&instance->sem_stopping);
+
 	/* state is CLOSE */
 	if (mse_state_test(instance, MSE_STATE_CLOSE)) {
+		up(&instance->sem_stopping);
 		mse_err("operation is not permitted. index=%d\n", index);
 		return -EPERM;
 	}
 
 	/* state is NOT OPEN */
 	if (!mse_state_test(instance, MSE_STATE_OPEN)) {
+		up(&instance->sem_stopping);
 		mse_err("instance is busy. index=%d\n", index);
 		return -EBUSY;
 	}
+
+	up(&instance->sem_stopping);
 
 	adapter = instance->media;
 	media_audio_config = &adapter->config.media_audio_config;
@@ -3741,17 +3751,23 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 
 	mse_debug_state(instance);
 
+	down(&instance->sem_stopping);
+
 	/* state is CLOSE */
 	if (mse_state_test(instance, MSE_STATE_CLOSE)) {
+		up(&instance->sem_stopping);
 		mse_err("operation is not permitted. index=%d\n", index);
 		return -EPERM;
 	}
 
 	/* state is NOT OPEN */
 	if (!mse_state_test(instance, MSE_STATE_OPEN)) {
+		up(&instance->sem_stopping);
 		mse_err("instance is busy. index=%d\n", index);
 		return -EBUSY;
 	}
+
+	up(&instance->sem_stopping);
 
 	switch (config->format) {
 	case MSE_VIDEO_FORMAT_H264_BYTE_STREAM:
@@ -3884,17 +3900,23 @@ int mse_set_mpeg2ts_config(int index, struct mse_mpeg2ts_config *config)
 
 	mse_debug_state(instance);
 
+	down(&instance->sem_stopping);
+
 	/* state is CLOSE */
 	if (mse_state_test(instance, MSE_STATE_CLOSE)) {
+		up(&instance->sem_stopping);
 		mse_err("operation is not permitted. index=%d\n", index);
 		return -EPERM;
 	}
 
 	/* state is NOT OPEN */
 	if (!mse_state_test(instance, MSE_STATE_OPEN)) {
+		up(&instance->sem_stopping);
 		mse_err("instance is busy. index=%d\n", index);
 		return -EBUSY;
 	}
+
+	up(&instance->sem_stopping);
 
 	mse_debug("mpeg2ts_type=%d\n", config->mpeg2ts_type);
 
@@ -4168,6 +4190,7 @@ int mse_open(int index_media, bool tx)
 	spin_lock_init(&instance->lock_timer);
 	spin_lock_init(&instance->lock_ques);
 	spin_lock_init(&instance->lock_buf_list);
+	sema_init(&instance->sem_stopping, 1);
 
 	mutex_unlock(&mse->mutex_open);
 
@@ -4620,19 +4643,27 @@ int mse_start_streaming(int index)
 
 	mse_debug_state(instance);
 
+	down(&instance->sem_stopping);
+
 	/* state is RUNNABLE */
-	if (mse_state_test(instance, MSE_STATE_RUNNABLE))
+	if (mse_state_test(instance, MSE_STATE_RUNNABLE)) {
+		up(&instance->sem_stopping);
 		return 0;
+	}
 
 	/* state is NOT OPEN */
-	if (!mse_state_test(instance, MSE_STATE_OPEN))
+	if (!mse_state_test(instance, MSE_STATE_OPEN)) {
+		up(&instance->sem_stopping);
 		return -EPERM;
+	}
 
 	write_lock_irqsave(&instance->lock_state, flags);
 	err = mse_state_change(instance, MSE_STATE_IDLE);
 	write_unlock_irqrestore(&instance->lock_state, flags);
-	if (err)
+	if (err) {
+		up(&instance->sem_stopping);
 		return err;
+	}
 
 	/* get timestamp(nsec) */
 	mse_ptp_get_time(instance->ptp_index, &now);
@@ -4651,6 +4682,8 @@ int mse_start_streaming(int index)
 	tstamps_init(&instance->tstamp_que_crf, "TSTAMP_CRF", false, std);
 
 	mse_start_streaming_common(instance);
+
+	up(&instance->sem_stopping);
 
 	return err;
 }
@@ -4677,8 +4710,10 @@ int mse_stop_streaming(int index)
 	}
 
 	/* state is RUNNABLE */
-	if (mse_state_test(instance, MSE_STATE_RUNNABLE))
+	if (mse_state_test(instance, MSE_STATE_RUNNABLE)) {
+		down(&instance->sem_stopping);
 		queue_work(instance->wq_packet, &instance->wk_stop_streaming);
+	}
 
 	return 0;
 }
