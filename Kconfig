@@ -102,7 +102,7 @@ config MSE_PACKETIZER_CVF_MJPEG
 config MSE_ADAPTER_EAVB
 	tristate "MSE EAVB Adapter"
 	depends on MSE_CORE
-	depends on RAVB_STREAMING
+	depends on RAVB_STREAMING || IGB_STREAMING
 	default m
 	---help---
 	  Renesas Ethernet AVB software
