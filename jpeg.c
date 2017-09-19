@@ -330,7 +330,7 @@ int jpeg_read_dqt(const u8 *buf,
 			return -EPERM;
 		}
 
-		mse_debug("DQT Tq=%d Pq=%d Size=%zu",
+		mse_debug("DQT Tq=%d Pq=%d Size=%zu\n",
 			  qid, precision, quant_len);
 
 		qtable[qid].precision = precision;
@@ -352,7 +352,7 @@ int jpeg_read_dri(const u8 *buf,
 	size_t offset_work = *offset;
 
 	if (*offset + JPEG_DRI_LENGTH > len) {
-		mse_debug("not enough data for DRI, request next buffer");
+		mse_debug("not enough data for DRI, request next buffer\n");
 		*offset += len;
 		return -EAGAIN;
 	}

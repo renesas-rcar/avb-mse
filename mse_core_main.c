@@ -1383,7 +1383,7 @@ static int tstamps_search_tstamp32(struct timestamp_reader *reader,
 	if (delta_ts < NSEC_SCALE)
 		reader->out_std -= delta_ts;
 	else
-		mse_info("not precision offset capture %u", delta_ts);
+		mse_info("not precision offset capture %u\n", delta_ts);
 
 	reader->out_std -= interval;
 	reader->out_offset = offset;

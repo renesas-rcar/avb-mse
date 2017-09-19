@@ -89,7 +89,7 @@ struct mse_packet_ctrl *mse_packet_ctrl_alloc(struct device *dev,
 	dma_addr_t paddr, pitch;
 	int i;
 
-	mse_debug("packets=%d size=%d", max_packet, max_packet_size);
+	mse_debug("packets=%d size=%d\n", max_packet, max_packet_size);
 
 	dma = kmalloc(sizeof(*dma), GFP_KERNEL);
 	if (!dma)
@@ -179,7 +179,8 @@ int mse_packet_ctrl_make_packet(int index,
 				timestamp = 0;      /* dummy, not used */
 				(*current_timestamp)++;
 			} else {
-				mse_err("not enough timestamp %d", tstamp_size);
+				mse_err("not enough timestamp %d\n",
+					tstamp_size);
 				return -EINVAL;
 			}
 		}

@@ -1249,7 +1249,7 @@ static int mse_adapter_v4l2_queue_setup(struct vb2_queue *vq,
 		return -EINVAL;
 	}
 
-	mse_debug("vq->num_buffers=%d, nbuffers=%d",
+	mse_debug("vq->num_buffers=%d, nbuffers=%d\n",
 		  vq->num_buffers, *nbuffers);
 	if (vq->num_buffers + *nbuffers < NUM_BUFFERS)
 		*nbuffers = NUM_BUFFERS - vq->num_buffers;
@@ -1589,7 +1589,7 @@ static int mse_adapter_v4l2_callback(void *priv, int size)
 	if (size < 0 && size != -EAGAIN) {
 		vb2_queue_error(vq);
 		return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
-		mse_err("priv=%p size=%d", priv, size);
+		mse_err("priv=%p size=%d\n", priv, size);
 
 		return size;
 	}
@@ -1961,7 +1961,7 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 		return -EPERM;
 	}
 
-	mse_debug("video device was registered as (%s)",
+	mse_debug("video device was registered as (%s)\n",
 		  video_device_node_name(vdev));
 
 	err = register_mse_core(vadp_dev, type);
