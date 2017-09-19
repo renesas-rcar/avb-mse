@@ -629,7 +629,7 @@ static int mse_packetizer_cvf_mjpeg_depacketize(int index,
 	struct cvf_mjpeg_packetizer *cvf_mjpeg;
 	struct mjpeg_restart_header *rheader;
 	struct mjpeg_quant_header qheader;
-	u8 *data, *qt, tspec;
+	u8 *data, *qt;
 	size_t data_len;
 	u16 dri = 0;
 	u32 offset, width, height;
@@ -665,7 +665,6 @@ static int mse_packetizer_cvf_mjpeg_depacketize(int index,
 	data_len = avtp_get_stream_data_length(packet) - AVTP_JPEG_HEADER_SIZE;
 	*timestamp = avtp_get_timestamp(packet);
 
-	tspec = avtp_get_cvf_mjpeg_tspec(packet);
 	offset = avtp_get_cvf_mjpeg_offset(packet);
 	cvf_mjpeg->type = avtp_get_cvf_mjpeg_type(packet);
 	cvf_mjpeg->quant = avtp_get_cvf_mjpeg_q(packet);
@@ -678,8 +677,8 @@ static int mse_packetizer_cvf_mjpeg_depacketize(int index,
 	}
 
 	mse_debug("tspec=%u, offset=%u, type=%u, quant=%u, pixel=%ux%u\n",
-		  tspec, offset, cvf_mjpeg->type, cvf_mjpeg->quant,
-		  width, height);
+		  avtp_get_cvf_mjpeg_tspec(packet), offset, cvf_mjpeg->type,
+		  cvf_mjpeg->quant, width, height);
 
 	if (cvf_mjpeg->type >= MJPEG_TYPE_RESTART_BIT) {
 		rheader = (struct mjpeg_restart_header *)data;

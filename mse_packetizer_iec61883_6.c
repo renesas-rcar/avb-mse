@@ -441,11 +441,11 @@ static int mse_packetizer_iec61883_6_calc_cbs(int index,
 #define SET_AM824_MBLA_16BIT_BE(_data) \
 	(0x00000042 | (((_data) << 8) & 0xFFFF00))
 
-static int mse_packetizer_iec61883_6_set_payload(int index,
-						 int data_num,
-						 u32 *sample,
-						 void *buffer,
-						 size_t buffer_processed)
+static void mse_packetizer_iec61883_6_set_payload(int index,
+						  int data_num,
+						  u32 *sample,
+						  void *buffer,
+						  size_t buffer_processed)
 {
 	struct iec61883_6_packetizer *iec61883_6;
 	int i, j = 0, count;
@@ -466,7 +466,7 @@ static int mse_packetizer_iec61883_6_set_payload(int index,
 				*(sample + i) = SET_AM824_MBLA_24BIT_BE(
 					*(data.d32 + i));
 			}
-			return 0;
+			return;
 		}
 		switch (iec61883_6->audio_config.sample_bit_depth) {
 		case MSE_AUDIO_BIT_16:
@@ -474,7 +474,7 @@ static int mse_packetizer_iec61883_6_set_payload(int index,
 				*(sample + i) = SET_AM824_MBLA_16BIT_BE(
 					*(data.d16 + i));
 			}
-			return 0;
+			return;
 		case MSE_AUDIO_BIT_18:
 			for (i = 0; i < data_num; i += 3) {
 				tmp = *(data.d8 + i) << 16
@@ -482,7 +482,7 @@ static int mse_packetizer_iec61883_6_set_payload(int index,
 					| *(data.d8 + i + 2);
 				*(sample + j++) = SET_AM824_MBLA_18BIT(tmp);
 			}
-			return 0;
+			return;
 		case MSE_AUDIO_BIT_20:
 			for (i = 0; i < data_num; i += 3) {
 				tmp = *(data.d8 + i) << 16
@@ -490,7 +490,7 @@ static int mse_packetizer_iec61883_6_set_payload(int index,
 					| *(data.d8 + i + 2);
 				*(sample + j++) = SET_AM824_MBLA_20BIT(tmp);
 			}
-			return 0;
+			return;
 		case MSE_AUDIO_BIT_24:
 			for (i = 0; i < data_num; i += 3) {
 				tmp = *(data.d8 + i) << 16
@@ -498,9 +498,9 @@ static int mse_packetizer_iec61883_6_set_payload(int index,
 					| *(data.d8 + i + 2);
 				*(sample + j++) = SET_AM824_MBLA_24BIT(tmp);
 			}
-			return 0;
+			return;
 		default:
-			return -EPERM;
+			return;
 		}
 	} else {
 		if (iec61883_6->audio_config.bytes_per_sample == 4) {
@@ -508,7 +508,7 @@ static int mse_packetizer_iec61883_6_set_payload(int index,
 				*(sample + i) =
 					SET_AM824_MBLA_24BIT(*(data.d32 + i));
 			}
-			return 0;
+			return;
 		}
 		switch (iec61883_6->audio_config.sample_bit_depth) {
 		case MSE_AUDIO_BIT_16:
@@ -516,7 +516,7 @@ static int mse_packetizer_iec61883_6_set_payload(int index,
 				*(sample + i) =
 					SET_AM824_MBLA_16BIT(*(data.d16 + i));
 			}
-			return 0;
+			return;
 		case MSE_AUDIO_BIT_18:
 			for (i = 0; i < data_num; i += 3) {
 				tmp = *(data.d8 + i)
@@ -524,7 +524,7 @@ static int mse_packetizer_iec61883_6_set_payload(int index,
 					| *(data.d8 + i + 2) << 16;
 				*(sample + j++) = SET_AM824_MBLA_18BIT(tmp);
 			}
-			return 0;
+			return;
 		case MSE_AUDIO_BIT_20:
 			for (i = 0; i < data_num; i += 3) {
 				tmp = *(data.d8 + i)
@@ -532,7 +532,7 @@ static int mse_packetizer_iec61883_6_set_payload(int index,
 					| *(data.d8 + i + 2) << 16;
 				*(sample + j++) = SET_AM824_MBLA_20BIT(tmp);
 			}
-			return 0;
+			return;
 		case MSE_AUDIO_BIT_24:
 			for (i = 0; i < data_num; i += 3) {
 				tmp = *(data.d8 + i)
@@ -540,12 +540,12 @@ static int mse_packetizer_iec61883_6_set_payload(int index,
 					| *(data.d8 + i + 2) << 16;
 				*(sample + j++) = SET_AM824_MBLA_24BIT(tmp);
 			}
-			return 0;
+			return;
 		default:
-			return -EPERM;
+			return;
 		}
 	}
-	return -EPERM;
+	return;
 }
 
 static int mse_packetizer_iec61883_6_packetize(int index,
@@ -558,7 +558,7 @@ static int mse_packetizer_iec61883_6_packetize(int index,
 {
 	struct iec61883_6_packetizer *iec61883_6;
 	struct mse_audio_config *audio_config;
-	int ret, payload_len, data_size;
+	int payload_len, data_size;
 	u32 *sample;
 	int piece_size = 0, piece_len = 0;
 
@@ -605,11 +605,11 @@ static int mse_packetizer_iec61883_6_packetize(int index,
 		*packet_size = iec61883_6->avtp_packet_size;
 	}
 
-	ret = mse_packetizer_iec61883_6_set_payload(index,
-						    data_size - piece_size,
-						    sample,
-						    buffer,
-						    *buffer_processed);
+	mse_packetizer_iec61883_6_set_payload(index,
+					      data_size - piece_size,
+					      sample,
+					      buffer,
+					      *buffer_processed);
 
 	*buffer_processed += data_size - piece_size;
 
