@@ -803,10 +803,10 @@ static int mse_adapter_v4l2_querycap(struct file *filp,
 		return -EINVAL;
 	}
 
-	strlcpy(vcap->driver, MSE_ADAPTER_V4L2_DRIVER_NAME,
+	strlcpy((char *)vcap->driver, MSE_ADAPTER_V4L2_DRIVER_NAME,
 		sizeof(vcap->driver));
-	strlcpy(vcap->card, vadp_dev->vdev.name, sizeof(vcap->card));
-	snprintf(vcap->bus_info, sizeof(vcap->bus_info), "platform:%s",
+	strlcpy((char *)vcap->card, vadp_dev->vdev.name, sizeof(vcap->card));
+	snprintf((char *)vcap->bus_info, sizeof(vcap->bus_info), "platform:%s",
 		 vadp_dev->v4l2_dev.name);
 	vcap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_VIDEO_OUTPUT |
 			    V4L2_CAP_STREAMING;
@@ -862,7 +862,7 @@ static int mse_adapter_v4l2_enum_fmt_vid(struct file *filp,
 
 	fmt->index = index;
 	fmt->type = buf_type;
-	strcpy(fmt->description, fmtdesc->description);
+	strcpy((char *)fmt->description, (char *)fmtdesc->description);
 	fmt->pixelformat = fmtdesc->pixelformat;
 
 	mse_debug("END format: %s\n", fmtdesc->description);

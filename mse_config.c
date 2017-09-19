@@ -974,5 +974,5 @@ void mse_config_init(struct mse_config *config,
 	spin_lock_init(&config->lock);
 
 	/* device name */
-	strncpy(config->info.device, device_name, MSE_NAME_LEN_MAX);
+	strncpy((char *)config->info.device, device_name, MSE_NAME_LEN_MAX);
 }

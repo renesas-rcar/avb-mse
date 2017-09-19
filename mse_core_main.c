@@ -4108,7 +4108,7 @@ static int crf_tx_network_setup(struct mse_instance *instance)
 	char *dev_name;
 
 	network = instance->network;
-	dev_name =
+	dev_name = (char *)
 		instance->media->config.network_device.device_name_tx_crf;
 
 	index_network = network->open(dev_name);
@@ -4153,7 +4153,7 @@ static int crf_rx_network_setup(struct mse_instance *instance)
 	char *dev_name;
 
 	network = instance->network;
-	dev_name =
+	dev_name = (char *)
 		instance->media->config.network_device.device_name_rx_crf;
 
 	index_network = network->open(dev_name);
@@ -4263,7 +4263,7 @@ int mse_open(int index_media, bool tx)
 		if (!network)
 			continue;
 
-		if (!mse_compare_param_key(network_device->module_name,
+		if (!mse_compare_param_key((char *)network_device->module_name,
 					   network->name))
 			break;
 	}
@@ -4300,9 +4300,9 @@ int mse_open(int index_media, bool tx)
 
 	/* open network adapter */
 	if (tx)
-		dev_name = network_device->device_name_tx;
+		dev_name = (char *)network_device->device_name_tx;
 	else
-		dev_name = network_device->device_name_rx;
+		dev_name = (char *)network_device->device_name_rx;
 
 	ret = network->open(dev_name);
 	if (ret < 0) {

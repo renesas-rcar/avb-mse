@@ -713,7 +713,7 @@ static int mse_packetizer_aaf_depacketize(int index,
 	struct aaf_packetizer *aaf;
 	int payload_size, piece_size = 0;
 	u32 offset;
-	char *buf, tmp_buffer[ETHFRAMEMTU_MAX] = {0};
+	unsigned char *buf, tmp_buffer[ETHFRAMEMTU_MAX] = {0};
 	int aaf_format;
 	int aaf_bit_depth;
 	int aaf_byte_per_ch;

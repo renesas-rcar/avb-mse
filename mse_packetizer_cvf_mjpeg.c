@@ -318,7 +318,7 @@ static ssize_t parse_jpeg_headers(struct cvf_mjpeg_packetizer *cvf_mjpeg,
 				  size_t data_len)
 {
 	struct jpeg_info *jpeg = &cvf_mjpeg->jpeg;
-	ssize_t offset = 0;
+	size_t offset = 0;
 	u8 mk, qid, qlen;
 	int header_len = 0;
 	int ret;
