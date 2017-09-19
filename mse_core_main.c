@@ -91,8 +91,6 @@
 #define MSE_DEBUG_TSTAMPS2 (0) /* very noisy */
 #define MSE_DEBUG_STATE    (0)
 
-#define BUF_SIZE                (32)
-
 #define MSE_TIMEOUT_CLOSE       (msecs_to_jiffies(5000)) /* 5secs */
 #define MSE_TIMEOUT_PACKETIZE   (msecs_to_jiffies(16))   /* 16 msecs */
 

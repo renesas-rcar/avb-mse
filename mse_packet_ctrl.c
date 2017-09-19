@@ -73,9 +73,6 @@
 #include "mse_packet_ctrl.h"
 #include "avtp.h"
 
-#define MSE_DMA_BUF_RECEIVE_SIZE 10
-#define MSE_DMA_BUF_SEND_SIZE 10
-
 #define MSE_PACKET_COUNT_MAX (128)
 
 /* Checking the difference between read_p and write_p */
