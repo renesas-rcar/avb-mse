@@ -2115,7 +2115,6 @@ static void mse_work_depacketize(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	struct mse_packet_ctrl *packet_buffer;
-	struct mse_audio_config *audio;
 	struct mse_audio_info audio_info;
 	struct mse_trans_buffer *buf;
 	int received, ret = 0;
@@ -2155,7 +2154,6 @@ static void mse_work_depacketize(struct work_struct *work)
 	switch (instance->media->type) {
 	case MSE_TYPE_ADAPTER_AUDIO:
 		/* get AVTP packet payload */
-		audio = &instance->media_config.audio;
 		while (received) {
 			/* set start time of period in media clock recovery */
 			if (instance->ptp_timer_handle && !buf->work_length)
@@ -2551,10 +2549,8 @@ static void mse_work_stop_streaming(struct work_struct *work)
 static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 {
 	struct mse_instance *instance;
-	struct mse_adapter *adapter;
 
 	instance = container_of(arg, struct mse_instance, timer);
-	adapter = instance->media;
 
 	/* state is NOT STARTED */
 	if (!mse_state_test(instance, MSE_STATE_STARTED)) {
@@ -2659,7 +2655,6 @@ static void mse_work_crf_send(struct work_struct *work)
 static void mse_work_crf_receive(struct work_struct *work)
 {
 	struct mse_instance *instance;
-	struct mse_adapter *adapter;
 	struct mse_audio_info audio_info;
 	int err, count, i;
 	u64 ptimes[6];
@@ -2668,7 +2663,6 @@ static void mse_work_crf_receive(struct work_struct *work)
 	struct mse_packetizer_ops *crf = &mse_packetizer_crf_tstamp_audio_ops;
 
 	instance = container_of(work, struct mse_instance, wk_crf_receive);
-	adapter = instance->media;
 
 	mse_debug("START\n");
 

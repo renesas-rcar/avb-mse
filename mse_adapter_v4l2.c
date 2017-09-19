@@ -926,7 +926,6 @@ static int mse_adapter_v4l2_try_fmt_vid(struct file *filp,
 	struct v4l2_adapter_fh *vadp_fh = to_v4l2_adapter_fh(filp);
 	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
-	struct video_device *vdev;
 	int fmt_size, vadp_fmt_size;
 
 	mse_debug("START\n");
@@ -938,8 +937,6 @@ static int mse_adapter_v4l2_try_fmt_vid(struct file *filp,
 
 	if (vadp_owner_get(vadp_fh))
 		return -EBUSY;
-
-	vdev = &vadp_dev->vdev;
 
 	if (vadp_dev->type == MSE_TYPE_ADAPTER_VIDEO) {
 		fmtbase = g_formats_video;
