@@ -336,7 +336,7 @@ static int mse_packetizer_crf_audio_depacketize(int index,
 	dest = buffer;
 
 	for (i = 0; i < size / sizeof(u64); i++)
-		*dest++ = be64_to_cpu(*crf_data++);
+		*(dest + i) = be64_to_cpu(*(crf_data + i));
 	*buffer_processed = size;
 
 	return MSE_PACKETIZE_STATUS_COMPLETE;
