@@ -1572,12 +1572,11 @@ static int mse_adapter_v4l2_callback(void *priv, int size)
 	struct v4l2_adapter_buffer *vadp_buf;
 	struct v4l2_adapter_temp_buffer *temp;
 
-	mse_debug("START vq=%p, type=%s\n", vq, v4l2_type_stringfy(vq->type));
-
 	if (!vq) {
 		mse_err("Private data is NULL\n");
 		return -EINVAL;
 	}
+	mse_debug("START vq=%p, type=%s\n", vq, v4l2_type_stringfy(vq->type));
 
 	vadp_dev = vb2_get_drv_priv(vq);
 
