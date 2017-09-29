@@ -499,6 +499,7 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	    (cvf_mjpeg->quant >= MJPEG_QUANT_QTABLE_BIT) &&
 	    (jpeg->max_comp)) {
 		qlen = 0;
+		qheader.mbz = 0;
 		qheader.precision = 0;
 
 		/* make Q header */
