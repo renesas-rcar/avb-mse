@@ -5012,9 +5012,9 @@ static int mse_probe(void)
 	}
 
 	/* W/A for cannot using DMA APIs */
-	if (IS_ENABLED(CONFIG_OF))
+	if (IS_ENABLED(CONFIG_OF)) {
 		of_dma_configure(&mse->pdev->dev, NULL);
-	else
+	} else {
 		/*
 		 * MSE has no dependency to OF, but w/o CONFIG_OF set the
 		 * above function does nothing while at least initializing
@@ -5022,7 +5022,13 @@ static int mse_probe(void)
 		 * 32bit is needed, as struct eavb_entryvec relies on 32bit
 		 * addresses.
 		 */
-		dma_coerce_mask_and_coherent(&mse->pdev->dev, DMA_BIT_MASK(32));
+		err = dma_coerce_mask_and_coherent(&mse->pdev->dev,
+						   DMA_BIT_MASK(32));
+		if (err) {
+			mse_err("Failed to configure DMA masks. ret=%d\n", err);
+			goto error;
+		}
+	}
 
 #if defined(CONFIG_MSE_SYSFS)
 	/* create class */
