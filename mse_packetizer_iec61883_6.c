@@ -694,6 +694,13 @@ static int mse_packetizer_iec61883_6_data_convert(int index,
 		else
 			value <<= -shift;
 
+		/* sign extend only S24_{LE,BE} */
+		if (buf_bit_depth == 24 &&
+		    audio_config->bytes_per_sample == 4) {
+			if (value & 0x800000)
+				value |= 0xFF000000;
+		}
+
 		if (audio_config->is_big_endian) {
 			value = htonl(value);
 			memcpy(buf, ((unsigned char *)&value) +
