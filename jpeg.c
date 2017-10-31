@@ -310,7 +310,7 @@ int jpeg_read_dqt(const u8 *buf,
 
 	while (header_len > 0) {
 		qid = JPEG_GET_DQT_QID(buf[*offset]);
-		if (qid > JPEG_QUANT_NUM) {
+		if (qid >= JPEG_QUANT_NUM) {
 			mse_warn("invalid id. qid=%d\n", qid);
 			return -EPERM;
 		}
