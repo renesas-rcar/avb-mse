@@ -437,7 +437,7 @@ static int mse_packetizer_iec61883_6_calc_cbs(int index,
 	htonl(0x42000000 | (((_data) << 8) & 0xFFFFFF))
 
 #define SET_AM824_MBLA_24BIT_BE(_data) \
-	(0x00000040 | ((_data) << 8))
+	(0x00000040 | ((_data) & 0xFFFFFF00))
 #define SET_AM824_MBLA_16BIT_BE(_data) \
 	(0x00000042 | (((_data) << 8) & 0xFFFF00))
 
