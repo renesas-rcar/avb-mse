@@ -576,6 +576,12 @@ static int copy_bit_to_buffer(unsigned char *dest, int dest_byte,
 	else
 		value <<= -shift;
 
+	/* sign extend only S24_{LE,BE} */
+	if (dest_byte == 4 && src_byte == 3) {
+		if (value & 0x800000)
+			value |= 0xFF000000;
+	}
+
 	if (big_endian) {
 		value = htonl(value);
 		memcpy(dest, ((unsigned char *)&value) + 4 - dest_byte,
