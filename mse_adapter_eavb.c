@@ -721,6 +721,7 @@ static int mse_adapter_eavb_get_link_speed(int index)
 }
 
 static struct mse_adapter_network_ops mse_adapter_eavb_ops = {
+	.owner = THIS_MODULE,
 	.name = "ravb",
 	.type = MSE_TYPE_ADAPTER_NETWORK,
 	.open = mse_adapter_eavb_open,
