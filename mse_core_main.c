@@ -4078,11 +4078,14 @@ static int check_mch_config(struct mse_instance *instance)
 
 static void mse_cleanup_crf_network_interface(struct mse_instance *instance)
 {
+	struct mse_adapter_network_ops *network = instance->network;
+
 	if (instance->crf_index_network < 0)
 		return;
 
 	instance->network->release(instance->crf_index_network);
 	instance->crf_index_network = MSE_INDEX_UNDEFINED;
+	module_put(network->owner);
 
 	mse_packet_ctrl_free(instance->crf_packet_buffer);
 	instance->crf_packet_buffer = NULL;
@@ -4114,9 +4117,18 @@ static int mse_setup_crf_network_interface(struct mse_instance *instance)
 
 	network = instance->network;
 
+	if (!try_module_get(network->owner)) {
+		mse_err("try_module_get() fail\n");
+
+		return -EBUSY;
+	}
+
 	index_network = network->open(dev_name);
-	if (index_network < 0)
+	if (index_network < 0) {
+		module_put(network->owner);
+
 		return index_network;
+	}
 
 	instance->crf_net_config.port_transmit_rate =
 		instance->net_config.port_transmit_rate;
@@ -4127,6 +4139,7 @@ static int mse_setup_crf_network_interface(struct mse_instance *instance)
 					      MSE_PACKET_SIZE_MAX);
 	if (!packet_buffer) {
 		network->release(index_network);
+		module_put(network->owner);
 
 		return -ENOMEM;
 	}
@@ -4143,6 +4156,7 @@ static int mse_setup_crf_network_interface(struct mse_instance *instance)
 	if (ret) {
 		mse_packet_ctrl_free(packet_buffer);
 		network->release(index_network);
+		module_put(network->owner);
 
 		return ret;
 	}
@@ -4155,6 +4169,8 @@ static int mse_setup_crf_network_interface(struct mse_instance *instance)
 
 static void mse_cleanup_ptp(struct mse_instance *instance)
 {
+	struct mse_ptp_ops *p_ops;
+
 	if (instance->ptp_timer_handle) {
 		if (mse_ptp_timer_close(instance->ptp_index,
 					instance->ptp_timer_handle) < 0)
@@ -4164,6 +4180,8 @@ static void mse_cleanup_ptp(struct mse_instance *instance)
 	}
 
 	if (instance->ptp_handle) {
+		p_ops = mse_ptp_find_ops(instance->ptp_index);
+
 		if (mse_ptp_capture_stop(instance->ptp_index,
 					 instance->ptp_handle) < 0)
 			mse_err("cannot mse_ptp_capture_stop()\n");
@@ -4173,6 +4191,7 @@ static void mse_cleanup_ptp(struct mse_instance *instance)
 			mse_err("cannot mse_ptp_close()\n");
 
 		instance->ptp_handle = NULL;
+		module_put(p_ops->owner);
 	}
 }
 
@@ -4181,11 +4200,19 @@ static int mse_setup_ptp(struct mse_instance *instance)
 	int err = 0;
 	void *ptp_handle;
 	void *ptp_timer_handle;
+	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(instance->ptp_index);
+
+	if (!try_module_get(p_ops->owner)) {
+		mse_err("try_module_get() fail\n");
+
+		return -EBUSY;
+	}
 
 	/* ptp open */
 	ptp_handle = mse_ptp_open(instance->ptp_index);
 	if (!ptp_handle) {
 		mse_err("cannot mse_ptp_open()\n");
+		module_put(p_ops->owner);
 
 		return -ENODEV;
 	}
@@ -4204,6 +4231,7 @@ static int mse_setup_ptp(struct mse_instance *instance)
 	if (err < 0) {
 		mse_err("cannot mse_ptp_capture_start()\n");
 		mse_ptp_close(instance->ptp_index, ptp_handle);
+		module_put(p_ops->owner);
 
 		return err;
 	}
@@ -4239,6 +4267,7 @@ static void mse_cleanup_mch(struct mse_instance *instance)
 		mse_err("mch close error(%d).\n", ret);
 
 	instance->mch_index = MSE_INDEX_UNDEFINED;
+	module_put(m_ops->owner);
 }
 
 static int mse_setup_mch(struct mse_instance *instance)
@@ -4258,9 +4287,16 @@ static int mse_setup_mch(struct mse_instance *instance)
 		return -EINVAL;
 	}
 
+	if (!try_module_get(m_ops->owner)) {
+		mse_err("try_module_get() fail\n");
+
+		return -EBUSY;
+	}
+
 	mch_handle = m_ops->open();
 	if (!mch_handle) {
 		mse_err("mch open error.\n");
+		module_put(m_ops->owner);
 
 		return -EINVAL;
 	}
@@ -4377,11 +4413,14 @@ error_create_singlethread_wq:
 
 static void mse_cleanup_network_interface(struct mse_instance *instance)
 {
+	struct mse_adapter_network_ops *network = instance->network;
+
 	if (instance->index_network < 0)
 		return;
 
 	instance->network->release(instance->index_network);
 	instance->index_network = MSE_INDEX_UNDEFINED;
+	module_put(network->owner);
 
 	mse_packet_ctrl_free(instance->packet_buffer);
 	instance->packet_buffer = NULL;
@@ -4433,10 +4472,17 @@ static int mse_setup_network_interface(struct mse_instance *instance,
 		ring_size = MSE_RX_RING_SIZE;
 	}
 
+	if (!try_module_get(network->owner)) {
+		mse_err("try_module_get() fail\n");
+
+		return -EBUSY;
+	}
+
 	/* open network adapter */
 	ret = network->open(dev_name);
 	if (ret < 0) {
 		mse_err("cannot open network adapter ret=%d\n", ret);
+		module_put(network->owner);
 
 		return ret;
 	}
@@ -4447,6 +4493,7 @@ static int mse_setup_network_interface(struct mse_instance *instance,
 	if (link_speed <= 0) {
 		mse_err("Link Down. ret=%ld\n", link_speed);
 		network->release(index_network);
+		module_put(network->owner);
 
 		return -ENETDOWN;
 	}
@@ -4461,6 +4508,7 @@ static int mse_setup_network_interface(struct mse_instance *instance,
 					      MSE_PACKET_SIZE_MAX);
 	if (!packet_buffer) {
 		network->release(index_network);
+		module_put(network->owner);
 
 		return -ENOMEM;
 	}
@@ -4477,6 +4525,7 @@ static int mse_setup_network_interface(struct mse_instance *instance,
 	if (ret) {
 		mse_packet_ctrl_free(packet_buffer);
 		network->release(index_network);
+		module_put(network->owner);
 
 		return ret;
 	}

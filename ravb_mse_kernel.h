@@ -243,6 +243,8 @@ struct mse_adapter_network_ops {
 	char *name;
 	/** @brief type */
 	enum MSE_TYPE type;
+	/** @brief owner info */
+	struct module *owner;
 	/** @brief open function pointer */
 	int (*open)(char *name);
 	/** @brief release function pointer */
@@ -275,6 +277,7 @@ struct mse_adapter_network_ops {
  * @brief registered operations for mch
  */
 struct mch_ops {
+	struct module *owner;
 	void *(*open)(void);
 	int (*close)(void *mch);
 	int (*set_interval)(void *mch, u32 ns);
@@ -289,6 +292,9 @@ struct mch_ops {
  * @brief registered operations for external ptp
  */
 struct mse_ptp_ops {
+	/* owner info */
+	struct module *owner;
+
 	/* PTP Time API */
 	int (*get_time)(u64 *ns);
 
