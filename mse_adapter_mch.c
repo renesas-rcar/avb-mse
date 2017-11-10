@@ -71,6 +71,7 @@
 #include "ravb_mch.h"
 
 static struct mch_ops mch_mse_ops = {
+	.owner = THIS_MODULE,
 	.open = mch_open,
 	.close = mch_close,
 	.set_interval = mch_set_interval,
@@ -79,6 +80,7 @@ static struct mch_ops mch_mse_ops = {
 };
 
 static struct mse_ptp_ops ptp_mse_ops = {
+	.owner = THIS_MODULE,
 	.get_time = mch_ptp_get_time,
 	.open = mch_ptp_open,
 	.close = mch_ptp_close,
