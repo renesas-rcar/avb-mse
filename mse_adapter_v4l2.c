@@ -716,11 +716,6 @@ static int mse_adapter_v4l2_fop_open(struct file *filp)
 
 	mse_debug("START\n");
 
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
-
 	vadp_fh = kzalloc(sizeof(*vadp_fh), GFP_KERNEL);
 	if (!vadp_fh)
 		return -ENOMEM;
@@ -744,11 +739,6 @@ static int mse_adapter_v4l2_fop_release(struct file *filp)
 	struct v4l2_requestbuffers req;
 
 	mse_debug("START\n");
-
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
 
 	if (vadp_owner_is(vadp_fh)) {
 		if (vb2_is_busy(vadp_dev->vdev.queue)) {
@@ -798,11 +788,6 @@ static int mse_adapter_v4l2_querycap(struct file *filp,
 
 	mse_debug("START\n");
 
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
-
 	strlcpy((char *)vcap->driver, MSE_ADAPTER_V4L2_DRIVER_NAME,
 		sizeof(vcap->driver));
 	strlcpy((char *)vcap->card, vadp_dev->vdev.name, sizeof(vcap->card));
@@ -830,11 +815,6 @@ static int mse_adapter_v4l2_enum_fmt_vid(struct file *filp,
 	int fmt_size;
 
 	mse_debug("START fmt->index=%d\n", fmt->index);
-
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
 
 	if (vadp_dev->type == MSE_TYPE_ADAPTER_VIDEO) {
 		fmtbase = g_formats_video;
@@ -930,11 +910,6 @@ static int mse_adapter_v4l2_try_fmt_vid(struct file *filp,
 
 	mse_debug("START\n");
 
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
-
 	if (vadp_owner_get(vadp_fh))
 		return -EBUSY;
 
@@ -994,11 +969,6 @@ static int mse_adapter_v4l2_g_fmt_vid(struct file *filp,
 
 	mse_debug("START\n");
 
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
-
 	*pix = vadp_dev->format;
 
 	mse_debug("END\n");
@@ -1017,11 +987,6 @@ static int mse_adapter_v4l2_s_fmt_vid(struct file *filp,
 	struct vb2_queue *vq;
 
 	mse_debug("START\n");
-
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
 
 	if (vadp_owner_get(vadp_fh))
 		return -EBUSY;
@@ -1059,11 +1024,6 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 	struct v4l2_adapter_device *vadp_dev = vadp_fh->dev;
 
 	mse_debug("START\n");
-
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
 
 	if (vadp_owner_get(vadp_fh))
 		return -EBUSY;
@@ -1109,11 +1069,6 @@ static int mse_adapter_v4l2_g_parm(struct file *filp,
 
 	mse_debug("START\n");
 
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
-
 	if (V4L2_TYPE_IS_OUTPUT(sp->type)) {
 		fract = &sp->parm.output.timeperframe;
 		sp->parm.output.outputmode = 0;
@@ -1139,11 +1094,6 @@ static int mse_adapter_v4l2_s_parm(struct file *filp,
 	struct v4l2_fract *fract;
 
 	mse_debug("START\n");
-
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
 
 	if (vadp_owner_get(vadp_fh))
 		return -EBUSY;
@@ -1172,11 +1122,6 @@ static int mse_adapter_v4l2_enum_framesizes(
 	int i, vadp_fmt_size;
 
 	mse_debug("START fsize->index=%d\n", fsize->index);
-
-	if (!vadp_dev) {
-		mse_err("Failed video_drvdata()\n");
-		return -EINVAL;
-	}
 
 	if (vadp_dev->type == MSE_TYPE_ADAPTER_VIDEO) {
 		vadp_fmtbase = g_mse_adapter_v4l2_fmt_sizes_video;
@@ -1244,11 +1189,6 @@ static int mse_adapter_v4l2_queue_setup(struct vb2_queue *vq,
 
 	mse_debug("START\n");
 
-	if (!vadp_dev) {
-		mse_err("Failed vb2_get_drv_priv()\n");
-		return -EINVAL;
-	}
-
 	mse_debug("vq->num_buffers=%d, nbuffers=%d\n",
 		  vq->num_buffers, *nbuffers);
 	if (vq->num_buffers + *nbuffers < NUM_BUFFERS)
@@ -1311,11 +1251,6 @@ static int mse_adapter_v4l2_buf_prepare(struct vb2_buffer *vb)
 
 	mse_debug("START vb=%p\n", vb2_plane_vaddr(vb, 0));
 
-	if (!vadp_dev) {
-		mse_err("Failed vb2_get_drv_priv()\n");
-		return -EINVAL;
-	}
-
 	plane_size = vb2_plane_size(&vbuf->vb2_buf, 0);
 	if (plane_size < vadp_dev->format.sizeimage) {
 		mse_err("buffer too small (%lu < %u)\n",
@@ -1336,11 +1271,6 @@ static void mse_adapter_v4l2_stop_streaming(struct vb2_queue *vq)
 	bool wait_for_buffers;
 
 	mse_debug("START\n");
-
-	if (!vadp_dev) {
-		mse_err("Failed vb2_get_drv_priv()\n");
-		return;
-	}
 
 	err = mse_stop_streaming(vadp_dev->index_instance);
 	if (err < 0) {
@@ -1408,11 +1338,6 @@ static void prepare_stream_buffer(struct vb2_queue *vq)
 	int ret = 0;
 
 	mse_debug("START vq=%p, type=%s\n", vq, v4l2_type_stringfy(vq->type));
-
-	if (!vadp_dev) {
-		mse_err("Failed vb2_get_drv_priv()\n");
-		return;
-	}
 
 	vadp_buf = list_first_entry_or_null(&vadp_dev->buf_list,
 					    struct v4l2_adapter_buffer,
@@ -1483,11 +1408,6 @@ static int set_stream_buffer(struct vb2_queue *vq)
 	unsigned long flags;
 
 	mse_debug("START vq=%p, type=%s\n", vq, v4l2_type_stringfy(vq->type));
-
-	if (!vadp_dev) {
-		mse_err("Failed vb2_get_drv_priv()\n");
-		return -EINVAL;
-	}
 
 	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 
@@ -1580,11 +1500,6 @@ static int mse_adapter_v4l2_callback(void *priv, int size)
 
 	vadp_dev = vb2_get_drv_priv(vq);
 
-	if (!vadp_dev) {
-		mse_err("vadp_dev is NULL\n");
-		return -EINVAL;
-	}
-
 	if (size < 0 && size != -EAGAIN) {
 		vb2_queue_error(vq);
 		return_all_buffers(vadp_dev, VB2_BUF_STATE_ERROR);
@@ -1645,11 +1560,6 @@ static void mse_adapter_v4l2_buf_queue(struct vb2_buffer *vb)
 	mse_debug("START vb=%p type=%s\n",
 		  vb2_plane_vaddr(vb, 0),
 		  v4l2_type_stringfy(vb->vb2_queue->type));
-
-	if (!vadp_dev) {
-		mse_err("Failed vb2_get_drv_priv()\n");
-		return;
-	}
 
 	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 
@@ -1761,11 +1671,6 @@ static int mse_adapter_v4l2_start_streaming(struct vb2_queue *vq,
 
 	mse_debug("START vq=%p, type=%s count=%d\n",
 		  vq, v4l2_type_stringfy(vq->type), count);
-
-	if (!vadp_dev) {
-		mse_err("Failed vb2_get_drv_priv()\n");
-		return -EINVAL;
-	}
 
 	spin_lock_irqsave(&vadp_dev->lock_buf_list, flags);
 	prepare_stream_buffer(vq);
@@ -1992,7 +1897,7 @@ static void unregister_mse_core(struct v4l2_adapter_device *vadp_dev)
 		mse_err("Failed mse_unregister_adapter_media()\n");
 }
 
-static int mse_adapter_v4l2_free(int dev_num)
+static void mse_adapter_v4l2_free(int dev_num)
 {
 	mse_debug("START device number=%d\n", dev_num);
 
@@ -2000,8 +1905,6 @@ static int mse_adapter_v4l2_free(int dev_num)
 	mse_adapter_v4l2_cleanup(&g_v4l2_adapter[dev_num]);
 
 	mse_debug("END\n");
-
-	return 0;
 }
 
 static int __init mse_adapter_v4l2_init(void)
