@@ -1171,19 +1171,11 @@ static int mse_adapter_v4l2_enum_framesizes(
 
 static int mse_adapter_v4l2_callback(void *priv, int size);
 
-#if KERNEL_VERSION(4, 7, 0) <= LINUX_VERSION_CODE
 static int mse_adapter_v4l2_queue_setup(struct vb2_queue *vq,
 					unsigned int *nbuffers,
 					unsigned int *nplanes,
 					unsigned int sizes[],
 					struct device *alloc_devs[])
-#else
-static int mse_adapter_v4l2_queue_setup(struct vb2_queue *vq,
-					unsigned int *nbuffers,
-					unsigned int *nplanes,
-					unsigned int sizes[],
-					void *alloc_ctxs[])
-#endif
 {
 	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
 
