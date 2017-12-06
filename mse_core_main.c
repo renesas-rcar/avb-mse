@@ -726,7 +726,7 @@ static bool compare_pcr(u64 a, u64 b)
 
 #if !(defined(CONFIG_MSE_SYSFS) || defined(CONFIG_MSE_IOCTL))
 static inline int mse_create_config_device(struct mse_adapter *adapter) { return 0; }
-static inline int mse_delete_config_device(struct mse_adapter *adapter) { return 0; }
+static inline void mse_delete_config_device(struct mse_adapter *adapter) { return; }
 #else
 static void mse_device_release(struct device *dev)
 {
@@ -766,14 +766,12 @@ static int mse_create_config_device(struct mse_adapter *adapter)
 	return 0;
 }
 
-static int mse_delete_config_device(struct mse_adapter *adapter)
+static void mse_delete_config_device(struct mse_adapter *adapter)
 {
 	mse_debug("START\n");
 
 	mse_ioctl_unregister(adapter->index);
 	device_unregister(&adapter->device);
-
-	return 0;
 }
 #endif
 
@@ -2631,11 +2629,19 @@ static void mse_work_crf_send(struct work_struct *work)
 			tsize,
 			instance->crf_packet_buffer);
 
+		if (err < 0)
+			break;
+
 		/* send packets */
 		err = mse_packet_ctrl_send_packet(
 			instance->crf_index_network,
 			instance->crf_packet_buffer,
 			instance->network);
+
+		if (err < 0) {
+			mse_err("send error %d\n", err);
+			break;
+		}
 
 		/* state is RUNNABLE */
 	} while (mse_state_test(instance, MSE_STATE_RUNNABLE));
@@ -4172,9 +4178,8 @@ static void mse_cleanup_ptp(struct mse_instance *instance)
 	struct mse_ptp_ops *p_ops;
 
 	if (instance->ptp_timer_handle) {
-		if (mse_ptp_timer_close(instance->ptp_index,
-					instance->ptp_timer_handle) < 0)
-			mse_err("cannot mse_ptp_timer_close()\n");
+		mse_ptp_timer_close(instance->ptp_index,
+				    instance->ptp_timer_handle);
 
 		instance->ptp_timer_handle = NULL;
 	}
@@ -4182,13 +4187,11 @@ static void mse_cleanup_ptp(struct mse_instance *instance)
 	if (instance->ptp_handle) {
 		p_ops = mse_ptp_find_ops(instance->ptp_index);
 
-		if (mse_ptp_capture_stop(instance->ptp_index,
-					 instance->ptp_handle) < 0)
-			mse_err("cannot mse_ptp_capture_stop()\n");
+		mse_ptp_capture_stop(instance->ptp_index,
+				     instance->ptp_handle);
 
-		if (mse_ptp_close(instance->ptp_index,
-				  instance->ptp_handle) < 0)
-			mse_err("cannot mse_ptp_close()\n");
+		mse_ptp_close(instance->ptp_index,
+			      instance->ptp_handle);
 
 		instance->ptp_handle = NULL;
 		module_put(p_ops->owner);
@@ -4256,15 +4259,12 @@ static int mse_setup_ptp(struct mse_instance *instance)
 static void mse_cleanup_mch(struct mse_instance *instance)
 {
 	struct mch_ops *m_ops = NULL;
-	int ret;
 
 	if (instance->mch_index < 0)
 		return;
 
 	m_ops = mse->mch_table[instance->mch_index];
-	ret = m_ops->close(instance->mch_handle);
-	if (ret < 0)
-		mse_err("mch close error(%d).\n", ret);
+	m_ops->close(instance->mch_handle);
 
 	instance->mch_index = MSE_INDEX_UNDEFINED;
 	module_put(m_ops->owner);
@@ -5215,7 +5215,7 @@ error:
 /*
  * cleanup MSE API
  */
-static int mse_remove(void)
+static void mse_remove(void)
 {
 	/* release ioctl device */
 	mse_ioctl_exit(major, mse_instance_max);
@@ -5228,8 +5228,6 @@ static int mse_remove(void)
 	kfree(mse);
 
 	mse_debug("success\n");
-
-	return 0;
 }
 
 static int __init mse_module_init(void)

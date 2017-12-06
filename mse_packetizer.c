@@ -316,13 +316,11 @@ u32 mse_packetizer_calc_audio_offset(
 	return sample_offset;
 }
 
-int mse_packetizer_stats_init(struct mse_packetizer_stats *stats)
+void mse_packetizer_stats_init(struct mse_packetizer_stats *stats)
 {
 	stats->seq_num_next = SEQNUM_INIT;
 	stats->seq_num_err = SEQNUM_INIT;
 	stats->seq_num_err_total = 0;
-
-	return 0;
 }
 
 int mse_packetizer_stats_seqnum(struct mse_packetizer_stats *stats, u8 seq_num)
@@ -358,13 +356,11 @@ int mse_packetizer_stats_seqnum(struct mse_packetizer_stats *stats, u8 seq_num)
 	return ret;
 }
 
-int mse_packetizer_stats_report(struct mse_packetizer_stats *stats)
+void mse_packetizer_stats_report(struct mse_packetizer_stats *stats)
 {
 	if (stats->seq_num_err_total)
 		mse_err("sequence number discontinuity total=%llu\n",
 			stats->seq_num_err_total);
-
-	return 0;
 }
 
 int mse_packetizer_open(enum MSE_PACKETIZER id)

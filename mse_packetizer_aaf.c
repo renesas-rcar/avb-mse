@@ -479,9 +479,9 @@ static int mse_packetizer_aaf_calc_cbs(int index,
 			cbs);
 }
 
-static int copy_bit_to_payload(unsigned char *dest, int dest_type,
-			       unsigned char *src, int src_byte, int shift,
-			       bool big_endian)
+static void copy_bit_to_payload(unsigned char *dest, int dest_type,
+				unsigned char *src, int src_byte, int shift,
+				bool big_endian)
 {
 	unsigned int value;
 	int i;
@@ -514,19 +514,16 @@ static int copy_bit_to_payload(unsigned char *dest, int dest_type,
 		dest[3] = (value & 0x000000FF);
 		break;
 	default:
-		mse_err("format error %d\n", dest_type);
-		return -1;
+		break;
 	}
-
-	return 0;
 }
 
-static int copy_payload(unsigned char *payload,
-			int *payload_stored,
-			unsigned char *buffer,
-			int *buffer_stored,
-			struct aaf_packetizer *aaf,
-			int count)
+static void copy_payload(unsigned char *payload,
+			 int *payload_stored,
+			 unsigned char *buffer,
+			 int *buffer_stored,
+			 struct aaf_packetizer *aaf,
+			 int count)
 {
 	int i;
 
@@ -546,13 +543,11 @@ static int copy_payload(unsigned char *payload,
 		*payload_stored += aaf->avtp_bytes_per_ch;
 		*buffer_stored += aaf->audio_config.bytes_per_sample;
 	}
-
-	return 0;
 }
 
-static int copy_bit_to_buffer(unsigned char *dest, int dest_byte,
-			      unsigned char *src, int src_byte, int shift,
-			      bool big_endian)
+static void copy_bit_to_buffer(unsigned char *dest, int dest_byte,
+			       unsigned char *src, int src_byte, int shift,
+			       bool big_endian)
 {
 	unsigned int value;
 
@@ -567,8 +562,7 @@ static int copy_bit_to_buffer(unsigned char *dest, int dest_byte,
 		value = src[0] << 24 | src[1] << 16 | src[2] << 8 | src[3];
 		break;
 	default:
-		mse_err("format error %d\n", src_byte);
-		return -1;
+		break;
 	}
 
 	if (shift > 0)
@@ -589,16 +583,14 @@ static int copy_bit_to_buffer(unsigned char *dest, int dest_byte,
 	} else {
 		memcpy(dest, &value, dest_byte);
 	}
-
-	return 0;
 }
 
-static int copy_buffer(unsigned char *buffer,
-		       int *buffer_stored,
-		       unsigned char *payload,
-		       int aaf_byte_per_ch,
-		       struct aaf_packetizer *aaf,
-		       int count)
+static void copy_buffer(unsigned char *buffer,
+			int *buffer_stored,
+			unsigned char *payload,
+			int aaf_byte_per_ch,
+			struct aaf_packetizer *aaf,
+			int count)
 {
 	int i;
 	int shift;
@@ -623,8 +615,6 @@ static int copy_buffer(unsigned char *buffer,
 		*buffer_stored += aaf->audio_config.bytes_per_sample;
 		payload += aaf_byte_per_ch;
 	}
-
-	return 0;
 }
 
 static int mse_packetizer_aaf_packetize(int index,
@@ -829,8 +819,8 @@ static int mse_packetizer_aaf_depacketize(int index,
 	return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
-int mse_packetizer_aaf_set_start_time(int index,
-				      struct mse_start_time *start_time)
+static int mse_packetizer_aaf_set_start_time(int index,
+					     struct mse_start_time *start_time)
 {
 	struct aaf_packetizer *aaf;
 

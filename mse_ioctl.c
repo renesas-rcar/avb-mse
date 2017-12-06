@@ -69,6 +69,7 @@
 #include "ravb_mse_kernel.h"
 #include "mse_config.h"
 #include "mse_packetizer.h"
+#include "mse_ioctl_local.h"
 
 struct mse_ioctl_table {
 	int index;

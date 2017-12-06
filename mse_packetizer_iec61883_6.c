@@ -545,7 +545,6 @@ static void mse_packetizer_iec61883_6_set_payload(int index,
 			return;
 		}
 	}
-	return;
 }
 
 static int mse_packetizer_iec61883_6_packetize(int index,
@@ -803,10 +802,12 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 	mse_packetizer_stats_seqnum(&iec61883_6->stats,
 				    avtp_get_sequence_num(packet));
 
-	mse_packetizer_iec61883_6_data_convert(index,
-					       data_size - piece_size,
-					       buf,
-					       packet);
+	ret = mse_packetizer_iec61883_6_data_convert(index,
+						     data_size - piece_size,
+						     buf,
+						     packet);
+	if (ret < 0)
+		return ret;
 
 	if (*buffer_processed + data_size > buffer_size) {
 		iec61883_6->piece_f = true;
@@ -830,8 +831,9 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 	return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
-int mse_packetizer_iec61883_6_set_start_time(int index,
-					     struct mse_start_time *start_time)
+static int mse_packetizer_iec61883_6_set_start_time(
+					int index,
+					struct mse_start_time *start_time)
 {
 	struct iec61883_6_packetizer *iec61883_6;
 

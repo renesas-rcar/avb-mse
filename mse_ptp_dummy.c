@@ -69,6 +69,7 @@
 #include <linux/hrtimer.h>
 
 #include "ravb_mse_kernel.h"
+#include "mse_ptp.h"
 
 #define MAX_PTP_DEVICES    10
 #define MAX_TIMESTAMPS     100
@@ -101,7 +102,7 @@ static struct ptp_device *g_ptp_devices[MAX_PTP_DEVICES];
 DECLARE_BITMAP(ptp_dummy_device_map, MAX_PTP_DEVICES);
 DEFINE_SPINLOCK(ptp_dummy_lock);
 
-static int enqueue(struct ptp_queue *que, u64 ns)
+static void enqueue(struct ptp_queue *que, u64 ns)
 {
 	mse_debug("START head=%d, tail=%d\n", que->head, que->tail);
 
@@ -110,8 +111,6 @@ static int enqueue(struct ptp_queue *que, u64 ns)
 
 	que->timestamps[que->tail] = ns;
 	que->tail = q_next(que, tail);
-
-	return 0;
 }
 
 static int dequeue(struct ptp_queue *que, u64 *ns)
