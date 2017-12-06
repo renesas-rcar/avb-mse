@@ -510,11 +510,8 @@ static int mse_adapter_eavb_send(int index,
 				eavb->ravb.handle,
 				eavb->entry,
 				num_packets - eavb->num_entry + eavb->unentry);
-		if (wret2 < 0) {
-			mse_err("write error %zd\n", wret);
-			return wret2;
-		}
-		wret += wret2;
+		if (wret2 >= 0)
+			wret += wret2;
 	}
 
 	if (wret != num_packets) {
@@ -597,9 +594,6 @@ static int mse_adapter_eavb_receive_prepare(int index,
 			       eavb->entry,
 			       MSE_EAVB_ADAPTER_ENTRY_MAX);
 	if (ret != MSE_EAVB_ADAPTER_ENTRY_MAX) {
-		mse_err("cannot entry packet %zu/%d\n",
-			ret, MSE_EAVB_ADAPTER_ENTRY_MAX);
-
 		avb_print_entrynum(eavb);
 		if (ret < 0)
 			mse_err("write error %zd\n", ret);
