@@ -64,14 +64,14 @@
 
 #if defined(CONFIG_MSE_IOCTL)
 int mse_ioctl_register(int index);
-int mse_ioctl_unregister(int index);
+void mse_ioctl_unregister(int index);
 int mse_ioctl_init(int major, int mse_instance_max);
-int mse_ioctl_exit(int major, int mse_instance_max);
+void mse_ioctl_exit(int major, int mse_instance_max);
 #else
 static inline int mse_ioctl_register(int index) { return 0; }
-static inline int mse_ioctl_unregister(int index) { return 0; }
+static inline void mse_ioctl_unregister(int index) {}
 static inline int mse_ioctl_init(int major, int mse_instance_max) { return 0; }
-static inline int mse_ioctl_exit(int major, int mse_instance_max) { return 0; }
+static inline void mse_ioctl_exit(int major, int mse_instance_max) {}
 #endif
 
 #endif /* __MSE_IOCTL_LOCAL_H__ */

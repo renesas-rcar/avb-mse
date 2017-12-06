@@ -209,9 +209,9 @@ u32 mse_packetizer_calc_audio_offset(u32 avtp_timestamp,
 				     int sample_byte,
 				     int channels,
 				     size_t buffer_size);
-int mse_packetizer_stats_init(struct mse_packetizer_stats *stats);
+void mse_packetizer_stats_init(struct mse_packetizer_stats *stats);
 int mse_packetizer_stats_seqnum(struct mse_packetizer_stats *stats, u8 seq_num);
-int mse_packetizer_stats_report(struct mse_packetizer_stats *stats);
+void mse_packetizer_stats_report(struct mse_packetizer_stats *stats);
 int mse_packetizer_open(enum MSE_PACKETIZER id);
 int mse_packetizer_release(enum MSE_PACKETIZER id, int index);
 
