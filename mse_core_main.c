@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -894,6 +894,7 @@ static void mse_get_default_config(struct mse_instance *instance,
  * PTP related functions
  */
 static struct mse_ptp_ops mse_ptp_ops_dummy = {
+	.owner = NULL,
 	.get_time = mse_ptp_get_time_dummy,
 	.open = mse_ptp_open_dummy,
 	.close = mse_ptp_close_dummy,
@@ -906,23 +907,40 @@ static struct mse_ptp_ops mse_ptp_ops_dummy = {
 	.timer_cancel = mse_ptp_timer_cancel_dummy,
 };
 
-static int mse_ptp_get_first_index(void)
-{
-	int i;
-
-	for (i = 0; i < MSE_PTP_MAX; i++)
-		if (mse->ptp_table[i])
-			return i;
-
-	return MSE_INDEX_UNDEFINED; /* not found, use dummy ops */
-}
-
 static struct mse_ptp_ops *mse_ptp_find_ops(int index)
 {
 	if ((index < 0) || (index >= MSE_PTP_MAX))
 		return &mse_ptp_ops_dummy;
 	else
 		return mse->ptp_table[index];
+}
+
+static void mse_ptp_put_index(int index)
+{
+	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
+
+	module_put(p_ops->owner);
+}
+
+static int mse_ptp_get_first_index(void)
+{
+	int i;
+	struct mse_ptp_ops *p_ops;
+
+	for (i = 0; i < MSE_PTP_MAX; i++) {
+		if (mse->ptp_table[i]) {
+			p_ops = mse_ptp_find_ops(i);
+			if (!try_module_get(p_ops->owner)) {
+				mse_err("try_module_get() fail\n");
+
+				return MSE_INDEX_UNDEFINED;
+			}
+
+			return i;
+		}
+	}
+
+	return MSE_INDEX_UNDEFINED; /* not found, use dummy ops */
 }
 
 static int mse_ptp_get_time(int index, u64 *ns)
@@ -4175,7 +4193,6 @@ static int mse_setup_crf_network_interface(struct mse_instance *instance)
 
 static void mse_cleanup_ptp(struct mse_instance *instance)
 {
-	struct mse_ptp_ops *p_ops;
 
 	if (instance->ptp_timer_handle) {
 		mse_ptp_timer_close(instance->ptp_index,
@@ -4185,8 +4202,6 @@ static void mse_cleanup_ptp(struct mse_instance *instance)
 	}
 
 	if (instance->ptp_handle) {
-		p_ops = mse_ptp_find_ops(instance->ptp_index);
-
 		mse_ptp_capture_stop(instance->ptp_index,
 				     instance->ptp_handle);
 
@@ -4194,7 +4209,6 @@ static void mse_cleanup_ptp(struct mse_instance *instance)
 			      instance->ptp_handle);
 
 		instance->ptp_handle = NULL;
-		module_put(p_ops->owner);
 	}
 }
 
@@ -4203,19 +4217,11 @@ static int mse_setup_ptp(struct mse_instance *instance)
 	int err = 0;
 	void *ptp_handle;
 	void *ptp_timer_handle;
-	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(instance->ptp_index);
-
-	if (!try_module_get(p_ops->owner)) {
-		mse_err("try_module_get() fail\n");
-
-		return -EBUSY;
-	}
 
 	/* ptp open */
 	ptp_handle = mse_ptp_open(instance->ptp_index);
 	if (!ptp_handle) {
 		mse_err("cannot mse_ptp_open()\n");
-		module_put(p_ops->owner);
 
 		return -ENODEV;
 	}
@@ -4234,7 +4240,6 @@ static int mse_setup_ptp(struct mse_instance *instance)
 	if (err < 0) {
 		mse_err("cannot mse_ptp_capture_start()\n");
 		mse_ptp_close(instance->ptp_index, ptp_handle);
-		module_put(p_ops->owner);
 
 		return err;
 	}
@@ -4589,6 +4594,7 @@ static void mse_resource_release(struct mse_instance *instance)
 
 	mse_cleanup_ptp(instance);
 
+	mse_ptp_put_index(instance->ptp_index);
 	instance->ptp_index = MSE_INDEX_UNDEFINED;
 
 	mse_release_crf_packetizer(instance);
