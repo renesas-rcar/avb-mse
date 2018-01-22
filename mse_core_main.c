@@ -1871,15 +1871,8 @@ static void mse_work_packetize(struct work_struct *work)
 	mse_debug("trans size=%d buffer=%p buffer_size=%zu\n",
 		  trans_size, buf->buffer, buf->buffer_size);
 
-	if (!(trans_size > 0)) {
-		/* no data to process */
-		atomic_inc(&instance->done_buf_cnt);
-
-		if (!instance->timer_interval)
-			queue_work(instance->wq_packet, &instance->wk_callback);
-
+	if (trans_size <= 0) /* no data to process */
 		return;
-	}
 
 	/* make AVTP packet with one timestamp */
 	if (!IS_MSE_TYPE_AUDIO(instance->media->type)) {
@@ -1988,9 +1981,7 @@ static void mse_work_packetize(struct work_struct *work)
 	if (instance->f_continue) {
 		queue_work(instance->wq_packet, &instance->wk_packetize);
 	} else {
-		if (ret != -EAGAIN)
-			atomic_inc(&instance->done_buf_cnt);
-
+		atomic_inc(&instance->done_buf_cnt);
 		if (!instance->timer_interval)
 			queue_work(instance->wq_packet, &instance->wk_callback);
 	}
