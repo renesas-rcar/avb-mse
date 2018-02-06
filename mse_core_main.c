@@ -2314,8 +2314,14 @@ static void mse_work_callback(struct work_struct *work)
 				       struct mse_trans_buffer, list);
 
 	/* no buffer to callback */
-	if (!buf)
+	if (!buf) {
+		/* state is STOPPING */
+		if (mse_state_test(instance, MSE_STATE_STOPPING))
+			queue_work(instance->wq_packet,
+				   &instance->wk_stop_streaming);
+
 		return; /* skip work */
+	}
 
 	/* for capture with timer_interval */
 	if (instance->timer_interval && !instance->tx)
@@ -3142,7 +3148,6 @@ static void mpeg2ts_buffer_flush(struct mse_instance *instance)
 	/* add mpeg2ts buffer to proc buffer list*/
 	mpeg2ts->work_length = 0;
 	list_add_tail(&mpeg2ts->list, &instance->proc_buf_list);
-	atomic_inc(&instance->trans_buf_cnt);
 	instance->mpeg2ts_buffer_idx = (idx + 1) % MSE_MPEG2TS_BUF_NUM;
 
 	mpeg2ts_adjust_pcr(instance, mpeg2ts->buffer_size);
