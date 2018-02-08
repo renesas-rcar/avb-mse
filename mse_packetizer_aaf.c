@@ -95,6 +95,8 @@ struct aaf_packetizer {
 	int avtp_packet_size;
 	int sample_per_packet;
 	int frame_interval_time;
+	bool has_valid_avtp_timestamp;
+	u32 last_avtp_timestamp;
 	enum AVTP_AAF_FORMAT avtp_format;
 	int avtp_bytes_per_ch;
 	int shift;
@@ -281,6 +283,8 @@ static int mse_packetizer_aaf_open(void)
 	aaf->piece_data_len = 0;
 	aaf->start_time = 0;
 	aaf->f_need_calc_offset = false;
+	aaf->has_valid_avtp_timestamp = false;
+	aaf->last_avtp_timestamp = 0;
 
 	mse_packetizer_stats_init(&aaf->stats);
 
@@ -321,6 +325,8 @@ static int mse_packetizer_aaf_packet_init(int index)
 	aaf->piece_data_len = 0;
 	aaf->start_time = 0;
 	aaf->f_need_calc_offset = false;
+	aaf->has_valid_avtp_timestamp = false;
+	aaf->last_avtp_timestamp = 0;
 
 	mse_packetizer_stats_init(&aaf->stats);
 
@@ -719,6 +725,8 @@ static int mse_packetizer_aaf_depacketize(int index,
 	int channels;
 	int count, stored;
 	int ret;
+	bool tv;
+	u32 avtp_timestamp;
 
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
@@ -760,9 +768,23 @@ static int mse_packetizer_aaf_depacketize(int index,
 	aaf->frame_interval_time = div_u64(NSEC_SCALE * aaf->sample_per_packet,
 					   aaf_sample_rate);
 
+	tv = avtp_get_tv(packet);
+	avtp_timestamp = avtp_get_timestamp(packet);
+
+	/* check timestamp valid, if false interpolate value */
+	if (tv) {
+		aaf->has_valid_avtp_timestamp = true;
+	} else if (aaf->has_valid_avtp_timestamp) {
+		avtp_timestamp = aaf->last_avtp_timestamp +
+			aaf->frame_interval_time;
+	} else if (aaf->f_need_calc_offset) {
+		return MSE_PACKETIZE_STATUS_DISCARD;
+	}
+	aaf->last_avtp_timestamp = avtp_timestamp;
+
 	if (aaf->f_need_calc_offset) {
 		ret = mse_packetizer_calc_audio_offset(
-			avtp_get_timestamp(packet),
+			avtp_timestamp,
 			aaf->start_time,
 			aaf_sample_rate,
 			aaf_byte_per_ch,
@@ -816,7 +838,7 @@ static int mse_packetizer_aaf_depacketize(int index,
 	else
 		*buffer_processed += stored;
 
-	*timestamp = avtp_get_timestamp(packet);
+	*timestamp = avtp_timestamp;
 
 	/* buffer over check */
 	if (*buffer_processed >= buffer_size)
@@ -847,6 +869,8 @@ static int mse_packetizer_aaf_set_need_calc_offset(int index)
 
 	aaf = &aaf_packetizer_table[index];
 	aaf->f_need_calc_offset = true;
+	aaf->has_valid_avtp_timestamp = false;
+	aaf->last_avtp_timestamp = 0;
 
 	return 0;
 }
