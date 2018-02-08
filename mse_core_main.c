@@ -143,7 +143,7 @@
 #define MSE_DECODE_BUFFER_NUM (8)
 #define MAX_DECODE_SIZE       (8192) /* ALSA Period byte size */
 
-#define MSE_TRANS_BUF_NUM (3) /* size of transmission buffer array */
+#define MSE_TRANS_BUF_NUM (5) /* size of transmission buffer array */
 #define MSE_TRANS_BUF_ACCEPTABLE (MSE_TRANS_BUF_NUM - 1)
 
 #define MSE_MPEG2TS_BUF_NUM  (MSE_TRANS_BUF_NUM)
