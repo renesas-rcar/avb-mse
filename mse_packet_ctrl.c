@@ -81,6 +81,11 @@ int mse_packet_ctrl_check_packet_remain(struct mse_packet_ctrl *dma)
 	return (dma->write_p + dma->size - dma->read_p) % dma->size;
 }
 
+void mse_packet_ctrl_discard_packet(struct mse_packet_ctrl *dma)
+{
+	dma->read_p = dma->write_p;
+}
+
 struct mse_packet_ctrl *mse_packet_ctrl_alloc(struct device *dev,
 					      int max_packet,
 					      int max_packet_size)
@@ -391,7 +396,7 @@ int mse_packet_ctrl_take_out_packet(int index,
 	*timestamps_stored = 0;
 
 	received = mse_packet_ctrl_check_packet_remain(dma);
-	while (received-- > 0) {
+	while (received-- > 0 && *timestamps_stored < timestamps_size) {
 		ret = ops->depacketize(index,
 				       data,
 				       size,
@@ -404,14 +409,16 @@ int mse_packet_ctrl_take_out_packet(int index,
 
 		dma->read_p = (dma->read_p + 1) % dma->size;
 
+		if (ret == MSE_PACKETIZE_STATUS_DISCARD)
+			continue;
+
 		if (ret < 0)
 			return -EIO;
 
 		pcount++;
-		if (ret >= 0 && *timestamps_stored < timestamps_size) {
-			*timestamps++ = (u64)recv_time;
-			(*timestamps_stored)++;
-		}
+
+		*timestamps++ = (u64)recv_time;
+		(*timestamps_stored)++;
 
 		if (ret == MSE_PACKETIZE_STATUS_COMPLETE)
 			break;

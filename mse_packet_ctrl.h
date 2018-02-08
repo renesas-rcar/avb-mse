@@ -122,5 +122,6 @@ int mse_packet_ctrl_take_out_packet_crf(int index,
 					u64 *timestamps,
 					int timestamps_size,
 					struct mse_packet_ctrl *dma);
+void mse_packet_ctrl_discard_packet(struct mse_packet_ctrl *dma);
 
 #endif /* __MSE_PACKET_CTRL_H__ */
