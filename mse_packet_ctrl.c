@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -144,8 +144,8 @@ int mse_packet_ctrl_make_packet(int index,
 				size_t size,
 				int ptp_clock,
 				int *current_timestamp,
-				int tstamp_size,
-				unsigned int *tstamp,
+				int timestamps_size,
+				u64 *timestamps,
 				struct mse_packet_ctrl *dma,
 				struct mse_packetizer_ops *ops,
 				size_t *processed)
@@ -170,17 +170,17 @@ int mse_packet_ctrl_make_packet(int index,
 		}
 		memset(dma->packet_table[dma->write_p].vaddr, 0,
 		       AVTP_FRAME_SIZE_MIN);
-		if (tstamp_size == 1) {               /* video */
-			timestamp = tstamp[0];
+		if (timestamps_size == 1) {               /* video */
+			timestamp = timestamps[0];
 		} else {                              /* audio */
-			if (*current_timestamp < tstamp_size) {
-				timestamp = tstamp[(*current_timestamp)++];
-			} else if (*current_timestamp == tstamp_size) {
+			if (*current_timestamp < timestamps_size) {
+				timestamp = timestamps[(*current_timestamp)++];
+			} else if (*current_timestamp == timestamps_size) {
 				timestamp = 0;      /* dummy, not used */
 				(*current_timestamp)++;
 			} else {
 				mse_err("not enough timestamp %d\n",
-					tstamp_size);
+					timestamps_size);
 				return -EINVAL;
 			}
 		}
@@ -213,7 +213,7 @@ int mse_packet_ctrl_make_packet(int index,
 
 int mse_packet_ctrl_make_packet_crf(int index,
 				    u64 *timestamps,
-				    int count,
+				    int timestamps_size,
 				    struct mse_packet_ctrl *dma)
 {
 	int ret = MSE_PACKETIZE_STATUS_CONTINUE;
@@ -230,12 +230,12 @@ int mse_packet_ctrl_make_packet_crf(int index,
 	memset(dma->packet_table[dma->write_p].vaddr, 0, AVTP_FRAME_SIZE_MIN);
 
 	/* CRF packetizer */
-	ret = mse_packetizer_crf_tstamp_audio_ops.packetize(
+	ret = mse_packetizer_crf_timestamp_audio_ops.packetize(
 		index,
 		dma->packet_table[dma->write_p].vaddr,
 		&packet_size,
 		timestamps,
-		count * sizeof(*timestamps),
+		timestamps_size * sizeof(*timestamps),
 		NULL,
 		NULL);
 
@@ -372,9 +372,9 @@ int mse_packet_ctrl_receive_packet_crf(int index,
 int mse_packet_ctrl_take_out_packet(int index,
 				    void *data,
 				    size_t size,
-				    unsigned int *timestamps,
-				    int t_size,
-				    int *t_stored,
+				    u64 *timestamps,
+				    int timestamps_size,
+				    int *timestamps_stored,
 				    struct mse_packet_ctrl *dma,
 				    struct mse_packetizer_ops *ops,
 				    size_t *processed)
@@ -388,7 +388,7 @@ int mse_packet_ctrl_take_out_packet(int index,
 		  dma->read_p, dma->write_p, dma->size,
 		  dma->packet_table[dma->read_p].vaddr);
 
-	*t_stored = 0;
+	*timestamps_stored = 0;
 
 	received = mse_packet_ctrl_check_packet_remain(dma);
 	while (received-- > 0) {
@@ -408,9 +408,9 @@ int mse_packet_ctrl_take_out_packet(int index,
 			return -EIO;
 
 		pcount++;
-		if (ret >= 0 && *t_stored < t_size) {
-			*timestamps++ = recv_time;
-			(*t_stored)++;
+		if (ret >= 0 && *timestamps_stored < timestamps_size) {
+			*timestamps++ = (u64)recv_time;
+			(*timestamps_stored)++;
 		}
 
 		if (ret == MSE_PACKETIZE_STATUS_COMPLETE)
@@ -433,8 +433,8 @@ int mse_packet_ctrl_take_out_packet(int index,
 
 int mse_packet_ctrl_take_out_packet_crf(
 	int index,
-	u64 *timestamp,
-	int t_size,
+	u64 *timestamps,
+	int timestamps_size,
 	struct mse_packet_ctrl *dma)
 {
 	int ret;
@@ -448,8 +448,8 @@ int mse_packet_ctrl_take_out_packet_crf(
 	if (dma->read_p == dma->write_p)
 		return 0;
 
-	ret = mse_packetizer_crf_tstamp_audio_ops.depacketize(
-		index, timestamp, t_size * sizeof(*timestamp),
+	ret = mse_packetizer_crf_timestamp_audio_ops.depacketize(
+		index, timestamps, timestamps_size * sizeof(*timestamps),
 		&crf_len,
 		NULL,
 		dma->packet_table[dma->read_p].vaddr,
@@ -462,7 +462,7 @@ int mse_packet_ctrl_take_out_packet_crf(
 
 	if (ret > 0) {
 		count = crf_len / sizeof(u64);
-		timestamp += count;
+		timestamps += count;
 	}
 
 	/* return the number of timestamp */

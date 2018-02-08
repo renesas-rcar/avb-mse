@@ -215,10 +215,10 @@ struct timestamp_set {
 };
 
 struct timestamp_queue {
+	rwlock_t rwlock;
 	const char *name;
 	bool f_init;
 	bool f_sync;
-	bool f_32bit;
 	bool f_discont;
 	u32 std_interval;
 	u64 std_counter;
@@ -232,7 +232,6 @@ struct timestamp_queue {
 struct timestamp_reader {
 	const char *name;
 	bool f_out_ok;
-	bool f_32bit;
 	u64 out_time;
 	u64 out_std;
 	u64 out_offset;
@@ -355,7 +354,6 @@ struct mse_instance {
 	int mch_index;
 
 	/* @brief timestamp ptp|capture */
-	spinlock_t lock_ques;
 	struct timestamp_queue tstamp_que;
 	struct timestamp_queue tstamp_que_crf;
 	struct timestamp_queue crf_que;
@@ -374,7 +372,7 @@ struct mse_instance {
 	struct mse_packet_ctrl *packet_buffer;
 
 	/** @brief AVTP timestampes */
-	u32 avtp_timestamps[CREATE_AVTP_TIMESTAMPS_MAX];
+	u64 avtp_timestamps[CREATE_AVTP_TIMESTAMPS_MAX];
 	int avtp_timestamps_size;
 	int avtp_timestamps_current;
 	/** @brief stopping streaming flag */
@@ -418,7 +416,6 @@ struct mse_instance {
 	bool f_present;
 	int captured_timestamps;
 	bool f_get_first_packet;
-	u32 first_avtp_timestamp;
 
 	/** @brief packet buffer */
 	int crf_index_network;
@@ -426,6 +423,7 @@ struct mse_instance {
 	bool f_crf_sending;
 
 	/** @brief media clock recovery work */
+	u64 temp_ts[PTP_TIMESTAMPS_MAX];
 	u64 timestamps[PTP_TIMESTAMPS_MAX];
 	struct mch_timestamp ts[PTP_TIMESTAMPS_MAX];
 
@@ -490,8 +488,6 @@ module_param(major, int, 0440);
 static int mse_get_capture_timestamp(struct mse_instance *instance,
 				     u64 now,
 				     bool is_first);
-static int tstamps_get_last_timestamp(struct timestamp_queue *que,
-				      struct timestamp_set *ts_set);
 static u64 ptp_timer_update_start_timing(struct mse_instance *instance,
 					 u64 now);
 
@@ -1154,11 +1150,11 @@ static void tstamps_init(struct timestamp_queue *que,
 			 bool f_32bit,
 			 u32 std_interval)
 {
+	rwlock_init(&que->rwlock);
 	que->name = name;
 	que->f_init = true;
 	que->head = 0;
 	que->tail = 0;
-	que->f_32bit = f_32bit;
 	que->std_interval = std_interval;
 	que->sync_count = 0;
 	que->f_sync = false;
@@ -1175,7 +1171,6 @@ static void tstamps_reader_init(struct timestamp_reader *reader,
 {
 	reader->name = name;
 	reader->f_out_ok = false;
-	reader->f_32bit = f_32bit;
 	reader->que = que;
 	reader->out_time = 0;
 	reader->out_std = 0;
@@ -1184,12 +1179,28 @@ static void tstamps_reader_init(struct timestamp_reader *reader,
 	mse_debug_tstamps2("%s\n", reader->name);
 }
 
+static int tstamps_get_last_timestamp_nolock(struct timestamp_queue *que,
+					     struct timestamp_set *ts_set)
+{
+	if (q_empty(que)) {
+		mse_debug("time stamp queue is not updated\n");
+		return -1;
+	}
+
+	if (!que->f_sync)
+		return -1;
+
+	*ts_set = que->timestamps[q_prev(que, que->tail)];
+
+	return 0;
+}
+
 /* calculate timestamp from std_time */
-static int tstamps_calc_tstamp(struct timestamp_reader *reader,
-			       u64 now,
-			       u32 offset,
-			       u64 interval,
-			       u64 *timestamp)
+static int tstamps_calc_tstamp_nolock(struct timestamp_reader *reader,
+				      u64 base,
+				      u32 offset,
+				      u64 interval,
+				      u64 *timestamp)
 {
 	struct timestamp_queue *que = reader->que;
 	struct timestamp_set ts_last = { 0 };
@@ -1207,7 +1218,7 @@ static int tstamps_calc_tstamp(struct timestamp_reader *reader,
 	/* first & not received */
 	if (!que->f_sync) {
 		if (reader->out_time == 0)
-			reader->out_time = now;
+			reader->out_time = base;
 		else
 			reader->out_time += interval;
 
@@ -1217,12 +1228,12 @@ static int tstamps_calc_tstamp(struct timestamp_reader *reader,
 
 	/* first sync output */
 	if (!reader->f_out_ok) {
-		tstamps_get_last_timestamp(que, &ts_last);
-		reader->out_std = ts_last.std + now - ts_last.real - offset;
+		tstamps_get_last_timestamp_nolock(que, &ts_last);
+		reader->out_std = ts_last.std + base - ts_last.real - offset;
 		reader->out_offset = offset;
 		if (que->timestamps[que->head].std > reader->out_std) {
 			reader->out_std = que->timestamps[que->head].std;
-			reader->out_offset = now -
+			reader->out_offset = base -
 				que->timestamps[que->head].real;
 		}
 
@@ -1269,7 +1280,7 @@ static int tstamps_calc_tstamp(struct timestamp_reader *reader,
 				   reader->name,
 				   reader->out_std,
 				   reader->out_offset,
-				   now,
+				   base,
 				   *timestamp,
 				   reader->out_time);
 	}
@@ -1279,20 +1290,53 @@ static int tstamps_calc_tstamp(struct timestamp_reader *reader,
 	return 0;
 }
 
-static int tstamps_get_last_timestamp(struct timestamp_queue *que,
-				      struct timestamp_set *ts_set)
+static int tstamps_calc_tstamp(struct timestamp_reader *reader,
+			       u64 base,
+			       u32 offset,
+			       u64 interval,
+			       u64 *timestamp)
 {
-	if (q_empty(que)) {
-		mse_debug("time stamp queue is not updated\n");
-		return -1;
+	int ret;
+	unsigned long flags;
+
+	read_lock_irqsave(&reader->que->rwlock, flags);
+	ret = tstamps_calc_tstamp_nolock(reader,
+					 base,
+					 offset,
+					 interval,
+					 timestamp);
+	read_unlock_irqrestore(&reader->que->rwlock, flags);
+
+	return ret;
+}
+
+static int tstamps_calc_tstamps(struct timestamp_reader *reader,
+				u64 base,
+				u32 offset,
+				u64 interval,
+				u64 *timestamps,
+				int size)
+{
+	int i;
+	u64 timestamp;
+	unsigned long flags;
+	int ret = -1;
+
+	read_lock_irqsave(&reader->que->rwlock, flags);
+	for (i = 0; i < size; i++) {
+		ret = tstamps_calc_tstamp_nolock(reader,
+						 base,
+						 offset,
+						 interval,
+						 &timestamp);
+		if (ret < 0)
+			break;
+
+		timestamps[i] = timestamp;
 	}
+	read_unlock_irqrestore(&reader->que->rwlock, flags);
 
-	if (!que->f_sync)
-		return -1;
-
-	*ts_set = que->timestamps[q_prev(que, que->tail)];
-
-	return 0;
+	return ret;
 }
 
 static int tstamps_search_tstamp32(struct timestamp_reader *reader,
@@ -1302,6 +1346,7 @@ static int tstamps_search_tstamp32(struct timestamp_reader *reader,
 {
 	struct timestamp_queue *que = reader->que;
 	struct timestamp_set ts_set;
+	unsigned long flags;
 	int pos;
 	u32 delta_ts;
 
@@ -1318,6 +1363,7 @@ static int tstamps_search_tstamp32(struct timestamp_reader *reader,
 
 	avtp_time -= offset;
 
+	read_lock_irqsave(&que->rwlock, flags);
 	/* for each queue forward */
 	for (pos = que->head;
 	     pos != que->tail;
@@ -1328,8 +1374,13 @@ static int tstamps_search_tstamp32(struct timestamp_reader *reader,
 			break;
 	}
 
-	if (pos == que->tail || pos == que->head)
+	/* not found search timestamp */
+	if (pos == que->tail || pos == que->head) {
+		read_unlock_irqrestore(&que->rwlock, flags);
 		return -1;
+	}
+
+	read_unlock_irqrestore(&que->rwlock, flags);
 
 	reader->out_std = ts_set.std;
 
@@ -1352,8 +1403,8 @@ static int tstamps_search_tstamp32(struct timestamp_reader *reader,
 	return 0;
 }
 
-static bool tstamps_continuity_check(struct timestamp_queue *que,
-				     u64 timestamp)
+static bool tstamps_continuity_check_nolock(struct timestamp_queue *que,
+					    u64 timestamp)
 {
 	struct timestamp_set ts_set;
 	s64 diff;
@@ -1361,8 +1412,8 @@ static bool tstamps_continuity_check(struct timestamp_queue *que,
 	ts_set = que->timestamps[q_prev(que, que->tail)];
 
 	diff = timestamp - ts_set.real - que->std_interval;
-	if (que->f_32bit)
-		diff = (s64)(s32)diff;
+	/* compare lower 32bit only */
+	diff = (s64)(s32)diff;
 
 	if (abs(diff) < PTP_SYNC_ERROR_THRESHOLD(que->std_interval)) {
 		if (!que->f_sync) {
@@ -1394,41 +1445,68 @@ static bool tstamps_continuity_check(struct timestamp_queue *que,
 	return false;
 }
 
-static int tstamps_enq_tstamp(struct timestamp_queue *que,
-			      u64 timestamp)
+static void tstamps_enq_tstamps(struct timestamp_queue *que,
+				u64 *timestamps,
+				int n)
 {
 	struct timestamp_set timestamp_set;
-
-	mse_debug_tstamps2("START head=%d, tail=%d\n", que->head, que->tail);
+	u64 timestamp;
+	int i;
+	unsigned long flags;
 
 	if (!que->f_init)
-		return -1;
+		return;
 
-	if (!q_empty(que))
-		if (!tstamps_continuity_check(que, timestamp))
-			return 0;
+	write_lock_irqsave(&que->rwlock, flags);
+	for (i = 0; i < n; i++) {
+		timestamp = timestamps[i];
 
-	timestamp_set.real = timestamp;
-	timestamp_set.std = que->std_counter;
+		if (!q_empty(que))
+			if (!tstamps_continuity_check_nolock(que, timestamp))
+				break;
 
-	que->std_counter += que->std_interval;
-	que->timestamps[que->tail] = timestamp_set;
-	que->tail = q_next(que, que->tail);
+		timestamp_set.real = timestamp;
+		timestamp_set.std = que->std_counter;
 
-	/* if tail equal head, push out head */
-	if (que->tail == que->head)
-		que->head = q_next(que, que->head);
+		que->std_counter += que->std_interval;
+		que->timestamps[que->tail] = timestamp_set;
+		que->tail = q_next(que, que->tail);
 
-	return 0;
+		/* if tail equal head, push out head */
+		if (que->tail == que->head)
+			que->head = q_next(que, que->head);
+
+		mse_debug_tstamps2("%s head=%d, tail=%d timestamp=%llu\n",
+				   que->name, que->head, que->tail, timestamp);
+	}
+
+	write_unlock_irqrestore(&que->rwlock, flags);
 }
 
-static int tstamps_deq_tstamp(struct timestamp_queue *que,
-			      u64 *timestamp)
+static void tstamps_enq_tstamp(struct timestamp_queue *que,
+			       u64 timestamp)
+{
+	tstamps_enq_tstamps(que, &timestamp, 1);
+}
+
+static int tstamps_get_tstamps_size_nolock(struct timestamp_queue *que)
 {
 	if (q_empty(que))
-		return -1;
+		return 0;
 
-	if (q_next(que, que->head) == que->tail)
+	if (!que->f_sync)
+		return 0;
+
+	if (que->tail >= que->head)
+		return que->tail - que->head - 1;
+	else
+		return (que->tail + PTP_TIMESTAMPS_MAX) - que->head - 1;
+}
+
+static int tstamps_deq_tstamp_nolock(struct timestamp_queue *que,
+				     u64 *timestamp)
+{
+	if (q_empty(que))
 		return -1;
 
 	if (!que->f_sync)
@@ -1438,22 +1516,47 @@ static int tstamps_deq_tstamp(struct timestamp_queue *que,
 
 	que->head = q_next(que, que->head);
 
+	mse_debug_tstamps2("%s head=%d, tail=%d timestamp=%llu\n",
+			   que->name, que->head, que->tail, *timestamp);
+
 	return 0;
 }
 
-static int tstamps_get_tstamps_size(struct timestamp_queue *que)
+static int tstamps_deq_tstamps(struct timestamp_queue *que,
+			       u64 *timestamps,
+			       int req_num_min,
+			       int req_num_max)
 {
+	int num, i;
+	unsigned long flags;
+
 	if (q_empty(que))
 		return 0;
 
-	if (que->tail >= que->head)
-		return que->tail - que->head - 1;
+	if (!que->f_sync)
+		return 0;
+
+	write_lock_irqsave(&que->rwlock, flags);
+
+	num = tstamps_get_tstamps_size_nolock(que);
+
+	if (num < req_num_min)
+		num = 0;
 	else
-		return (que->tail + PTP_TIMESTAMPS_MAX) - que->head - 1;
+		num = min(req_num_max, num);
+
+	for (i = 0; i < num; i++)
+		tstamps_deq_tstamp_nolock(que, &timestamps[i]);
+
+	write_unlock_irqrestore(&que->rwlock, flags);
+
+	mse_debug_tstamps2("%s head=%d, tail=%d timestamp=%llu\n",
+			   que->name, que->head, que->tail, timestamps[0]);
+
+	return num;
 }
 
 static bool media_clock_recovery_calc_ts(struct timestamp_reader *reader,
-					 struct timestamp_queue *que,
 					 u64 timestamp,
 					 u32 interval,
 					 u32 offset,
@@ -1513,13 +1616,13 @@ static int media_clock_recovery(struct mse_instance *instance)
 	struct timestamp_reader *reader_mch = &instance->reader_mch;
 	struct mch_timestamp ts;
 	int index_packetizer;
-	u64 timestamp;
 	u32 delta_ts, offset;
+	int ts_num;
+	int i = 0;
 	int out = 0;
 	int recovery_value;
 	u64 recovery_capture_freq;
 	bool f_out_ok_pre;
-	unsigned long flags;
 	int calc_error = 0;
 
 	if (instance->crf_type != MSE_CRF_TYPE_RX) {
@@ -1528,7 +1631,7 @@ static int media_clock_recovery(struct mse_instance *instance)
 		que = &instance->avtp_que;
 		offset = 0;
 	} else {
-		packetizer = &mse_packetizer_crf_tstamp_audio_ops;
+		packetizer = &mse_packetizer_crf_timestamp_audio_ops;
 		index_packetizer = instance->crf_index;
 		que = &instance->crf_que;
 		offset = instance->max_transit_time_ns;
@@ -1546,14 +1649,13 @@ static int media_clock_recovery(struct mse_instance *instance)
 	f_out_ok_pre = reader_mch->f_out_ok;
 
 	/* fill master/device timestamps */
-	spin_lock_irqsave(&instance->lock_ques, flags);
-	while (out < ARRAY_SIZE(instance->ts)) {
-		if (tstamps_deq_tstamp(que, &timestamp) < 0)
-			break;
-
+	ts_num = tstamps_deq_tstamps(que,
+				     instance->temp_ts,
+				     0,
+				     ARRAY_SIZE(instance->ts));
+	for (i = 0; i < ts_num; i++) {
 		if (!media_clock_recovery_calc_ts(reader_mch,
-						  que,
-						  timestamp,
+						  instance->temp_ts[i],
 						  delta_ts,
 						  offset,
 						  &ts)) {
@@ -1563,8 +1665,7 @@ static int media_clock_recovery(struct mse_instance *instance)
 			out++;
 		}
 	}
-	/* could not get master timestamps */
-	spin_unlock_irqrestore(&instance->lock_ques, flags);
+
 	if (out <= 0) {
 		/* if CRF Rx, accept for one period which not get timestamp */
 		if (instance->crf_type == MSE_CRF_TYPE_RX &&
@@ -1649,10 +1750,9 @@ static int create_avtp_timestamps(struct mse_instance *instance)
 	struct mse_audio_config *audio = &instance->media_config.audio;
 	struct mse_audio_info audio_info;
 	u64 now = 0;
-	u64 avtp_timestamp = 0;
 	u32 delta_ts;
 	u32 offset;
-	unsigned long flags;
+	int ret;
 
 	instance->packetizer->get_audio_info(
 		instance->index_packetizer,
@@ -1683,26 +1783,36 @@ static int create_avtp_timestamps(struct mse_instance *instance)
 
 	/* get timestamps from private table */
 	mse_ptp_get_time(instance->ptp_index, &now);
-	spin_lock_irqsave(&instance->lock_ques, flags);
-	for (i = 0; i < create_size; i++) {
-		tstamps_calc_tstamp(&instance->reader_create_avtp,
-				    now,
-				    offset,
-				    delta_ts,
-				    &avtp_timestamp);
 
-		instance->avtp_timestamps[i] =
-			avtp_timestamp + instance->max_transit_time_ns;
+	ret = tstamps_calc_tstamps(&instance->reader_create_avtp,
+				   now,
+				   offset,
+				   delta_ts,
+				   instance->avtp_timestamps,
+				   create_size);
+	if (ret >= 0) {
+		for (i = 0; i < create_size; i++) {
+			instance->avtp_timestamps[i] +=
+				instance->max_transit_time_ns;
+		}
+	} else {
+		instance->avtp_timestamps[0] =
+			now + instance->max_transit_time_ns;
+		for (i = 1; i < create_size; i++) {
+			instance->avtp_timestamps[i] =
+				instance->avtp_timestamps[i - 1] + delta_ts;
+		}
 	}
+
 	instance->avtp_timestamps_size = create_size;
-	spin_unlock_irqrestore(&instance->lock_ques, flags);
 
 	return 0;
 }
 
 static int mse_initialize_crf_packetizer(struct mse_instance *instance)
 {
-	struct mse_packetizer_ops *crf = &mse_packetizer_crf_tstamp_audio_ops;
+	struct mse_packetizer_ops *crf =
+		&mse_packetizer_crf_timestamp_audio_ops;
 	struct mse_audio_config *audio = &instance->media_config.audio;
 	struct mse_audio_config config;
 	struct mse_cbsparam cbs;
@@ -1749,7 +1859,8 @@ static int mse_initialize_crf_packetizer(struct mse_instance *instance)
 
 static void mse_release_crf_packetizer(struct mse_instance *instance)
 {
-	struct mse_packetizer_ops *crf = &mse_packetizer_crf_tstamp_audio_ops;
+	struct mse_packetizer_ops *crf =
+		&mse_packetizer_crf_timestamp_audio_ops;
 	unsigned long flags;
 
 	if (instance->crf_index >= 0) {
@@ -1763,7 +1874,8 @@ static void mse_release_crf_packetizer(struct mse_instance *instance)
 
 static int mse_open_crf_packetizer(struct mse_instance *instance)
 {
-	struct mse_packetizer_ops *crf = &mse_packetizer_crf_tstamp_audio_ops;
+	struct mse_packetizer_ops *crf =
+		&mse_packetizer_crf_timestamp_audio_ops;
 	int ret;
 	unsigned long flags;
 
@@ -1971,8 +2083,8 @@ static void mse_work_depacketize(struct work_struct *work)
 	struct mse_audio_info audio_info;
 	struct mse_trans_buffer *buf;
 	int received, ret = 0;
-	u32 timestamps[128];
-	int t_stored, i;
+	u64 timestamps[128];
+	int timestamps_stored;
 	int buf_cnt;
 	unsigned long flags;
 
@@ -2019,7 +2131,7 @@ static void mse_work_depacketize(struct work_struct *work)
 				buf->buffer_size,
 				timestamps,
 				ARRAY_SIZE(timestamps),
-				&t_stored,
+				&timestamps_stored,
 				packet_buffer,
 				instance->packetizer,
 				&instance->temp_len[instance->temp_w]);
@@ -2037,23 +2149,23 @@ static void mse_work_depacketize(struct work_struct *work)
 				&audio_info);
 
 			/* store avtp timestamp */
-			spin_lock_irqsave(&instance->lock_ques, flags);
-			if (!instance->avtp_que.f_init && t_stored > 0) {
-				tstamps_init(&instance->avtp_que,
-					     "AVTP",
-					     true,
-					     audio_info.frame_interval_time);
-			}
-			for (i = 0; i < t_stored; i++) {
-				tstamps_enq_tstamp(&instance->avtp_que,
-						   timestamps[i]);
-			}
-			spin_unlock_irqrestore(&instance->lock_ques, flags);
+			if (timestamps_stored > 0) {
+				if (!instance->avtp_que.f_init)  {
+					tstamps_init(
+						&instance->avtp_que,
+						"AVTP",
+						true,
+						audio_info.frame_interval_time);
+				}
 
-			if (!instance->f_get_first_packet && t_stored > 0) {
-				instance->first_avtp_timestamp = timestamps[0];
-				instance->f_get_first_packet = true;
-				instance->processed = 0;
+				tstamps_enq_tstamps(&instance->avtp_que,
+						    timestamps,
+						    timestamps_stored);
+
+				if (!instance->f_get_first_packet) {
+					instance->f_get_first_packet = true;
+					instance->processed = 0;
+				}
 			}
 
 			if (instance->temp_len[instance->temp_w] >=
@@ -2095,7 +2207,7 @@ static void mse_work_depacketize(struct work_struct *work)
 						buf->buffer_size,
 						timestamps,
 						ARRAY_SIZE(timestamps),
-						&t_stored,
+						&timestamps_stored,
 						packet_buffer,
 						instance->packetizer,
 						&buf->work_length);
@@ -2439,9 +2551,7 @@ static void mse_work_crf_send(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	int err, tsize, size, i;
-	u64 timestamp;
-	u64 timestamps[6];
-	unsigned long flags;
+	u64 timestamps[CRF_AUDIO_TIMESTAMPS];
 
 	mse_debug("START\n");
 
@@ -2455,33 +2565,22 @@ static void mse_work_crf_send(struct work_struct *work)
 
 	tsize = (!instance->f_ptp_capture) ?
 		CRF_PTP_TIMESTAMPS : CRF_AUDIO_TIMESTAMPS;
-	timestamp = 0;
 
 	do {
-		spin_lock_irqsave(&instance->lock_ques, flags);
-		size = tstamps_get_tstamps_size(&instance->tstamp_que_crf);
-
-		/* get Timestamps */
-		mse_debug("size %d tsize %d\n", size, tsize);
-
-		if (size < tsize) {
-			spin_unlock_irqrestore(&instance->lock_ques, flags);
+		size = tstamps_deq_tstamps(&instance->tstamp_que_crf,
+					   timestamps,
+					   tsize,
+					   tsize);
+		if (size != tsize)
 			break;
-		}
 
 		for (i = 0; i < tsize; i++) {
-			tstamps_deq_tstamp(&instance->tstamp_que_crf,
-					   &timestamp);
-
 			if (instance->tx)
-				timestamp += instance->max_transit_time_ns;
+				timestamps[i] += instance->max_transit_time_ns;
 
 			if (instance->f_ptp_capture)
-				timestamp += instance->delay_time_ns;
-
-			timestamps[i] = timestamp;
+				timestamps[i] += instance->delay_time_ns;
 		}
-		spin_unlock_irqrestore(&instance->lock_ques, flags);
 
 		/* create CRF packets */
 		err = mse_packet_ctrl_make_packet_crf(
@@ -2514,11 +2613,10 @@ static void mse_work_crf_receive(struct work_struct *work)
 {
 	struct mse_instance *instance;
 	struct mse_audio_info audio_info;
-	int err, count, i;
+	int err, count;
 	u64 ptimes[6];
-	unsigned long flags;
-
-	struct mse_packetizer_ops *crf = &mse_packetizer_crf_tstamp_audio_ops;
+	struct mse_packetizer_ops *crf =
+		&mse_packetizer_crf_timestamp_audio_ops;
 
 	instance = container_of(work, struct mse_instance, wk_crf_receive);
 
@@ -2545,18 +2643,13 @@ static void mse_work_crf_receive(struct work_struct *work)
 
 		crf->get_audio_info(instance->crf_index, &audio_info);
 
-		spin_lock_irqsave(&instance->lock_ques, flags);
-
 		if (!instance->crf_que.f_init)
 			tstamps_init(&instance->crf_que,
 				     "CRF",
 				     true,
 				     audio_info.frame_interval_time);
 
-		for (i = 0; i < count; i++)
-			tstamps_enq_tstamp(&instance->crf_que, ptimes[i]);
-
-		spin_unlock_irqrestore(&instance->lock_ques, flags);
+		tstamps_enq_tstamps(&instance->crf_que, ptimes, count);
 
 	/* while state is RUNNABLE */
 	} while (mse_state_test(instance, MSE_STATE_RUNNABLE));
@@ -2626,7 +2719,6 @@ static int mse_get_capture_timestamp(struct mse_instance *instance,
 	int ret;
 	int count, i;
 	s64 diff;
-	unsigned long flags;
 
 	/* get timestamps */
 	ret = mse_ptp_get_timestamps(instance->ptp_index,
@@ -2664,16 +2756,10 @@ static int mse_get_capture_timestamp(struct mse_instance *instance,
 	}
 
 	/* store timestamps */
-	spin_lock_irqsave(&instance->lock_ques, flags);
-
-	for (; i < count; i++) {
-		tstamps_enq_tstamp(&instance->tstamp_que,
-				   instance->timestamps[i]);
-		tstamps_enq_tstamp(&instance->tstamp_que_crf,
-				   instance->timestamps[i]);
-	}
-
-	spin_unlock_irqrestore(&instance->lock_ques, flags);
+	tstamps_enq_tstamps(&instance->tstamp_que,
+			    instance->timestamps, count);
+	tstamps_enq_tstamps(&instance->tstamp_que_crf,
+			    instance->timestamps, count);
 
 	return count;
 }
@@ -3085,7 +3171,6 @@ static u64 ptp_timer_update_start_timing(struct mse_instance *instance, u64 now)
 	u64 error_thresh;
 	u32 interval, offset;
 	int ret;
-	unsigned long flags;
 
 	ptp_timer_start = instance->ptp_timer_start;
 	offset = instance->delay_time_ns;
@@ -3096,19 +3181,18 @@ static u64 ptp_timer_update_start_timing(struct mse_instance *instance, u64 now)
 	if (!ptp_timer_start)
 		ptp_timer_start = now;
 
-	spin_lock_irqsave(&instance->lock_ques, flags);
 	ret = tstamps_calc_tstamp(&instance->reader_ptp_start_time,
 				  now,
 				  offset,
 				  interval,
 				  &next_time);
-	spin_unlock_irqrestore(&instance->lock_ques, flags);
 
 	update = now - next_time;
 	diff = ptp_timer_start - next_time;
 
 	/* check 'update' and 'diff' within error threshold */
-	if ((abs(update) < error_thresh) && (abs(diff) < error_thresh))
+	if (ret >= 0 &&
+	    ((abs(update) < error_thresh) && (abs(diff) < error_thresh)))
 		ptp_timer_start = next_time;
 
 	ptp_timer_start += interval;
@@ -3187,11 +3271,9 @@ static void mse_work_start_transmission(struct work_struct *work)
 	instance->timestamp = now;
 
 	if (!instance->f_ptp_capture) {
-		spin_lock_irqsave(&instance->lock_ques, flags);
 		/* store ptp timestamp to AVTP and CRF */
 		tstamps_enq_tstamp(&instance->tstamp_que, now);
 		tstamps_enq_tstamp(&instance->tstamp_que_crf, now);
-		spin_unlock_irqrestore(&instance->lock_ques, flags);
 	} else if (instance->ptp_timer_handle) {
 		ptp_timer_start = ptp_timer_update_start_timing(instance, now);
 		if (mse_ptp_timer_start(instance->ptp_index,
@@ -4186,7 +4268,6 @@ static int mse_init_kernel_resource(struct mse_instance *instance,
 	rwlock_init(&instance->lock_state);
 	rwlock_init(&instance->lock_stream);
 	spin_lock_init(&instance->lock_timer);
-	spin_lock_init(&instance->lock_ques);
 	spin_lock_init(&instance->lock_buf_list);
 	sema_init(&instance->sem_stopping, 1);
 
