@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -100,7 +100,7 @@ struct iec61883_6_packetizer {
 	u8 local_total_samples;
 	int piece_data_len;
 	bool f_warned;
-	struct mse_start_time start_time;
+	u32 start_time;
 
 	unsigned char packet_template[ETHFRAMELEN_MAX];
 	unsigned char packet_piece[ETHFRAMELEN_MAX];
@@ -218,6 +218,7 @@ static int mse_packetizer_iec61883_6_open(void)
 	iec61883_6->send_seq_num = 0;
 	iec61883_6->local_total_samples = 0;
 	iec61883_6->piece_data_len = 0;
+	iec61883_6->start_time = 0;
 
 	mse_packetizer_stats_init(&iec61883_6->stats);
 
@@ -257,9 +258,7 @@ static int mse_packetizer_iec61883_6_packet_init(int index)
 	iec61883_6->send_seq_num = 0;
 	iec61883_6->local_total_samples = 0;
 	iec61883_6->piece_data_len = 0;
-	iec61883_6->start_time.start_time = 0;
-	iec61883_6->start_time.capture_diff = 0;
-	iec61883_6->start_time.capture_freq = 0;
+	iec61883_6->start_time = 0;
 
 	mse_packetizer_stats_init(&iec61883_6->stats);
 
@@ -775,11 +774,10 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 			NSEC_SCALE * iec61883_6->sample_per_packet,
 			sample_rate);
 
-	if (iec61883_6->start_time.capture_freq > 0 &&
-	    iec61883_6->stats.seq_num_next == SEQNUM_INIT) {
+	if (iec61883_6->stats.seq_num_next == SEQNUM_INIT) {
 		offset = mse_packetizer_calc_audio_offset(
 			avtp_get_timestamp(packet),
-			&iec61883_6->start_time,
+			iec61883_6->start_time,
 			avtp_fdf_to_sample_rate(avtp_get_iec61883_fdf(packet)),
 			iec61883_6->audio_config.bytes_per_sample,
 			channels,
@@ -831,9 +829,7 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 	return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
-static int mse_packetizer_iec61883_6_set_start_time(
-					int index,
-					struct mse_start_time *start_time)
+static int mse_packetizer_iec61883_6_set_start_time(int index, u32 start_time)
 {
 	struct iec61883_6_packetizer *iec61883_6;
 
@@ -841,7 +837,7 @@ static int mse_packetizer_iec61883_6_set_start_time(
 		return -EPERM;
 
 	iec61883_6 = &iec61883_6_packetizer_table[index];
-	iec61883_6->start_time = *start_time;
+	iec61883_6->start_time = start_time;
 
 	return 0;
 }

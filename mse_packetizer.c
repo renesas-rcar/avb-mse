@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -268,7 +268,7 @@ int mse_packetizer_calc_cbs_by_bitrate(u32 port_transmit_rate,
 
 u32 mse_packetizer_calc_audio_offset(
 	u32 avtp_timestamp,
-	struct mse_start_time *start_time,
+	u32 start_time,
 	int sample_rate,
 	int sample_byte,
 	int channels,
@@ -276,11 +276,11 @@ u32 mse_packetizer_calc_audio_offset(
 {
 	u64 diff;
 	u32 sample_offset;
+	u64 calc_time, period_time;
+	u32 sample_time;
 
 	/*  Calculate offset by avtp timestamp on first packet */
-	diff = avtp_timestamp - start_time->start_time;
-	diff = diff * start_time->capture_diff * start_time->capture_freq;
-	diff = div64_u64(diff, NSEC_SCALE);
+	diff = avtp_timestamp - start_time;
 
 	sample_offset = div64_u64(diff * sample_rate, NSEC_SCALE) *
 		sample_byte * channels;
@@ -291,25 +291,21 @@ u32 mse_packetizer_calc_audio_offset(
 		sample_offset = buffer_size;  /* skip this period */
 
 	if (sample_offset != buffer_size) {
-		u64 calc_time, period_time;
-		u32 sample_time = NSEC_SCALE / sample_rate;
-
 		calc_time = (u64)(sample_offset / sample_byte / channels)
 			* NSEC_SCALE;
 		calc_time = div64_u64(calc_time, sample_rate);
 		period_time = (u64)(buffer_size / sample_byte / channels)
 			* NSEC_SCALE;
 		period_time = div64_u64(period_time, sample_rate);
+		sample_time = NSEC_SCALE / sample_rate;
 
 		mse_info("start %u avtp %u calc %u offset %d(i=%d) diff=%d(+%u)\n",
-			 start_time->start_time,
+			 start_time,
 			 avtp_timestamp,
-			 start_time->start_time + (u32)calc_time +
-			 (u32)period_time,
+			 start_time + (u32)calc_time + (u32)period_time,
 			 sample_offset,
 			 sample_time,
-			 (s32)(start_time->start_time + calc_time -
-			       avtp_timestamp),
+			 (s32)(start_time + calc_time - avtp_timestamp),
 			 (u32)period_time);
 	}
 

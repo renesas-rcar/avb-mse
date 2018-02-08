@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -98,15 +98,6 @@ struct mse_audio_info {
 	int frame_interval_time;
 };
 
-/**
- * @brief audio period start time
- */
-struct mse_start_time {
-	u32 start_time;
-	u32 capture_diff;
-	u32 capture_freq;
-};
-
 static inline int mse_get_bit_depth(enum MSE_AUDIO_BIT bit_depth)
 {
 	switch (bit_depth) {
@@ -148,8 +139,7 @@ struct mse_packetizer_ops {
 	/** @brief get audio info function pointer */
 	int (*get_audio_info)(int index, struct mse_audio_info *info);
 	/** @brief set start time of audio period */
-	int (*set_start_time)(int index,
-			      struct mse_start_time *start_time);
+	int (*set_start_time)(int index, u32 start_time);
 
 	/** @brief calc_cbs function pointer */
 	int (*calc_cbs)(int index, struct mse_cbsparam *cbs);
@@ -204,7 +194,7 @@ int mse_packetizer_calc_cbs_by_bitrate(u32 port_transmit_rate,
 				       u32 payload_size,
 				       struct mse_cbsparam *cbs);
 u32 mse_packetizer_calc_audio_offset(u32 avtp_timestamp,
-				     struct mse_start_time *start_time,
+				     u32 start_time,
 				     int sample_rate,
 				     int sample_byte,
 				     int channels,

@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -103,7 +103,7 @@ struct aaf_packetizer {
 
 	int piece_data_len;
 	bool f_warned;
-	struct mse_start_time start_time;
+	u32 start_time;
 
 	unsigned char packet_template[ETHFRAMELEN_MAX];
 	unsigned char packet_piece[ETHFRAMELEN_MAX];
@@ -278,6 +278,7 @@ static int mse_packetizer_aaf_open(void)
 	aaf->piece_f = false;
 	aaf->send_seq_num = 0;
 	aaf->piece_data_len = 0;
+	aaf->start_time = 0;
 
 	mse_packetizer_stats_init(&aaf->stats);
 
@@ -316,9 +317,7 @@ static int mse_packetizer_aaf_packet_init(int index)
 	aaf->piece_f = false;
 	aaf->send_seq_num = 0;
 	aaf->piece_data_len = 0;
-	aaf->start_time.start_time = 0;
-	aaf->start_time.capture_diff = 0;
-	aaf->start_time.capture_freq = 0;
+	aaf->start_time = 0;
 
 	mse_packetizer_stats_init(&aaf->stats);
 
@@ -758,11 +757,10 @@ static int mse_packetizer_aaf_depacketize(int index,
 	aaf->frame_interval_time = div_u64(NSEC_SCALE * aaf->sample_per_packet,
 					   aaf_sample_rate);
 
-	if (aaf->start_time.capture_freq > 0 &&
-	    aaf->stats.seq_num_next == SEQNUM_INIT) {
+	if (aaf->stats.seq_num_next == SEQNUM_INIT) {
 		offset = mse_packetizer_calc_audio_offset(
 			avtp_get_timestamp(packet),
-			&aaf->start_time,
+			aaf->start_time,
 			aaf_sample_rate,
 			aaf_byte_per_ch,
 			channels,
@@ -819,8 +817,7 @@ static int mse_packetizer_aaf_depacketize(int index,
 	return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
-static int mse_packetizer_aaf_set_start_time(int index,
-					     struct mse_start_time *start_time)
+static int mse_packetizer_aaf_set_start_time(int index, u32 start_time)
 {
 	struct aaf_packetizer *aaf;
 
@@ -828,11 +825,10 @@ static int mse_packetizer_aaf_set_start_time(int index,
 		return -EPERM;
 
 	aaf = &aaf_packetizer_table[index];
-	aaf->start_time = *start_time;
+	aaf->start_time = start_time;
 
 	return 0;
 }
-
 struct mse_packetizer_ops mse_packetizer_aaf_ops = {
 	.open = mse_packetizer_aaf_open,
 	.release = mse_packetizer_aaf_release,
