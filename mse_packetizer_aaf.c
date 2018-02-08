@@ -103,6 +103,7 @@ struct aaf_packetizer {
 
 	int piece_data_len;
 	bool f_warned;
+	bool f_need_calc_offset;
 	u32 start_time;
 
 	unsigned char packet_template[ETHFRAMELEN_MAX];
@@ -279,6 +280,7 @@ static int mse_packetizer_aaf_open(void)
 	aaf->send_seq_num = 0;
 	aaf->piece_data_len = 0;
 	aaf->start_time = 0;
+	aaf->f_need_calc_offset = false;
 
 	mse_packetizer_stats_init(&aaf->stats);
 
@@ -318,6 +320,7 @@ static int mse_packetizer_aaf_packet_init(int index)
 	aaf->send_seq_num = 0;
 	aaf->piece_data_len = 0;
 	aaf->start_time = 0;
+	aaf->f_need_calc_offset = false;
 
 	mse_packetizer_stats_init(&aaf->stats);
 
@@ -757,19 +760,24 @@ static int mse_packetizer_aaf_depacketize(int index,
 	aaf->frame_interval_time = div_u64(NSEC_SCALE * aaf->sample_per_packet,
 					   aaf_sample_rate);
 
-	if (aaf->stats.seq_num_next == SEQNUM_INIT) {
-		offset = mse_packetizer_calc_audio_offset(
+	if (aaf->f_need_calc_offset) {
+		ret = mse_packetizer_calc_audio_offset(
 			avtp_get_timestamp(packet),
 			aaf->start_time,
 			aaf_sample_rate,
 			aaf_byte_per_ch,
 			channels,
-			buffer_size);
-		if (offset >= buffer_size) {
+			buffer_size,
+			&offset);
+		if (ret == MSE_PACKETIZE_STATUS_SKIP) {
 			*buffer_processed = buffer_size;
+
 			return MSE_PACKETIZE_STATUS_SKIP;
+		} else if (ret == MSE_PACKETIZE_STATUS_DISCARD) {
+			return MSE_PACKETIZE_STATUS_DISCARD;
 		}
 
+		aaf->f_need_calc_offset = false;
 		*buffer_processed += offset;
 	}
 
@@ -829,6 +837,20 @@ static int mse_packetizer_aaf_set_start_time(int index, u32 start_time)
 
 	return 0;
 }
+
+static int mse_packetizer_aaf_set_need_calc_offset(int index)
+{
+	struct aaf_packetizer *aaf;
+
+	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+		return -EPERM;
+
+	aaf = &aaf_packetizer_table[index];
+	aaf->f_need_calc_offset = true;
+
+	return 0;
+}
+
 struct mse_packetizer_ops mse_packetizer_aaf_ops = {
 	.open = mse_packetizer_aaf_open,
 	.release = mse_packetizer_aaf_release,
@@ -837,6 +859,7 @@ struct mse_packetizer_ops mse_packetizer_aaf_ops = {
 	.set_audio_config = mse_packetizer_aaf_set_audio_config,
 	.get_audio_info = mse_packetizer_aaf_get_audio_info,
 	.set_start_time = mse_packetizer_aaf_set_start_time,
+	.set_need_calc_offset = mse_packetizer_aaf_set_need_calc_offset,
 	.calc_cbs = mse_packetizer_aaf_calc_cbs,
 	.packetize = mse_packetizer_aaf_packetize,
 	.depacketize = mse_packetizer_aaf_depacketize,

@@ -78,6 +78,7 @@ enum MSE_PACKETIZE_STATUS  {
 	MSE_PACKETIZE_STATUS_MAY_COMPLETE,
 	MSE_PACKETIZE_STATUS_NOT_ENOUGH,
 	MSE_PACKETIZE_STATUS_SKIP,
+	MSE_PACKETIZE_STATUS_DISCARD,
 };
 
 /**
@@ -140,6 +141,8 @@ struct mse_packetizer_ops {
 	int (*get_audio_info)(int index, struct mse_audio_info *info);
 	/** @brief set start time of audio period */
 	int (*set_start_time)(int index, u32 start_time);
+	/** @brief set need calc offset mode */
+	int (*set_need_calc_offset)(int index);
 
 	/** @brief calc_cbs function pointer */
 	int (*calc_cbs)(int index, struct mse_cbsparam *cbs);
@@ -193,12 +196,13 @@ int mse_packetizer_calc_cbs_by_bitrate(u32 port_transmit_rate,
 				       u32 payload_bitrate,
 				       u32 payload_size,
 				       struct mse_cbsparam *cbs);
-u32 mse_packetizer_calc_audio_offset(u32 avtp_timestamp,
+int mse_packetizer_calc_audio_offset(u32 avtp_timestamp,
 				     u32 start_time,
 				     int sample_rate,
 				     int sample_byte,
 				     int channels,
-				     size_t buffer_size);
+				     size_t buffer_size,
+				     u32 *offset);
 void mse_packetizer_stats_init(struct mse_packetizer_stats *stats);
 int mse_packetizer_stats_seqnum(struct mse_packetizer_stats *stats, u8 seq_num);
 void mse_packetizer_stats_report(struct mse_packetizer_stats *stats);
