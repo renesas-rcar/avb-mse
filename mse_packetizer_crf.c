@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2016-2017 Renesas Electronics Corporation
+ Copyright (C) 2016-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -342,7 +342,7 @@ static int mse_packetizer_crf_audio_depacketize(int index,
 	return MSE_PACKETIZE_STATUS_COMPLETE;
 }
 
-struct mse_packetizer_ops mse_packetizer_crf_tstamp_audio_ops = {
+struct mse_packetizer_ops mse_packetizer_crf_timestamp_audio_ops = {
 	.open = mse_packetizer_crf_audio_open,
 	.release = mse_packetizer_crf_audio_release,
 	.init = mse_packetizer_crf_audio_packet_init,

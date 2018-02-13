@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -95,6 +95,8 @@ struct aaf_packetizer {
 	int avtp_packet_size;
 	int sample_per_packet;
 	int frame_interval_time;
+	bool has_valid_avtp_timestamp;
+	u32 last_avtp_timestamp;
 	enum AVTP_AAF_FORMAT avtp_format;
 	int avtp_bytes_per_ch;
 	int shift;
@@ -103,7 +105,8 @@ struct aaf_packetizer {
 
 	int piece_data_len;
 	bool f_warned;
-	struct mse_start_time start_time;
+	bool f_need_calc_offset;
+	u32 start_time;
 
 	unsigned char packet_template[ETHFRAMELEN_MAX];
 	unsigned char packet_piece[ETHFRAMELEN_MAX];
@@ -278,6 +281,10 @@ static int mse_packetizer_aaf_open(void)
 	aaf->piece_f = false;
 	aaf->send_seq_num = 0;
 	aaf->piece_data_len = 0;
+	aaf->start_time = 0;
+	aaf->f_need_calc_offset = false;
+	aaf->has_valid_avtp_timestamp = false;
+	aaf->last_avtp_timestamp = 0;
 
 	mse_packetizer_stats_init(&aaf->stats);
 
@@ -316,9 +323,10 @@ static int mse_packetizer_aaf_packet_init(int index)
 	aaf->piece_f = false;
 	aaf->send_seq_num = 0;
 	aaf->piece_data_len = 0;
-	aaf->start_time.start_time = 0;
-	aaf->start_time.capture_diff = 0;
-	aaf->start_time.capture_freq = 0;
+	aaf->start_time = 0;
+	aaf->f_need_calc_offset = false;
+	aaf->has_valid_avtp_timestamp = false;
+	aaf->last_avtp_timestamp = 0;
 
 	mse_packetizer_stats_init(&aaf->stats);
 
@@ -717,6 +725,8 @@ static int mse_packetizer_aaf_depacketize(int index,
 	int channels;
 	int count, stored;
 	int ret;
+	bool tv;
+	u32 avtp_timestamp;
 
 	if (index >= ARRAY_SIZE(aaf_packetizer_table))
 		return -EPERM;
@@ -758,20 +768,38 @@ static int mse_packetizer_aaf_depacketize(int index,
 	aaf->frame_interval_time = div_u64(NSEC_SCALE * aaf->sample_per_packet,
 					   aaf_sample_rate);
 
-	if (aaf->start_time.capture_freq > 0 &&
-	    aaf->stats.seq_num_next == SEQNUM_INIT) {
-		offset = mse_packetizer_calc_audio_offset(
-			avtp_get_timestamp(packet),
-			&aaf->start_time,
+	tv = avtp_get_tv(packet);
+	avtp_timestamp = avtp_get_timestamp(packet);
+
+	/* check timestamp valid, if false interpolate value */
+	if (tv) {
+		aaf->has_valid_avtp_timestamp = true;
+	} else if (aaf->has_valid_avtp_timestamp) {
+		avtp_timestamp = aaf->last_avtp_timestamp +
+			aaf->frame_interval_time;
+	} else if (aaf->f_need_calc_offset) {
+		return MSE_PACKETIZE_STATUS_DISCARD;
+	}
+	aaf->last_avtp_timestamp = avtp_timestamp;
+
+	if (aaf->f_need_calc_offset) {
+		ret = mse_packetizer_calc_audio_offset(
+			avtp_timestamp,
+			aaf->start_time,
 			aaf_sample_rate,
 			aaf_byte_per_ch,
 			channels,
-			buffer_size);
-		if (offset >= buffer_size) {
+			buffer_size,
+			&offset);
+		if (ret == MSE_PACKETIZE_STATUS_SKIP) {
 			*buffer_processed = buffer_size;
+
 			return MSE_PACKETIZE_STATUS_SKIP;
+		} else if (ret == MSE_PACKETIZE_STATUS_DISCARD) {
+			return MSE_PACKETIZE_STATUS_DISCARD;
 		}
 
+		aaf->f_need_calc_offset = false;
 		*buffer_processed += offset;
 	}
 
@@ -810,7 +838,7 @@ static int mse_packetizer_aaf_depacketize(int index,
 	else
 		*buffer_processed += stored;
 
-	*timestamp = avtp_get_timestamp(packet);
+	*timestamp = avtp_timestamp;
 
 	/* buffer over check */
 	if (*buffer_processed >= buffer_size)
@@ -819,8 +847,7 @@ static int mse_packetizer_aaf_depacketize(int index,
 	return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
-static int mse_packetizer_aaf_set_start_time(int index,
-					     struct mse_start_time *start_time)
+static int mse_packetizer_aaf_set_start_time(int index, u32 start_time)
 {
 	struct aaf_packetizer *aaf;
 
@@ -828,7 +855,22 @@ static int mse_packetizer_aaf_set_start_time(int index,
 		return -EPERM;
 
 	aaf = &aaf_packetizer_table[index];
-	aaf->start_time = *start_time;
+	aaf->start_time = start_time;
+
+	return 0;
+}
+
+static int mse_packetizer_aaf_set_need_calc_offset(int index)
+{
+	struct aaf_packetizer *aaf;
+
+	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+		return -EPERM;
+
+	aaf = &aaf_packetizer_table[index];
+	aaf->f_need_calc_offset = true;
+	aaf->has_valid_avtp_timestamp = false;
+	aaf->last_avtp_timestamp = 0;
 
 	return 0;
 }
@@ -841,6 +883,7 @@ struct mse_packetizer_ops mse_packetizer_aaf_ops = {
 	.set_audio_config = mse_packetizer_aaf_set_audio_config,
 	.get_audio_info = mse_packetizer_aaf_get_audio_info,
 	.set_start_time = mse_packetizer_aaf_set_start_time,
+	.set_need_calc_offset = mse_packetizer_aaf_set_need_calc_offset,
 	.calc_cbs = mse_packetizer_aaf_calc_cbs,
 	.packetize = mse_packetizer_aaf_packetize,
 	.depacketize = mse_packetizer_aaf_depacketize,

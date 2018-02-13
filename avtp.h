@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -360,6 +360,20 @@ static inline void avtp_set_stream_id(void *data, u8 value[8])
 	*((u8 *)(data + 9 + AVTP_OFFSET))  = value[5];
 	*((u8 *)(data + 10 + AVTP_OFFSET)) = value[6];
 	*((u8 *)(data + 11 + AVTP_OFFSET)) = value[7];
+}
+
+static inline bool avtp_get_tv(void *data)
+{
+	u8 tmp = *((u8 *)(data + 1 + AVTP_OFFSET));
+
+	return (tmp & 0x1);
+}
+
+static inline void avtp_set_tv(void *data, bool tv)
+{
+	u8 tmp = *((u8 *)(data + 1 + AVTP_OFFSET));
+
+	*((u8 *)(data + 1 + AVTP_OFFSET)) = (tmp & 0xFE) | (!!tv);
 }
 
 static inline void avtp_make_streamid(u8 *streamid, char *mac, int uid)

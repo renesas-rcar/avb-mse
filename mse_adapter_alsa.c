@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -91,13 +91,18 @@ module_param(alsa_devices, int, 0440);
 struct alsa_stream {
 	struct snd_pcm_substream	*substream;
 	struct mse_audio_config		audio_config;
-	int				byte_pos;
 	int				period_pos;
+	int                             next_period_pos;
+	int                             periods;
 	int				byte_per_period;
-	int				next_period_byte;
 	int				index;
 	bool				streaming;
 };
+
+static inline int pos_inc(struct alsa_stream *io, int pos)
+{
+	return (pos + 1) % io->periods;
+}
 
 /* Device info */
 struct alsa_device {
@@ -182,6 +187,7 @@ static int mse_adapter_alsa_callback(void *priv, int size)
 	struct snd_pcm_runtime *runtime;
 	struct alsa_stream *io = priv;
 	int err;
+	void *buffer;
 
 	mse_debug("START\n");
 
@@ -205,14 +211,7 @@ static int mse_adapter_alsa_callback(void *priv, int size)
 		return 0;
 	}
 
-	io->byte_pos += io->byte_per_period;
-	io->period_pos++;
-	io->next_period_byte += io->byte_per_period;
-	if (io->period_pos >= runtime->periods) {
-		io->byte_pos = 0;
-		io->period_pos = 0;
-		io->next_period_byte = io->byte_per_period;
-	}
+	io->period_pos = pos_inc(io, io->period_pos);
 
 	snd_pcm_period_elapsed(io->substream);
 
@@ -221,15 +220,22 @@ static int mse_adapter_alsa_callback(void *priv, int size)
 		return 0;
 	}
 
-	err = mse_start_transmission(io->index,
-				     runtime->dma_area + io->byte_pos,
-				     io->byte_per_period,
-				     io,
-				     mse_adapter_alsa_callback);
-	if (err < 0) {
+	buffer = runtime->dma_area + io->next_period_pos * io->byte_per_period,
+
+	err = mse_start_transmission(
+		io->index,
+		buffer,
+		io->byte_per_period,
+		io,
+		mse_adapter_alsa_callback);
+	if (err == -EAGAIN) {
+		return 0;
+	} else if (err < 0) {
 		mse_err("Failed mse_start_transmission() err=%d\n", err);
 		return -EPERM;
 	}
+
+	io->next_period_pos = pos_inc(io, io->next_period_pos);
 
 	return 0;
 }
@@ -368,8 +374,10 @@ static int mse_adapter_alsa_trigger(
 	struct alsa_device *chip;
 	struct snd_pcm_runtime *runtime;
 	struct alsa_stream *io;
+	void *buffer;
 	int rtn = 0;
-	int err;
+	int err, i;
+	int periods;
 
 	mse_debug("cmd=%d\n", cmd);
 
@@ -386,12 +394,12 @@ static int mse_adapter_alsa_trigger(
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 		io->substream		= substream;
-		io->byte_pos		= 0;
 		io->period_pos		= 0;
 		io->byte_per_period	= runtime->period_size
 					  * runtime->channels
 					  * samples_to_bytes(runtime, 1);
-		io->next_period_byte	= io->byte_per_period;
+		io->next_period_pos	= 0;
+		io->periods		= runtime->periods;
 
 		/* config check */
 		mse_debug("ch=%u period_size=%lu fmt_size=%zu\n",
@@ -405,16 +413,30 @@ static int mse_adapter_alsa_trigger(
 			break;
 		}
 		io->streaming = true;
-		err = mse_start_transmission(io->index,
-					     runtime->dma_area + io->byte_pos,
-					     io->byte_per_period,
-					     io,
-					     mse_adapter_alsa_callback);
-		if (err < 0) {
-			mse_err("Failed mse_start_transmission() err=%d\n",
-				err);
-			rtn = -EPERM;
-			break;
+
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			periods = runtime->start_threshold / runtime->period_size;
+		else
+			periods = io->periods;
+
+		for (i = 0; i < periods; i++) {
+			buffer = runtime->dma_area + io->next_period_pos * io->byte_per_period,
+
+			err = mse_start_transmission(io->index,
+						     buffer,
+						     io->byte_per_period,
+						     io,
+						     mse_adapter_alsa_callback);
+			if (err == -EAGAIN) {
+				break;
+			} else if (err < 0) {
+				mse_err("Failed mse_start_transmission() err=%d\n",
+					err);
+				rtn = -EPERM;
+				break;
+			}
+
+			io->next_period_pos = pos_inc(io, io->next_period_pos);
 		}
 		break;
 
@@ -559,7 +581,9 @@ static snd_pcm_uframes_t mse_adapter_alsa_pointer(
 	io = mse_adapter_alsa_pcm_to_io(chip, substream);
 
 	mse_debug("bytes_to_frames()\n");
-	return bytes_to_frames(runtime, io->byte_pos);
+
+	/* return current proccessed bytes that calculated by period position */
+	return bytes_to_frames(runtime, io->period_pos * io->byte_per_period);
 }
 
 struct snd_pcm_ops g_mse_adapter_alsa_playback_ops = {
