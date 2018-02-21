@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2016-2017 Renesas Electronics Corporation
+ Copyright (C) 2016-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -716,9 +716,6 @@ int mse_ioctl_init(int major, int mse_instance_max)
 	int err;
 
 	mse_debug("START\n");
-
-	if (major < 0 || 4094 < major)
-		return -EINVAL;
 
 	ioctl_table = kcalloc(mse_instance_max, sizeof(*ioctl_table),
 			      GFP_KERNEL);

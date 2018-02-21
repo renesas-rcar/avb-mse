@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -94,13 +94,16 @@ struct iec61883_6_packetizer {
 	int avtp_packet_size;
 	int sample_per_packet;
 	int frame_interval_time;
+	bool has_valid_avtp_timestamp;
+	u32 last_avtp_timestamp;
 
 	int class_interval_frames;
 
 	u8 local_total_samples;
 	int piece_data_len;
 	bool f_warned;
-	struct mse_start_time start_time;
+	bool f_need_calc_offset;
+	u32 start_time;
 
 	unsigned char packet_template[ETHFRAMELEN_MAX];
 	unsigned char packet_piece[ETHFRAMELEN_MAX];
@@ -218,6 +221,10 @@ static int mse_packetizer_iec61883_6_open(void)
 	iec61883_6->send_seq_num = 0;
 	iec61883_6->local_total_samples = 0;
 	iec61883_6->piece_data_len = 0;
+	iec61883_6->start_time = 0;
+	iec61883_6->f_need_calc_offset = false;
+	iec61883_6->has_valid_avtp_timestamp = false;
+	iec61883_6->last_avtp_timestamp = 0;
 
 	mse_packetizer_stats_init(&iec61883_6->stats);
 
@@ -257,9 +264,10 @@ static int mse_packetizer_iec61883_6_packet_init(int index)
 	iec61883_6->send_seq_num = 0;
 	iec61883_6->local_total_samples = 0;
 	iec61883_6->piece_data_len = 0;
-	iec61883_6->start_time.start_time = 0;
-	iec61883_6->start_time.capture_diff = 0;
-	iec61883_6->start_time.capture_freq = 0;
+	iec61883_6->start_time = 0;
+	iec61883_6->f_need_calc_offset = false;
+	iec61883_6->has_valid_avtp_timestamp = false;
+	iec61883_6->last_avtp_timestamp = 0;
 
 	mse_packetizer_stats_init(&iec61883_6->stats);
 
@@ -731,6 +739,8 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 	int data_size;
 	char *buf, tmp_buffer[ETHFRAMEMTU_MAX] = {0};
 	int ret;
+	bool tv;
+	u32 avtp_timestamp;
 
 	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
 		return -EPERM;
@@ -775,20 +785,37 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 			NSEC_SCALE * iec61883_6->sample_per_packet,
 			sample_rate);
 
-	if (iec61883_6->start_time.capture_freq > 0 &&
-	    iec61883_6->stats.seq_num_next == SEQNUM_INIT) {
-		offset = mse_packetizer_calc_audio_offset(
-			avtp_get_timestamp(packet),
-			&iec61883_6->start_time,
+	tv = avtp_get_tv(packet);
+	avtp_timestamp = avtp_get_timestamp(packet);
+
+	/* check timestamp valid, if false interpolate value */
+	if (tv) {
+		iec61883_6->has_valid_avtp_timestamp = true;
+	} else if (iec61883_6->has_valid_avtp_timestamp) {
+		avtp_timestamp = iec61883_6->last_avtp_timestamp +
+			iec61883_6->frame_interval_time;
+	} else if (iec61883_6->f_need_calc_offset) {
+		return MSE_PACKETIZE_STATUS_DISCARD;
+	}
+	iec61883_6->last_avtp_timestamp = avtp_timestamp;
+
+	if (iec61883_6->f_need_calc_offset) {
+		ret = mse_packetizer_calc_audio_offset(
+			avtp_timestamp,
+			iec61883_6->start_time,
 			avtp_fdf_to_sample_rate(avtp_get_iec61883_fdf(packet)),
 			iec61883_6->audio_config.bytes_per_sample,
 			channels,
-			buffer_size);
-		if (offset >= buffer_size) {
+			buffer_size,
+			&offset);
+		if (ret == MSE_PACKETIZE_STATUS_SKIP) {
 			*buffer_processed = buffer_size;
 			return MSE_PACKETIZE_STATUS_SKIP;
+		} else if (ret == MSE_PACKETIZE_STATUS_DISCARD) {
+			return MSE_PACKETIZE_STATUS_DISCARD;
 		}
 
+		iec61883_6->f_need_calc_offset = false;
 		*buffer_processed += offset;
 	}
 
@@ -822,7 +849,7 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 		*buffer_processed += data_size;
 	}
 
-	*timestamp = avtp_get_timestamp(packet);
+	*timestamp = avtp_timestamp;
 
 	/* buffer over check */
 	if (*buffer_processed >= buffer_size)
@@ -831,9 +858,7 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 	return MSE_PACKETIZE_STATUS_CONTINUE;
 }
 
-static int mse_packetizer_iec61883_6_set_start_time(
-					int index,
-					struct mse_start_time *start_time)
+static int mse_packetizer_iec61883_6_set_start_time(int index, u32 start_time)
 {
 	struct iec61883_6_packetizer *iec61883_6;
 
@@ -841,7 +866,22 @@ static int mse_packetizer_iec61883_6_set_start_time(
 		return -EPERM;
 
 	iec61883_6 = &iec61883_6_packetizer_table[index];
-	iec61883_6->start_time = *start_time;
+	iec61883_6->start_time = start_time;
+
+	return 0;
+}
+
+static int mse_packetizer_iec61883_6_set_need_calc_offset(int index)
+{
+	struct iec61883_6_packetizer *iec61883_6;
+
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+		return -EPERM;
+
+	iec61883_6 = &iec61883_6_packetizer_table[index];
+	iec61883_6->f_need_calc_offset = true;
+	iec61883_6->has_valid_avtp_timestamp = false;
+	iec61883_6->last_avtp_timestamp = 0;
 
 	return 0;
 }
@@ -854,6 +894,7 @@ struct mse_packetizer_ops mse_packetizer_iec61883_6_ops = {
 	.set_audio_config = mse_packetizer_iec61883_6_set_audio_config,
 	.get_audio_info = mse_packetizer_iec61883_6_get_audio_info,
 	.set_start_time = mse_packetizer_iec61883_6_set_start_time,
+	.set_need_calc_offset = mse_packetizer_iec61883_6_set_need_calc_offset,
 	.calc_cbs = mse_packetizer_iec61883_6_calc_cbs,
 	.packetize = mse_packetizer_iec61883_6_packetize,
 	.depacketize = mse_packetizer_iec61883_6_depacketize,

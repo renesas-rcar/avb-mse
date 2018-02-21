@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -78,6 +78,7 @@ enum MSE_PACKETIZE_STATUS  {
 	MSE_PACKETIZE_STATUS_MAY_COMPLETE,
 	MSE_PACKETIZE_STATUS_NOT_ENOUGH,
 	MSE_PACKETIZE_STATUS_SKIP,
+	MSE_PACKETIZE_STATUS_DISCARD,
 };
 
 /**
@@ -96,15 +97,6 @@ struct mse_audio_info {
 	int avtp_packet_size;
 	int sample_per_packet;
 	int frame_interval_time;
-};
-
-/**
- * @brief audio period start time
- */
-struct mse_start_time {
-	u32 start_time;
-	u32 capture_diff;
-	u32 capture_freq;
 };
 
 static inline int mse_get_bit_depth(enum MSE_AUDIO_BIT bit_depth)
@@ -148,8 +140,9 @@ struct mse_packetizer_ops {
 	/** @brief get audio info function pointer */
 	int (*get_audio_info)(int index, struct mse_audio_info *info);
 	/** @brief set start time of audio period */
-	int (*set_start_time)(int index,
-			      struct mse_start_time *start_time);
+	int (*set_start_time)(int index, u32 start_time);
+	/** @brief set need calc offset mode */
+	int (*set_need_calc_offset)(int index);
 
 	/** @brief calc_cbs function pointer */
 	int (*calc_cbs)(int index, struct mse_cbsparam *cbs);
@@ -183,7 +176,7 @@ extern struct mse_packetizer_ops mse_packetizer_cvf_h264_ops;
 /* Video Packetizer for CVF MJPEG */
 extern struct mse_packetizer_ops mse_packetizer_cvf_mjpeg_ops;
 /* Packetizer for CRF timestamp Audio */
-extern struct mse_packetizer_ops mse_packetizer_crf_tstamp_audio_ops;
+extern struct mse_packetizer_ops mse_packetizer_crf_timestamp_audio_ops;
 /* Video Packetizer for IEC61883-4 */
 extern struct mse_packetizer_ops mse_packetizer_iec61883_4_ops;
 
@@ -203,12 +196,13 @@ int mse_packetizer_calc_cbs_by_bitrate(u32 port_transmit_rate,
 				       u32 payload_bitrate,
 				       u32 payload_size,
 				       struct mse_cbsparam *cbs);
-u32 mse_packetizer_calc_audio_offset(u32 avtp_timestamp,
-				     struct mse_start_time *start_time,
+int mse_packetizer_calc_audio_offset(u32 avtp_timestamp,
+				     u32 start_time,
 				     int sample_rate,
 				     int sample_byte,
 				     int channels,
-				     size_t buffer_size);
+				     size_t buffer_size,
+				     u32 *offset);
 void mse_packetizer_stats_init(struct mse_packetizer_stats *stats);
 int mse_packetizer_stats_seqnum(struct mse_packetizer_stats *stats, u8 seq_num);
 void mse_packetizer_stats_report(struct mse_packetizer_stats *stats);
