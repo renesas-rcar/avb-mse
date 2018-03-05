@@ -2043,8 +2043,10 @@ static void mse_work_packetize(struct work_struct *work)
 	if (instance->f_continue) {
 		queue_work(instance->wq_packet, &instance->wk_packetize);
 	} else {
-		atomic_inc(&instance->done_buf_cnt);
 		if (!instance->timer_interval)
+			atomic_inc(&instance->done_buf_cnt);
+
+		if (atomic_read(&instance->done_buf_cnt) > 0)
 			queue_work(instance->wq_packet, &instance->wk_callback);
 	}
 }
@@ -2266,7 +2268,7 @@ static void mse_work_callback(struct work_struct *work)
 	struct mse_instance *instance;
 	struct mse_adapter *adapter;
 	struct mse_trans_buffer *buf;
-	int size;
+	int work_length;
 	unsigned long flags;
 
 	instance = container_of(work, struct mse_instance, wk_callback);
@@ -2294,12 +2296,12 @@ static void mse_work_callback(struct work_struct *work)
 		return;
 
 	/* no buffer is processed */
-	if (!atomic_read(&instance->done_buf_cnt))
+	if (!instance->tx && !atomic_read(&instance->done_buf_cnt))
 		return;
 
 	mse_debug_state(instance);
 
-	size = buf->work_length;
+	work_length = buf->work_length;
 
 	if (instance->tx) {
 		if (IS_MSE_TYPE_MPEG2TS(adapter->type)) {
@@ -2314,13 +2316,16 @@ static void mse_work_callback(struct work_struct *work)
 
 					if (compare_pcr(pcr_90k, clock_90k))
 						return;
+
+					atomic_set(&instance->done_buf_cnt, 1);
 				}
 			}
 		}
+
+		if (work_length < buf->buffer_size)
+			return;
 	} else {
-		if (!IS_MSE_TYPE_AUDIO(adapter->type)) {
-			size = buf->work_length;
-		} else {
+		if (IS_MSE_TYPE_AUDIO(adapter->type)) {
 			int out_cnt, i, temp_r, temp_w, temp_len;
 			bool has_valid_data, has_writing_data, f_present;
 			struct mse_packetizer_ops *packetizer;
@@ -2416,9 +2421,9 @@ static void mse_work_callback(struct work_struct *work)
 	}
 
 	/* complete callback */
-	if (instance->tx || size)
+	if (instance->tx || work_length)
 		if (atomic_dec_not_zero(&instance->done_buf_cnt))
-			mse_trans_complete(instance, size);
+			mse_trans_complete(instance, work_length);
 
 	if (!atomic_read(&instance->trans_buf_cnt)) {
 		/* state is STOPPING */
@@ -2570,7 +2575,9 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 	if (instance->mpeg2ts_clock_90k != MPEG2TS_PCR90K_INVALID)
 		instance->mpeg2ts_clock_90k += MPEG2TS_CLOCK_INC;
 
-	if (IS_MSE_TYPE_AUDIO(instance->media->type) && !instance->tx)
+	if (IS_MSE_TYPE_AUDIO(instance->media->type))
+		atomic_inc(&instance->done_buf_cnt);
+	else if (IS_MSE_TYPE_VIDEO(instance->media->type) && instance->tx)
 		atomic_inc(&instance->done_buf_cnt);
 
 	/* timer update */
@@ -2596,7 +2603,7 @@ static u32 mse_ptp_timer_callback(void *arg)
 	expire_prev = instance->ptp_timer_start;
 	expire_next = ptp_timer_update_start_timing(instance, expire_prev);
 
-	if (IS_MSE_TYPE_AUDIO(instance->media->type) && !instance->tx)
+	if (IS_MSE_TYPE_AUDIO(instance->media->type))
 		atomic_inc(&instance->done_buf_cnt);
 
 	queue_work(instance->wq_packet, &instance->wk_callback);
@@ -3222,6 +3229,8 @@ static int mpeg2ts_buffer_write(struct mse_instance *instance,
 
 	if (instance->mpeg2ts_clock_90k != MPEG2TS_PCR90K_INVALID)
 		mpeg2ts_adjust_pcr(instance, mpeg2ts->buffer_size);
+
+	atomic_set(&instance->done_buf_cnt, 1);
 
 	return 0;
 }
