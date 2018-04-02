@@ -451,7 +451,8 @@ static int mse_packetizer_cvf_h264_packetize(int index,
 	data_len = h264->next_nal - cur_nal;
 	if (data_len > h264->data_len_max) {
 		data_len = h264->data_len_max;
-	} else {
+	} else if (is_single_nal(h264->fu_indicator) ||
+		   !(h264->fu_header & FU_H_S_BIT)) {
 		h264->fu_header |= FU_H_E_BIT; /* end bit*/
 		h264->next_nal = NULL;
 	}
@@ -476,7 +477,8 @@ static int mse_packetizer_cvf_h264_packetize(int index,
 	*packet_size = h264->header_size + data_offset + data_len;
 	(*buffer_processed) += data_len;
 
-	if (*buffer_processed >= buffer_size) {
+	if (*buffer_processed >= buffer_size &&
+	    h264->fu_header & FU_H_E_BIT) {
 		/* set M bit */
 		((unsigned char *)packet)[MBIT_ADDR] |= MBIT_SET;
 
