@@ -4312,6 +4312,19 @@ static void mse_exit_kernel_resource(struct mse_instance *instance,
 				     struct mse_adapter *adapter)
 
 {
+	/* flush workqueue */
+	if (instance->wq_crf_packet)
+		flush_workqueue(instance->wq_crf_packet);
+
+	if (instance->wq_tstamp)
+		flush_workqueue(instance->wq_tstamp);
+
+	if (instance->wq_packet)
+		flush_workqueue(instance->wq_packet);
+
+	if (instance->wq_stream)
+		flush_workqueue(instance->wq_stream);
+
 	/* destroy workqueue */
 	if (instance->wq_crf_packet)
 		destroy_workqueue(instance->wq_crf_packet);
