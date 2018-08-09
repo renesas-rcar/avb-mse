@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2016-2017 Renesas Electronics Corporation
+ Copyright (C) 2016-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -203,6 +203,9 @@ struct mse_ptp_config {
 struct mse_mch_config {
 	bool enable;
 };
+
+#define MSE_CONFIG_TX_DELAY_TIME_NS_MAX (0x40000000)
+#define MSE_CONFIG_RX_DELAY_TIME_NS_MAX (0x40000000)
 
 struct mse_delay_time {
 	uint32_t max_transit_time_ns;

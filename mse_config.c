@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -792,11 +792,25 @@ int mse_config_set_delay_time(int index, struct mse_delay_time *data)
 
 	mse_debug("START\n");
 
+	if (data->tx_delay_time_ns > MSE_CONFIG_TX_DELAY_TIME_NS_MAX)
+		goto wrong_value;
+
+	if (data->rx_delay_time_ns > MSE_CONFIG_RX_DELAY_TIME_NS_MAX)
+		goto wrong_value;
+
 	spin_lock_irqsave(&config->lock, flags);
 	config->delay_time = *data;
 	spin_unlock_irqrestore(&config->lock, flags);
 
 	return 0;
+
+wrong_value:
+	mse_err("invalid value. max_transit_time_ns=%d, tx_delay_time_ns=%d, rx_delay_time_ns=%d\n",
+		data->max_transit_time_ns,
+		data->tx_delay_time_ns,
+		data->rx_delay_time_ns);
+
+	return -EINVAL;
 }
 
 int mse_config_get_delay_time(int index, struct mse_delay_time *data)
@@ -911,8 +925,8 @@ static struct mse_config mse_config_default_video = {
 	},
 	.delay_time = {
 		.max_transit_time_ns = 2000000,
-		.tx_delay_time_ns = 2000000,
-		.rx_delay_time_ns = 2000000,
+		.tx_delay_time_ns = 0,
+		.rx_delay_time_ns = 0,
 	},
 };
 
@@ -950,8 +964,8 @@ static struct mse_config mse_config_default_mpeg2ts = {
 	},
 	.delay_time = {
 		.max_transit_time_ns = 2000000,
-		.tx_delay_time_ns = 2000000,
-		.rx_delay_time_ns = 2000000,
+		.tx_delay_time_ns = 0,
+		.rx_delay_time_ns = 0,
 	},
 };
 
