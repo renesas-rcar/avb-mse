@@ -400,6 +400,7 @@ struct mse_instance {
 
 	/** @brief MCH & CRF Settings **/
 	int f_ptp_capture;
+	int f_ptp_timer;
 	int f_mch_enable;
 	int ptp_clock_device;
 	int ptp_clock_ch;
@@ -834,6 +835,7 @@ static void mse_get_default_config(struct mse_instance *instance,
 		instance->ptp_clock_device = 0;
 		instance->f_ptp_capture =
 			(ptp_config.type == MSE_PTP_TYPE_CAPTURE);
+		instance->f_ptp_timer = instance->f_ptp_capture;
 		instance->ptp_clock_ch = ptp_config.capture_ch;
 		instance->ptp_capture_freq = ptp_config.capture_freq;
 
@@ -3324,7 +3326,8 @@ static void mse_work_start_transmission(struct work_struct *work)
 		}
 	}
 
-	if (instance->ptp_timer_handle &&
+	if (instance->f_ptp_capture &&
+	    instance->ptp_timer_handle &&
 	    instance->captured_timestamps < PTP_SYNC_LOCK_THRESHOLD) {
 		spin_unlock_irqrestore(&instance->lock_buf_list, flags);
 		instance->f_wait_start_transmission = true;
@@ -4212,7 +4215,6 @@ static int mse_setup_ptp(struct mse_instance *instance)
 {
 	int err = 0;
 	void *ptp_handle;
-	void *ptp_timer_handle;
 
 	/* ptp open */
 	ptp_handle = mse_ptp_open(instance->ptp_index);
@@ -4240,18 +4242,21 @@ static int mse_setup_ptp(struct mse_instance *instance)
 		return err;
 	}
 
+	instance->ptp_handle = ptp_handle;
+
+	return 0;
+}
+
+static int mse_setup_ptp_timer(struct mse_instance *instance)
+{
+	void *ptp_timer_handle;
+
 	ptp_timer_handle = mse_ptp_timer_open(instance->ptp_index,
 					      mse_ptp_timer_callback,
 					      instance);
 	if (!ptp_timer_handle)
 		mse_warn("cannot open ptp_timer, fallback using hires timer\n");
-	else
-		tstamps_reader_init(&instance->reader_ptp_start_time,
-				    &instance->tstamp_que,
-				    "PERIOD",
-				    false);
 
-	instance->ptp_handle = ptp_handle;
 	instance->ptp_timer_handle = ptp_timer_handle;
 
 	return 0;
@@ -4703,6 +4708,13 @@ int mse_open(int index_media, bool tx)
 	/* open PTP capture and PTP Timer */
 	if (instance->f_ptp_capture) {
 		err = mse_setup_ptp(instance);
+		if (err < 0)
+			goto error_mse_resource_release;
+	}
+
+	/* open PTP Timer */
+	if (instance->f_ptp_timer) {
+		err = mse_setup_ptp_timer(instance);
 		if (err < 0)
 			goto error_mse_resource_release;
 	}
