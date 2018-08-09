@@ -1025,12 +1025,13 @@ static void callback_completion(struct mse_trans_buffer *buf, int size)
 	buf->mse_completion = NULL;
 }
 
-static void mse_trans_complete(struct mse_instance *instance, int size)
+static void mse_trans_complete(struct mse_instance *instance,
+			       struct list_head *buf_list,
+			       int size)
 {
 	struct mse_trans_buffer *buf;
 
-	buf = list_first_entry_or_null(&instance->proc_buf_list,
-				       struct mse_trans_buffer, list);
+	buf = list_first_entry_or_null(buf_list, struct mse_trans_buffer, list);
 	if (buf) {
 		if (size > 0)
 			instance->processed += buf->work_length;
@@ -2020,7 +2021,9 @@ static void mse_work_packetize(struct work_struct *work)
 							flags);
 			}
 
-			mse_trans_complete(instance, ret);
+			mse_trans_complete(instance,
+					   &instance->proc_buf_list,
+					   ret);
 
 			return;
 		}
@@ -2028,7 +2031,7 @@ static void mse_work_packetize(struct work_struct *work)
 		mse_err("error=%d buffer may be corrupted\n", ret);
 		instance->f_continue = false;
 
-		mse_trans_complete(instance, ret);
+		mse_trans_complete(instance, &instance->proc_buf_list, ret);
 
 		/* state is STOPPING */
 		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
@@ -2150,11 +2153,11 @@ static void mse_work_depacketize(struct work_struct *work)
 				packet_buffer,
 				instance->packetizer,
 				&instance->temp_len[temp_w]);
-			if (ret < 0) {
-				if (ret != -EAGAIN) {
-					mse_trans_complete(instance, ret);
-					break;
-				}
+			if (ret < 0 && ret != -EAGAIN) {
+				mse_trans_complete(instance,
+						   &instance->proc_buf_list,
+						   ret);
+				break;
 			}
 
 			/* samples per packet */
@@ -2238,7 +2241,9 @@ static void mse_work_depacketize(struct work_struct *work)
 				  buf->buffer,
 				  buf->work_length, ret);
 		} else if (ret != -EAGAIN) {
-			mse_trans_complete(instance, ret);
+			mse_trans_complete(instance,
+					   &instance->proc_buf_list,
+					   ret);
 		}
 
 		break;
@@ -2411,7 +2416,10 @@ static void mse_work_callback(struct work_struct *work)
 
 			/* output out_cnt buffers to adapter */
 			for (i = 0; i < out_cnt && buf; i++) {
-				mse_trans_complete(instance, buf->buffer_size);
+				mse_trans_complete(instance,
+						   &instance->proc_buf_list,
+						   buf->buffer_size);
+
 				atomic_dec(&instance->done_buf_cnt);
 				buf = list_first_entry_or_null(
 					&instance->proc_buf_list,
@@ -2428,7 +2436,9 @@ static void mse_work_callback(struct work_struct *work)
 	/* complete callback */
 	if (instance->tx || work_length)
 		if (atomic_dec_not_zero(&instance->done_buf_cnt))
-			mse_trans_complete(instance, work_length);
+			mse_trans_complete(instance,
+					   &instance->proc_buf_list,
+					   work_length);
 
 	if (mse_is_buffer_empty(instance)) {
 		/* state is STOPPING */
@@ -3182,7 +3192,7 @@ static int mpeg2ts_buffer_write(struct mse_instance *instance,
 	if (request_size > MSE_MPEG2TS_BUF_SIZE) {
 		mse_err("mpeg2ts buffer overrun %zu/%u\n",
 			request_size, MSE_MPEG2TS_BUF_SIZE);
-		mse_trans_complete(instance, -EIO);
+		mse_trans_complete(instance, &instance->proc_buf_list, -EIO);
 
 		/* state is STOPPING */
 		if (mse_state_test(instance, MSE_STATE_STOPPING))
@@ -3213,7 +3223,9 @@ static int mpeg2ts_buffer_write(struct mse_instance *instance,
 
 	if (!trans_start && !force_flush) {
 		/* Not enough data, request next buffer */
-		mse_trans_complete(instance, buffer_size);
+		mse_trans_complete(instance,
+				   &instance->proc_buf_list,
+				   buffer_size);
 
 		return -1;
 	}
@@ -3381,7 +3393,10 @@ static void mse_work_start_transmission(struct work_struct *work)
 				write_unlock_irqrestore(&instance->lock_state,
 							flags);
 
-				mse_trans_complete(instance, ret);
+				mse_trans_complete(instance,
+						   &instance->proc_buf_list,
+						   ret);
+
 				return;
 			}
 		}
