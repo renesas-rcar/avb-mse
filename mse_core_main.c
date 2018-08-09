@@ -797,6 +797,14 @@ static void mse_get_default_config(struct mse_instance *instance,
 	memcpy(network->streamid, avtp_rx_param.streamid,
 	       sizeof(network->streamid));
 
+	delay_time = media->config.delay_time;
+
+	instance->max_transit_time_ns = delay_time.max_transit_time_ns;
+	if (tx)
+		instance->delay_time_ns = delay_time.tx_delay_time_ns;
+	else
+		instance->delay_time_ns = delay_time.rx_delay_time_ns;
+
 	switch (media->type) {
 	case MSE_TYPE_ADAPTER_VIDEO:
 		video_config = media->config.media_video_config;
@@ -805,10 +813,6 @@ static void mse_get_default_config(struct mse_instance *instance,
 		video->fps.denominator = video_config.fps_denominator;
 		video->bitrate = video_config.bitrate;
 		video->bytes_per_frame = video_config.bytes_per_frame;
-
-		delay_time = media->config.delay_time;
-
-		instance->max_transit_time_ns = delay_time.max_transit_time_ns;
 		break;
 
 	case MSE_TYPE_ADAPTER_MPEG2TS:
@@ -818,10 +822,6 @@ static void mse_get_default_config(struct mse_instance *instance,
 			mpeg2ts_config.tspackets_per_frame;
 		mpeg2ts->bitrate = mpeg2ts_config.bitrate;
 		mpeg2ts->pcr_pid = mpeg2ts_config.pcr_pid;
-
-		delay_time = media->config.delay_time;
-
-		instance->max_transit_time_ns = delay_time.max_transit_time_ns;
 		break;
 
 	case MSE_TYPE_ADAPTER_AUDIO:
@@ -860,13 +860,6 @@ static void mse_get_default_config(struct mse_instance *instance,
 		memcpy(crf_network->streamid, crf_rx.streamid,
 		       sizeof(crf_network->streamid));
 
-		delay_time = media->config.delay_time;
-
-		instance->max_transit_time_ns = delay_time.max_transit_time_ns;
-		if (tx)
-			instance->delay_time_ns = delay_time.tx_delay_time_ns;
-		else
-			instance->delay_time_ns = delay_time.rx_delay_time_ns;
 		break;
 
 	default:
@@ -2849,7 +2842,6 @@ static void mse_start_streaming_audio(struct mse_instance *instance, u64 now)
 {
 	int i;
 	int captured;
-	struct mse_delay_time delay_time;
 
 	if (!instance->tx) {
 		instance->temp_w = 0;
@@ -2857,13 +2849,6 @@ static void mse_start_streaming_audio(struct mse_instance *instance, u64 now)
 		for (i = 0; i < MSE_DECODE_BUFFER_NUM; i++)
 			instance->temp_len[i] = 0;
 	}
-
-	/* Initialize delay time */
-	mse_config_get_delay_time(instance->media->index, &delay_time);
-	if (instance->tx)
-		instance->delay_time_ns = delay_time.tx_delay_time_ns;
-	else
-		instance->delay_time_ns = delay_time.rx_delay_time_ns;
 
 	instance->f_wait_start_transmission = false;
 
