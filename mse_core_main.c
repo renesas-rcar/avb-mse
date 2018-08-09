@@ -120,6 +120,7 @@
 #define PTP_TIMESTAMPS_MAX   (512)
 #define PTP_TIMER_INTERVAL   (20 * 1000000)  /* 1/300 sec * 6 = 20ms */
 
+#define PTP_TIMESTAMP_INVALID   ((u64)-1)
 #define PTP_TIME_DIFF_S32(a, b) ((s32)((u32)(a) - (u32)(b)))
 
 /* judge error 5% */
@@ -135,6 +136,9 @@
 #define MCH_ERROR_THRESHOLD(x)  div64_u64((x) * 10, 100)
 
 #define PTP_SYNC_LOCK_THRESHOLD (3)
+
+/* judge start 500us */
+#define PTP_TIMER_START_THRESHOLD (500000)
 
 #define CRF_TIMER_INTERVAL   (20 * 1000000)  /* 20ms */
 #define CRF_PTP_TIMESTAMPS   (1)     /* timestamps per CRF packet using ptp */
@@ -248,6 +252,8 @@ struct mse_trans_buffer {
 	size_t buffer_size;
 	/** @brief processed length of media buffer */
 	size_t work_length;
+	/** @brief AVTP timestamp for launch timer */
+	u64 launch_avtp_timestamp;
 	/** @brief private data of media adapter */
 	void *private_data;
 	/** @brief callback function to media adapter */
@@ -321,6 +327,10 @@ struct mse_instance {
 	struct list_head trans_buf_list;
 	/** @brief list of transmission buffer for core processing */
 	struct list_head proc_buf_list;
+	/** @brief list of transmission buffer for adjust output timing */
+	struct list_head wait_buf_list;
+	/** @brief list of transmission buffer for processing done */
+	struct list_head done_buf_list;
 	/** brief index of transmission buffer array */
 	int trans_idx;
 	/** brief count of buffers is not completed */
@@ -816,6 +826,12 @@ static void mse_get_default_config(struct mse_instance *instance,
 		video->fps.denominator = video_config.fps_denominator;
 		video->bitrate = video_config.bitrate;
 		video->bytes_per_frame = video_config.bytes_per_frame;
+
+		if (!tx && delay_time.rx_delay_time_ns != 0)
+			instance->f_ptp_timer = true;
+		else
+			instance->f_ptp_timer = false;
+
 		break;
 
 	case MSE_TYPE_ADAPTER_MPEG2TS:
@@ -1044,6 +1060,10 @@ static void mse_free_all_trans_buffers(struct mse_instance *instance, int size)
 	struct mse_trans_buffer *buf, *buf1;
 
 	/* free all buf from DONE buf list */
+	list_for_each_entry_safe(buf, buf1, &instance->done_buf_list, list)
+		callback_completion(buf, size);
+	list_for_each_entry_safe(buf, buf1, &instance->wait_buf_list, list)
+		callback_completion(buf, size);
 	list_for_each_entry_safe(buf, buf1, &instance->proc_buf_list, list)
 		callback_completion(buf, size);
 	atomic_set(&instance->done_buf_cnt, 0);
@@ -2079,21 +2099,17 @@ static void mse_set_start_time(struct mse_instance *instance)
 			   delay_period);
 }
 
-static void mse_work_depacketize(struct work_struct *work)
+static void mse_work_depacketize_common(struct mse_instance *instance)
 {
-	struct mse_instance *instance;
 	struct mse_packet_ctrl *packet_buffer;
 	struct mse_audio_info audio_info;
 	struct mse_trans_buffer *buf;
 	int received, ret = 0;
 	u64 timestamps[128];
 	int timestamps_stored;
-	int buf_cnt;
 	int temp_r, temp_w, temp_w_next;
 	bool has_valid_data = false;
 	unsigned long flags;
-
-	instance = container_of(work, struct mse_instance, wk_depacketize);
 
 	/* state is NOT STARTED */
 	if (!mse_state_test(instance, MSE_STATE_STARTED))
@@ -2228,11 +2244,7 @@ static void mse_work_depacketize(struct work_struct *work)
 		/* complete callback */
 		if (ret > 0) {
 			has_valid_data = true;
-			buf_cnt = atomic_inc_return(&instance->done_buf_cnt);
-
-			/* if timer enabled, done_buf_cnt keep in one */
-			if (instance->timer_interval && buf_cnt != 1)
-				atomic_dec(&instance->done_buf_cnt);
+			atomic_inc(&instance->done_buf_cnt);
 
 			mse_debug("buffer=%p depacketized=%zu ret=%d\n",
 				  buf->buffer,
@@ -2270,15 +2282,230 @@ static void mse_work_depacketize(struct work_struct *work)
 		instance->f_depacketizing = false;
 }
 
-static void mse_work_callback(struct work_struct *work)
+static bool mse_check_buffer_starvation(struct mse_instance *instance)
+{
+	int remain;
+
+	/* Stopped supply of buffer from upper */
+	if (mse_state_test(instance, MSE_STATE_STOPPING))
+		return false;
+
+	/* Exists buffer in preparation */
+	if (!list_empty(&instance->trans_buf_list) ||
+	    !list_empty(&instance->proc_buf_list) ||
+	    !list_empty(&instance->done_buf_list))
+		return false;
+
+	/* No exist buffer of extrusion target */
+	if (list_empty(&instance->wait_buf_list))
+		return false;
+
+	/* Exists still available space in receive buffer */
+	remain = mse_packet_ctrl_check_packet_remain(instance->packet_buffer);
+	if (remain > MSE_RX_PACKET_NUM_MAX)
+		return false;
+
+	mse_debug("Insufficient free buffer.\n");
+
+	return true;
+}
+
+static bool mse_check_ptp_timer_threshold(struct mse_instance *instance,
+					  u64 timestamp)
+{
+	struct mse_trans_buffer *wait_buf;
+	u64 now;
+
+	if (timestamp == PTP_TIMESTAMP_INVALID)
+		return false;
+
+	mse_ptp_get_time(instance->ptp_index, &now);
+
+	mse_debug("timestamp = %llu, now = %u\n", timestamp, (u32)now);
+
+	/* Check difference between now time and current timestamp */
+	if (PTP_TIME_DIFF_S32(timestamp, now) < PTP_TIMER_START_THRESHOLD) {
+		mse_debug("timestamp is within threashold. timestamp = %llu, now = %u\n",
+			  timestamp,
+			  (u32)now);
+
+		return false;
+	}
+
+	if (!list_empty(&instance->wait_buf_list)) {
+		/*
+		 * Check difference between previous timestamp for wait and
+		 * current timestamp
+		 */
+		wait_buf = list_last_entry(&instance->wait_buf_list,
+					   struct mse_trans_buffer,
+					   list);
+
+		if (wait_buf->launch_avtp_timestamp != PTP_TIMESTAMP_INVALID &&
+		    PTP_TIME_DIFF_S32(timestamp, wait_buf->launch_avtp_timestamp) < PTP_TIMER_START_THRESHOLD)
+			return false;
+	}
+
+	return true;
+}
+
+static bool do_depacketize_video_rx(struct mse_instance *instance, struct mse_trans_buffer *buf)
+{
+	u64 launch_avtp_timestamp = PTP_TIMESTAMP_INVALID;
+	int timestamps_stored;
+	u64 timestamps[128];
+	unsigned long flags;
+	int ret = 0;
+
+	/* get AVTP packet payload */
+	ret = mse_packet_ctrl_take_out_packet(instance->index_packetizer,
+					      buf->buffer,
+					      buf->buffer_size,
+					      timestamps,
+					      ARRAY_SIZE(timestamps),
+					      &timestamps_stored,
+					      instance->packet_buffer,
+					      instance->packetizer,
+					      &buf->work_length);
+
+	/* complete callback */
+	if (ret > 0) {
+		mse_debug("buffer=%p depacketized=%zu ret=%d\n",
+			  buf->buffer,
+			  buf->work_length,
+			  ret);
+
+		/*
+		 * Should use the timestamp of picture first packet.
+		 * But, all packets have same timestamp. Therefore,
+		 * Here we use the output timestamp.
+		 */
+		launch_avtp_timestamp = (u32)(timestamps[0] + instance->delay_time_ns);
+	} else if (ret == -EAGAIN && !mse_state_test(instance, MSE_STATE_STOPPING)) {
+		/* no process data, wait next receive */
+		return false;
+	} else {
+		buf->work_length = ret;
+	}
+
+	/* Move list of current buffer */
+	spin_lock_irqsave(&instance->lock_buf_list, flags);
+
+	if (!instance->ptp_timer_handle) {
+		/* Output immediately. Skip wait_buf_list */
+		list_move_tail(&buf->list, &instance->done_buf_list);
+	} else {
+		/* If timestamp is within threshold, output immediately */
+		if (mse_check_ptp_timer_threshold(instance, launch_avtp_timestamp))
+			buf->launch_avtp_timestamp = launch_avtp_timestamp;
+
+		if (instance->f_timer_started) {
+			/* Update timer when launch timer */
+			list_move_tail(&buf->list, &instance->wait_buf_list);
+		} else {
+			if (buf->launch_avtp_timestamp == PTP_TIMESTAMP_INVALID) {
+				/* Output immediately. Skip wait_buf_list */
+				list_move_tail(&buf->list, &instance->done_buf_list);
+			} else {
+				/* Set timer of current timestamp */
+				list_move_tail(&buf->list, &instance->wait_buf_list);
+
+				/* Set ptp timer */
+				mse_debug("Timer start.\n");
+
+				instance->ptp_timer_start = buf->launch_avtp_timestamp;
+				if (mse_ptp_timer_start(instance->ptp_index,
+							instance->ptp_timer_handle,
+							(u32)(instance->ptp_timer_start)) < 0) {
+					mse_err("mse_ptp_timer_start error\n");
+
+					/* Output immediately. Skip wait_buf_list */
+					buf->launch_avtp_timestamp = PTP_TIMESTAMP_INVALID;
+					list_move_tail(&buf->list, &instance->done_buf_list);
+				} else {
+					instance->f_timer_started = true;
+				}
+			}
+		}
+	}
+
+	spin_unlock_irqrestore(&instance->lock_buf_list, flags);
+
+	return true;
+}
+
+static void mse_work_depacketize_video_rx(struct mse_instance *instance)
+{
+	struct mse_trans_buffer *buf, *buf1;
+	struct mse_trans_buffer *wait_buf;
+	unsigned long flags;
+
+	/* state is NOT RUNNING */
+	if (!mse_state_test(instance, MSE_STATE_RUNNING))
+		return; /* skip work */
+
+	/* no buffer to write data */
+	if (list_empty(&instance->proc_buf_list)) {
+		spin_lock_irqsave(&instance->lock_buf_list, flags);
+
+		if (mse_check_buffer_starvation(instance)) {
+			/* Wait buffer extrusion */
+			wait_buf = list_first_entry_or_null(&instance->wait_buf_list,
+							    struct mse_trans_buffer,
+							    list);
+			if (wait_buf) {
+				/* Move from wait_buf_list to done_buf_list */
+				list_move_tail(&wait_buf->list, &instance->done_buf_list);
+				queue_work(instance->wq_packet, &instance->wk_callback);
+			}
+		}
+
+		spin_unlock_irqrestore(&instance->lock_buf_list, flags);
+
+		return;
+	}
+
+	read_lock_irqsave(&instance->lock_stream, flags);
+	if (!instance->f_streaming)
+		queue_work(instance->wq_stream, &instance->wk_stream);
+	read_unlock_irqrestore(&instance->lock_stream, flags);
+
+	instance->f_depacketizing = true;
+
+	list_for_each_entry_safe(buf, buf1, &instance->proc_buf_list, list)
+		if (!do_depacketize_video_rx(instance, buf))
+			break;
+
+	/*
+	 * If added to done_buf_list by do_depacketize_video_rx. Call
+	 * wk_callback
+	 */
+	if (!list_empty(&instance->done_buf_list))
+		queue_work(instance->wq_packet, &instance->wk_callback);
+
+	/* state is NOT EXECUTE */
+	if (!mse_state_test(instance, MSE_STATE_EXECUTE))
+		instance->f_depacketizing = false;
+}
+
+static void mse_work_depacketize(struct work_struct *work)
 {
 	struct mse_instance *instance;
+
+	instance = container_of(work, struct mse_instance, wk_depacketize);
+
+	if (IS_MSE_TYPE_VIDEO(instance->media->type) && !instance->tx)
+		mse_work_depacketize_video_rx(instance);
+	else
+		mse_work_depacketize_common(instance);
+}
+
+static void mse_work_callback_common(struct mse_instance *instance)
+{
 	struct mse_adapter *adapter;
 	struct mse_trans_buffer *buf;
 	int work_length;
 	unsigned long flags;
-
-	instance = container_of(work, struct mse_instance, wk_callback);
 
 	/* state is NOT RUNNING */
 	if (!mse_state_test(instance, MSE_STATE_RUNNING))
@@ -2461,6 +2688,56 @@ static void mse_work_callback(struct work_struct *work)
 	}
 }
 
+static void mse_work_callback_video_rx(struct mse_instance *instance)
+{
+	struct mse_trans_buffer *buf, *buf1;
+	struct list_head buf_list;
+	unsigned long flags;
+
+	/* state is NOT RUNNING */
+	if (!mse_state_test(instance, MSE_STATE_RUNNING))
+		return; /* skip work */
+
+	mse_debug_state(instance);
+
+	INIT_LIST_HEAD(&buf_list);
+
+	spin_lock_irqsave(&instance->lock_buf_list, flags);
+	/* Move all buffer to temp list, for lock done_buf_list. */
+	list_splice_init(&instance->done_buf_list, &buf_list);
+	spin_unlock_irqrestore(&instance->lock_buf_list, flags);
+
+	/* complete callback */
+	list_for_each_entry_safe(buf, buf1, &buf_list, list)
+		mse_trans_complete(instance, &buf_list, buf->work_length);
+
+	/* buffer is NOT empty, so wait next callback queued */
+	if (!mse_is_buffer_empty(instance))
+		return;
+
+	/* state is STOPPING */
+	if (mse_state_test(instance, MSE_STATE_STOPPING)) {
+		queue_work(instance->wq_packet, &instance->wk_stop_streaming);
+	} else {
+		write_lock_irqsave(&instance->lock_state, flags);
+		/* if state is EXECUTE, change to IDLE */
+		mse_state_change_if(instance, MSE_STATE_IDLE, MSE_STATE_EXECUTE);
+		write_unlock_irqrestore(&instance->lock_state, flags);
+	}
+}
+
+static void mse_work_callback(struct work_struct *work)
+{
+	struct mse_instance *instance;
+
+	instance = container_of(work, struct mse_instance, wk_callback);
+
+	if (IS_MSE_TYPE_VIDEO(instance->media->type) && !instance->tx)
+		mse_work_callback_video_rx(instance);
+	else
+		mse_work_callback_common(instance);
+}
+
 static void mse_stop_streaming_audio(struct mse_instance *instance)
 {
 	int ret;
@@ -2601,9 +2878,8 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 	return HRTIMER_RESTART;
 }
 
-static u32 mse_ptp_timer_callback(void *arg)
+static u32 mse_ptp_timer_callback_common(struct mse_instance *instance)
 {
-	struct mse_instance *instance = arg;
 	u64 expire_next, expire_prev;
 
 	/* state is NOT STARTED */
@@ -2621,6 +2897,67 @@ static u32 mse_ptp_timer_callback(void *arg)
 	queue_work(instance->wq_packet, &instance->wk_callback);
 
 	return (u32)(expire_next - expire_prev);
+}
+
+static u32 mse_ptp_timer_callback_video_rx(struct mse_instance *instance)
+{
+	struct mse_trans_buffer *buf, *buf1;
+	u64 expire_next, expire_prev;
+	u64 launch_avtp_timestamp;
+	unsigned long flags;
+
+	/* state is NOT STARTED */
+	if (!mse_state_test(instance, MSE_STATE_STARTED)) {
+		mse_debug("stopping ...\n");
+		instance->f_timer_started = false;
+		return 0;
+	}
+
+	spin_lock_irqsave(&instance->lock_buf_list, flags);
+
+	expire_prev = instance->ptp_timer_start;
+	expire_next = instance->ptp_timer_start;
+
+	/* Search valid next timestamp */
+	list_for_each_entry_safe(buf, buf1, &instance->wait_buf_list, list) {
+		launch_avtp_timestamp = buf->launch_avtp_timestamp;
+
+		/* If equal to previous timestamp, current output buffer */
+		if (launch_avtp_timestamp != expire_prev) {
+			/* If valid, schedule next expire time */
+			if (launch_avtp_timestamp != PTP_TIMESTAMP_INVALID) {
+				expire_next = launch_avtp_timestamp;
+				instance->ptp_timer_start = expire_next;
+				break;
+			}
+
+			/* If invalid, Output at same time as current buffer */
+		}
+
+		/* Output buffer */
+		list_move_tail(&buf->list, &instance->done_buf_list);
+		queue_work(instance->wq_packet, &instance->wk_callback);
+	}
+
+	/* If not found next timestamp, timer stop */
+	if (expire_next == expire_prev)
+		instance->f_timer_started = false;
+
+	spin_unlock_irqrestore(&instance->lock_buf_list, flags);
+
+	mse_debug("ret = %u\n", PTP_TIME_DIFF_S32(expire_next, expire_prev));
+
+	return (u32)PTP_TIME_DIFF_S32(expire_next, expire_prev);
+}
+
+static u32 mse_ptp_timer_callback(void *arg)
+{
+	struct mse_instance *instance = arg;
+
+	if (IS_MSE_TYPE_VIDEO(instance->media->type) && !instance->tx)
+		return mse_ptp_timer_callback_video_rx(instance);
+	else
+		return mse_ptp_timer_callback_common(instance);
 }
 
 static void mse_work_crf_send(struct work_struct *work)
@@ -3282,16 +3619,13 @@ static u64 ptp_timer_update_start_timing(struct mse_instance *instance, u64 now)
 	return ptp_timer_start;
 }
 
-static void mse_work_start_transmission(struct work_struct *work)
+static void mse_work_start_transmission_common(struct mse_instance *instance)
 {
-	struct mse_instance *instance;
 	struct mse_adapter *adapter;
 	struct mse_trans_buffer *buf;
 	int ret;
 	u64 now, ptp_timer_start;
 	unsigned long flags;
-
-	instance = container_of(work, struct mse_instance, wk_start_trans);
 
 	/* state is NOT RUNNING */
 	if (!mse_state_test(instance, MSE_STATE_RUNNING))
@@ -3364,8 +3698,6 @@ static void mse_work_start_transmission(struct work_struct *work)
 		instance->f_timer_started = true;
 	}
 
-	buf->buffer = buf->media_buffer;
-
 	adapter = instance->media;
 	if (instance->tx) {
 		if (IS_MSE_TYPE_MPEG2TS(adapter->type))
@@ -3400,6 +3732,35 @@ static void mse_work_start_transmission(struct work_struct *work)
 		/* start workqueue for depacketize */
 		queue_work(instance->wq_packet, &instance->wk_depacketize);
 	}
+}
+
+static void mse_work_start_transmission_video_rx(struct mse_instance *instance)
+{
+	unsigned long flags;
+
+	/* state is NOT RUNNING */
+	if (!mse_state_test(instance, MSE_STATE_RUNNING))
+		return;
+
+	spin_lock_irqsave(&instance->lock_buf_list, flags);
+	list_splice_tail_init(&instance->trans_buf_list,
+			      &instance->proc_buf_list);
+	spin_unlock_irqrestore(&instance->lock_buf_list, flags);
+
+	/* start workqueue for depacketize */
+	queue_work(instance->wq_packet, &instance->wk_depacketize);
+}
+
+static void mse_work_start_transmission(struct work_struct *work)
+{
+	struct mse_instance *instance;
+
+	instance = container_of(work, struct mse_instance, wk_start_trans);
+
+	if (IS_MSE_TYPE_VIDEO(instance->media->type) && !instance->tx)
+		mse_work_start_transmission_video_rx(instance);
+	else
+		mse_work_start_transmission_common(instance);
 }
 
 static inline
@@ -4363,6 +4724,8 @@ static int mse_init_kernel_resource(struct mse_instance *instance,
 	init_waitqueue_head(&instance->wait_wk_stream);
 	INIT_LIST_HEAD(&instance->trans_buf_list);
 	INIT_LIST_HEAD(&instance->proc_buf_list);
+	INIT_LIST_HEAD(&instance->wait_buf_list);
+	INIT_LIST_HEAD(&instance->done_buf_list);
 	rwlock_init(&instance->lock_state);
 	rwlock_init(&instance->lock_stream);
 	spin_lock_init(&instance->lock_timer);
@@ -5015,9 +5378,10 @@ int mse_start_transmission(int index,
 		idx = instance->trans_idx;
 		buf = &instance->trans_buffer[idx];
 		buf->media_buffer = buffer;
-		buf->buffer = NULL;
+		buf->buffer = buffer;
 		buf->buffer_size = buffer_size;
 		buf->work_length = 0;
+		buf->launch_avtp_timestamp = PTP_TIMESTAMP_INVALID;
 		buf->private_data = priv;
 		buf->mse_completion = mse_completion;
 		instance->trans_idx = (idx + 1) % MSE_TRANS_BUF_NUM;
