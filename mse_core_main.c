@@ -120,6 +120,8 @@
 #define PTP_TIMESTAMPS_MAX   (512)
 #define PTP_TIMER_INTERVAL   (20 * 1000000)  /* 1/300 sec * 6 = 20ms */
 
+#define PTP_TIME_DIFF_S32(a, b) ((s32)((u32)(a) - (u32)(b)))
+
 /* judge error 5% */
 #define PTP_TIMER_ERROR_THRESHOLD(x)  div64_u64((x) * 5, 100)
 
@@ -1586,7 +1588,7 @@ static bool media_clock_recovery_calc_ts(struct timestamp_reader *reader,
 		return false;
 	}
 
-	diff = (s32)((u32)timestamp - (u32)device_time);
+	diff = PTP_TIME_DIFF_S32(timestamp, device_time);
 	if (abs(diff) > MCH_ERROR_THRESHOLD(interval)) {
 		mse_debug_tstamps("NG: mch diff error m=%u d=%u (%d) interval=%u\n",
 				  (u32)timestamp, (u32)device_time, diff,
