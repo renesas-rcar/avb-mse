@@ -698,6 +698,11 @@ static int __mse_state_change_if(const char *func,
 	return __mse_state_change(func, instance, next);
 }
 
+static inline bool mse_is_buffer_empty(struct mse_instance *instance)
+{
+	return !atomic_read(&instance->trans_buf_cnt);
+}
+
 static bool compare_pcr(u64 a, u64 b)
 {
 	u64 diff;
@@ -1995,7 +2000,7 @@ static void mse_work_packetize(struct work_struct *work)
 
 	if (ret == -EAGAIN) {
 		instance->f_continue = false;
-		if (!atomic_read(&instance->trans_buf_cnt)) {
+		if (mse_is_buffer_empty(instance)) {
 			/* state is STOPPING */
 			if (mse_state_test(instance, MSE_STATE_STOPPING)) {
 				mse_debug("discard %zu byte before stopping\n",
@@ -2425,7 +2430,7 @@ static void mse_work_callback(struct work_struct *work)
 		if (atomic_dec_not_zero(&instance->done_buf_cnt))
 			mse_trans_complete(instance, work_length);
 
-	if (!atomic_read(&instance->trans_buf_cnt)) {
+	if (mse_is_buffer_empty(instance)) {
 		/* state is STOPPING */
 		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
 			queue_work(instance->wq_packet,
