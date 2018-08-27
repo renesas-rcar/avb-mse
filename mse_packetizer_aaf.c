@@ -787,7 +787,7 @@ static int mse_packetizer_aaf_depacketize(int index,
 			avtp_timestamp,
 			aaf->start_time,
 			aaf_sample_rate,
-			aaf_byte_per_ch,
+			aaf->audio_config.bytes_per_sample,
 			channels,
 			buffer_size,
 			&offset);
