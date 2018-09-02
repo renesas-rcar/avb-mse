@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -118,6 +118,7 @@
 #define MSE_SYSFS_NAME_STR_BITRATE                   "bitrate"
 #define MSE_SYSFS_NAME_STR_TSPACKETS_PER_FRAME       "tspackets_per_frame"
 #define MSE_SYSFS_NAME_STR_PCR_PID                   "pcr_pid"
+#define MSE_SYSFS_NAME_STR_TRANSMIT_MODE             "transmit_mode"
 #define MSE_SYSFS_NAME_STR_DEVICEID                  "deviceid"
 #define MSE_SYSFS_NAME_STR_CAPTURE_CH                "capture_ch"
 #define MSE_SYSFS_NAME_STR_CAPTURE_FREQ              "capture_freq"
@@ -198,6 +199,21 @@ static struct convert_table ptp_type_table[] = {
 	{
 		MSE_PTP_TYPE_CAPTURE,
 		"capture",
+	},
+};
+
+static struct convert_table transmit_mode_table[] = {
+	{
+		MSE_TRANSMIT_MODE_BITRATE,
+		"bitrate",
+	},
+	{
+		MSE_TRANSMIT_MODE_PCR,
+		"pcr",
+	},
+	{
+		MSE_TRANSMIT_MODE_TIMESTAMP,
+		"timestamp",
 	},
 };
 
@@ -952,6 +968,78 @@ static ssize_t mse_video_config_u32_store(struct device *dev,
 		return ret;
 
 	mse_debug("END value=%u ret=%zd\n", value, len);
+
+	return len;
+}
+
+static ssize_t mse_mpeg2ts_config_transmit_mode_show(struct device *dev,
+						     struct device_attribute *attr,
+						     char *buf)
+{
+	struct mse_media_mpeg2ts_config data;
+	int index = mse_dev_to_index(dev);
+	int i, ret;
+
+	mse_debug("START %s\n", attr->attr.name);
+
+	ret = mse_config_get_media_mpeg2ts_config(index, &data);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < MSE_TRANSMIT_MODE_MAX; i++) {
+		if (data.transmit_mode == transmit_mode_table[i].id)
+			break;
+	}
+	if (i == MSE_TRANSMIT_MODE_MAX)
+		return -EPERM;
+
+	ret = sprintf(buf, "%s\n", transmit_mode_table[i].str);
+
+	mse_debug("END value=%s(%d) ret=%d\n", buf, data.transmit_mode, ret);
+
+	return ret;
+}
+
+static ssize_t mse_mpeg2ts_config_transmit_mode_store(struct device *dev,
+						      struct device_attribute *attr,
+						      const char *buf,
+						      size_t len)
+{
+	enum MSE_TRANSMIT_MODE transmit_mode = -1;
+	struct mse_media_mpeg2ts_config data;
+	int index = mse_dev_to_index(dev);
+	int i, ret;
+	char buf2[MSE_NAME_LEN_MAX + 1];
+
+	mse_debug("START %s(%zd) to %s\n", buf, len, attr->attr.name);
+
+	if (len > sizeof(buf2))
+		return -EINVAL;
+
+	ret = mse_sysfs_strncpy_from_user(buf2, buf, sizeof(buf2));
+	if (ret < 0 || ret > MSE_NAME_LEN_MAX)
+		return -EINVAL;
+
+	for (i = 0; i < MSE_TRANSMIT_MODE_MAX; i++) {
+		if (!mse_compare_param_key(buf2, transmit_mode_table[i].str)) {
+			transmit_mode = transmit_mode_table[i].id;
+			break;
+		}
+	}
+	if (i == MSE_TRANSMIT_MODE_MAX)
+		return -EINVAL;
+
+	ret = mse_config_get_media_mpeg2ts_config(index, &data);
+	if (ret)
+		return ret;
+
+	data.transmit_mode = transmit_mode;
+
+	ret = mse_config_set_media_mpeg2ts_config(index, &data);
+	if (ret)
+		return ret;
+
+	mse_debug("END value=%s(%d) ret=%zd\n", buf, data.transmit_mode, len);
 
 	return len;
 }
@@ -1769,11 +1857,15 @@ static MSE_DEVICE_ATTR(bitrate, mpeg2ts_config, 0644,
 static MSE_DEVICE_ATTR(pcr_pid, mpeg2ts_config, 0644,
 		       mse_mpeg2ts_config_u32_show,
 		       mse_mpeg2ts_config_u32_store);
+static MSE_DEVICE_ATTR(transmit_mode, mpeg2ts_config, 0644,
+		       mse_mpeg2ts_config_transmit_mode_show,
+		       mse_mpeg2ts_config_transmit_mode_store);
 
 static struct attribute *mse_attr_mpeg2ts_config[] = {
 	&mse_dev_attr_mpeg2ts_config_tspackets_per_frame.attr,
 	&mse_dev_attr_mpeg2ts_config_bitrate.attr,
 	&mse_dev_attr_mpeg2ts_config_pcr_pid.attr,
+	&mse_dev_attr_mpeg2ts_config_transmit_mode.attr,
 	NULL,
 };
 

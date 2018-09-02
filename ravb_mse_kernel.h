@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -210,6 +210,8 @@ struct mse_mpeg2ts_config {
 	int pcr_pid;
 	/** @brief mpeg2ts type */
 	enum MSE_MPEG2TS_TYPE mpeg2ts_type;
+	/** @brief transmit mode */
+	enum MSE_TRANSMIT_MODE transmit_mode;
 };
 
 /**

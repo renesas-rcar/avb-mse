@@ -172,10 +172,18 @@ struct mse_media_video_config {
 #define MSE_CONFIG_TSPACKET_PER_FRAME_MAX (7)
 #define MSE_CONFIG_PCR_PID_MAX            (8192)
 
+enum MSE_TRANSMIT_MODE {
+	MSE_TRANSMIT_MODE_BITRATE,
+	MSE_TRANSMIT_MODE_PCR,
+	MSE_TRANSMIT_MODE_TIMESTAMP,
+	MSE_TRANSMIT_MODE_MAX,
+};
+
 struct mse_media_mpeg2ts_config {
 	uint32_t tspackets_per_frame;
 	uint32_t bitrate;
 	uint32_t pcr_pid;
+	enum MSE_TRANSMIT_MODE transmit_mode;
 };
 
 enum MSE_PTP_TYPE {

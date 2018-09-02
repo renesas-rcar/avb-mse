@@ -484,6 +484,9 @@ int mse_config_set_media_mpeg2ts_config(int index,
 	if (data->pcr_pid > MSE_CONFIG_PCR_PID_MAX)
 		goto wrong_value;
 
+	if (data->transmit_mode >= MSE_TRANSMIT_MODE_MAX)
+		goto wrong_value;
+
 	spin_lock_irqsave(&config->lock, flags);
 	config->media_mpeg2ts_config = *data;
 	spin_unlock_irqrestore(&config->lock, flags);
@@ -491,8 +494,8 @@ int mse_config_set_media_mpeg2ts_config(int index,
 	return 0;
 
 wrong_value:
-	mse_err("invalid value. bitrate=%d pcr_pid=%d\n",
-		data->bitrate, data->pcr_pid);
+	mse_err("invalid value. bitrate=%d pcr_pid=%d transmit_mode=%d\n",
+		data->bitrate, data->pcr_pid, data->transmit_mode);
 	return -EINVAL;
 }
 
@@ -957,6 +960,7 @@ static struct mse_config mse_config_default_mpeg2ts = {
 		.tspackets_per_frame = 7,
 		.bitrate = 50000000,
 		.pcr_pid = MSE_CONFIG_PCR_PID_MAX,
+		.transmit_mode = MSE_TRANSMIT_MODE_TIMESTAMP,
 	},
 	.ptp_config = {
 		.type = MSE_PTP_TYPE_CURRENT_TIME,
