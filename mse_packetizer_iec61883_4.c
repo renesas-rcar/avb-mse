@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2016-2017 Renesas Electronics Corporation
+ Copyright (C) 2016-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -80,6 +80,10 @@
 #define MSE_M2TS_PACKET_SIZE    (MSE_TIMESTAMP_SIZE + MSE_TS_PACKET_SIZE)
 #define M2TS_FREQ               (27000000)    /* 27MHz */
 #define DEFAULT_DIFF_TIMESTAMP  (NSEC_SCALE / DEFAULT_INTERVAL_FRAMES)
+#define PACKET_PIECE_SIZE_MAX   (MSE_M2TS_PACKET_SIZE * MSE_CONFIG_TSPACKET_PER_FRAME_MAX)
+
+#define BYTE_TO_BIT(byte)        ((byte) * 8)
+#define TIMESTAMP_DIFF_S32(a, b) ((s32)((u32)(a) - (u32)(b)))
 
 struct avtp_iec61883_4_param {
 	char dest_addr[MSE_MAC_LEN_MAX];
@@ -92,6 +96,7 @@ struct avtp_iec61883_4_param {
 
 struct iec61883_4_packetizer {
 	bool used_f;
+	bool start_f;
 
 	int send_seq_num;
 	int payload_max;
@@ -102,9 +107,12 @@ struct iec61883_4_packetizer {
 	u32 prev_timestamp;
 	u32 curr_timestamp;
 	u32 diff_timestamp;
-	u32 m2ts_start;
+	u32 base_timestamp;
+	u32 base_timestamp_m2ts;
+	u32 piece_data_len;
 
 	unsigned char packet_template[ETHFRAMELEN_MAX];
+	unsigned char packet_piece[PACKET_PIECE_SIZE_MAX];
 
 	struct mse_network_config net_config;
 	struct mse_mpeg2ts_config mpeg2ts_config;
@@ -130,6 +138,7 @@ static int mse_packetizer_iec61883_4_open(void)
 	iec61883_4->used_f = true;
 	iec61883_4->send_seq_num = 0;
 	iec61883_4->dbc = 0;
+	iec61883_4->piece_data_len = 0;
 
 	mse_packetizer_stats_init(&iec61883_4->stats);
 
@@ -164,9 +173,11 @@ static int mse_packetizer_iec61883_4_packet_init(int index)
 	mse_debug("index=%d\n", index);
 	iec61883_4 = &iec61883_4_packetizer_table[index];
 
+	iec61883_4->start_f = false;
 	iec61883_4->send_seq_num = 0;
 	iec61883_4->dbc = 0;
 	iec61883_4->diff_timestamp = 0;
+	iec61883_4->piece_data_len = 0;
 
 	mse_packetizer_stats_init(&iec61883_4->stats);
 
@@ -247,6 +258,10 @@ static int mse_packetizer_iec61883_4_set_mpeg2ts_config(
 	iec61883_4->payload_max = tspackets_per_frame * MSE_TS_PACKET_SIZE;
 	iec61883_4->packet_size = AVTP_IEC61883_4_PAYLOAD_OFFSET +
 		tspackets_per_frame * AVTP_SOURCE_PACKET_SIZE;
+	/* Calculate time(ns) per TS packet */
+	iec61883_4->diff_timestamp =
+		(u32)div64_u64(MSE_TS_PACKET_SIZE * 8 * NSEC_SCALE,
+			       iec61883_4->mpeg2ts_config.bitrate);
 
 	memcpy(param.dest_addr, net_config->dest_addr, MSE_MAC_LEN_MAX);
 	memcpy(param.source_addr, net_config->source_addr,
@@ -288,6 +303,119 @@ static u32 m2ts_timestamp_to_nsec(u32 host_header)
 	return (u32)div64_u64(ts_nsec, M2TS_FREQ);
 }
 
+static void copy_payload(struct iec61883_4_packetizer *iec61883_4,
+			 unsigned char *data,
+			 size_t data_len,
+			 int src_packet_size,
+			 unsigned char *payload,
+			 u32 *timestamp_top)
+{
+	u32 timestamp_m2ts;
+	int payload_num;
+	u32 timestamp;
+	u32 diff;
+	int i;
+
+	payload_num = data_len / src_packet_size;
+	for (i = 0; i < payload_num; i++) {
+		/* calculate timestamp */
+		if (iec61883_4->mpeg2ts_config.transmit_mode == MSE_TRANSMIT_MODE_TIMESTAMP &&
+		    src_packet_size == MSE_M2TS_PACKET_SIZE) {
+			/* M2TS timestamp */
+			timestamp = iec61883_4->base_timestamp;
+
+			timestamp_m2ts = ntohl(*(u32 *)data);
+
+			/* timestamp adjust by m2ts timestamp */
+			diff = timestamp_m2ts - iec61883_4->base_timestamp_m2ts;
+
+			timestamp += m2ts_timestamp_to_nsec(diff);
+			iec61883_4->curr_timestamp = timestamp;
+		} else {
+			/* calculate timestamp by bitrate */
+			timestamp = iec61883_4->curr_timestamp;
+			iec61883_4->curr_timestamp += iec61883_4->diff_timestamp;
+		}
+
+		/* offset adjust by m2ts host_header size */
+		if (src_packet_size == MSE_M2TS_PACKET_SIZE)
+			data += MSE_TIMESTAMP_SIZE;
+
+		if (i == 0)
+			*timestamp_top = timestamp;
+
+		/* copy to source_header_timestamp */
+		*(__be32 *)payload = cpu_to_be32(timestamp);
+
+		/* copy to iec61883_4 packet */
+		memcpy(payload + sizeof(__be32), data, MSE_TS_PACKET_SIZE);
+
+		/* increment payload and data offset */
+		payload += AVTP_SOURCE_PACKET_SIZE;
+		data += MSE_TS_PACKET_SIZE;
+	}
+}
+
+static void update_base_timestamp(struct iec61883_4_packetizer *iec61883_4,
+				  u32 timestamp,
+				  u8 *data,
+				  bool is_ts,
+				  unsigned int piece_num)
+{
+	u32 timestamp_m2ts_piece;
+	u32 timestamp_m2ts;
+	u32 diff;
+
+	if (!is_ts)
+		timestamp_m2ts = ntohl(*(u32 *)data);
+	else
+		timestamp_m2ts = 0;
+
+	if (!iec61883_4->start_f) {
+		iec61883_4->start_f = true;
+
+		/* Init base timestamp */
+		iec61883_4->prev_timestamp = timestamp;
+		iec61883_4->curr_timestamp = timestamp;
+		iec61883_4->base_timestamp = timestamp;
+		iec61883_4->base_timestamp_m2ts = timestamp_m2ts;
+
+		return;
+	}
+
+	if (timestamp == iec61883_4->prev_timestamp)
+		return; /* No change */
+
+	/* Update base timestamp */
+	iec61883_4->prev_timestamp = timestamp;
+
+	if (TIMESTAMP_DIFF_S32(timestamp, iec61883_4->curr_timestamp) < 0) {
+		mse_debug("Base time[%u] is old, so use current time[%u].\n",
+			  timestamp, iec61883_4->curr_timestamp);
+		return;
+	}
+
+	if (piece_num != 0) {
+		/* Back timestamp for piece packet */
+		if (iec61883_4->mpeg2ts_config.transmit_mode == MSE_TRANSMIT_MODE_TIMESTAMP &&
+		    !is_ts) {
+			timestamp_m2ts_piece = ntohl(*(u32 *)iec61883_4->packet_piece);
+
+			/* timestamp adjust by m2ts timestamp */
+			diff = timestamp_m2ts - timestamp_m2ts_piece;
+			timestamp -= m2ts_timestamp_to_nsec(diff);
+
+			timestamp_m2ts = timestamp_m2ts_piece;
+		} else {
+			timestamp -= iec61883_4->diff_timestamp * piece_num;
+		}
+	}
+
+	iec61883_4->curr_timestamp = timestamp;
+	iec61883_4->base_timestamp = timestamp;
+	iec61883_4->base_timestamp_m2ts = timestamp_m2ts;
+}
+
 static int mse_packetizer_iec61883_4_packetize(int index,
 					       void *packet,
 					       size_t *packet_size,
@@ -302,12 +430,10 @@ static int mse_packetizer_iec61883_4_packetize(int index,
 	unsigned char *payload;
 	int is_ts;
 	int src_packet_size;
-	int payloads;
-	int i;
-	u32 timestamp_m2ts;
-	unsigned int avtp_timestamp;
-	unsigned int num = 0, diff;
-	bool is_top_on_buffer;
+	int payload_num;
+	u32 avtp_timestamp = 0;
+	u32 avtp_timestamp_piece = 0;
+	unsigned int piece_num;
 
 	if (index >= ARRAY_SIZE(iec61883_4_packetizer_table))
 		return -EPERM;
@@ -333,93 +459,105 @@ static int mse_packetizer_iec61883_4_packetize(int index,
 		return -EINVAL;
 	}
 
-	is_top_on_buffer = (*buffer_processed == 0) ? true : false;
+	/* Flush packet piece */
+	if (!buffer) {
+		/* Packet piece is none */
+		*packet_size = 0;
 
-	if (is_top_on_buffer) {
-		iec61883_4->curr_timestamp = *timestamp;
-		if (iec61883_4->diff_timestamp == 0) {
-			iec61883_4->diff_timestamp = DEFAULT_DIFF_TIMESTAMP;
+		if (!iec61883_4->piece_data_len)
+			return MSE_PACKETIZE_STATUS_NOT_ENOUGH;
+
+		data = iec61883_4->packet_piece;
+		data_len = iec61883_4->piece_data_len;
+		payload_num = iec61883_4->piece_data_len / src_packet_size;
+
+		iec61883_4->piece_data_len = 0;
+		piece_num = 0;
+	} else {
+		/* data */
+		data = buffer + *buffer_processed;
+		data_len = buffer_size - *buffer_processed;
+
+		piece_num = iec61883_4->piece_data_len / src_packet_size;
+		payload_num = piece_num + (data_len / src_packet_size);
+
+		if (payload_num >= iec61883_4->mpeg2ts_config.tspackets_per_frame) {
+			payload_num = iec61883_4->mpeg2ts_config.tspackets_per_frame;
+			data_len = (payload_num - piece_num) * src_packet_size;
 		} else {
-			num = buffer_size / src_packet_size;
-			diff = iec61883_4->curr_timestamp -
-				iec61883_4->prev_timestamp;
-			iec61883_4->diff_timestamp = diff / num;
+			update_base_timestamp(iec61883_4,
+					      *timestamp,
+					      data,
+					      is_ts,
+					      piece_num);
+
+			/* Store packet piece */
+			memcpy(iec61883_4->packet_piece + iec61883_4->piece_data_len,
+			       data,
+			       data_len);
+			iec61883_4->piece_data_len += data_len;
+			*packet_size = 0;
+			*buffer_processed += data_len;
+
+			return MSE_PACKETIZE_STATUS_NOT_ENOUGH;
 		}
-		mse_debug("timestamp curr %u prev %u diff %u num %u\n",
-			  iec61883_4->curr_timestamp,
-			  iec61883_4->prev_timestamp,
-			  iec61883_4->diff_timestamp,
-			  num);
 	}
 
-	/* data */
-	data = buffer + *buffer_processed;
+	update_base_timestamp(iec61883_4,
+			      *timestamp,
+			      data,
+			      is_ts,
+			      piece_num);
 
-	data_len = buffer_size - *buffer_processed;
-
-	/* check data length */
-	if (data_len < src_packet_size) {
-		mse_debug("invalid data length %d\n", data_len);
-		return -EAGAIN;
-	}
-	payloads = data_len / src_packet_size;
-	if (payloads > iec61883_4->mpeg2ts_config.tspackets_per_frame)
-		payloads = iec61883_4->mpeg2ts_config.tspackets_per_frame;
-
-	/* header */
+	/* Copy header template */
 	memcpy(packet,
 	       iec61883_4->packet_template,
 	       AVTP_IEC61883_4_PAYLOAD_OFFSET);
 
-	/* variable header */
+	/* Update dynamic field of header */
 	avtp_set_sequence_num(packet, iec61883_4->send_seq_num++);
-	avtp_set_stream_data_length(
-		packet,
-		payloads * AVTP_SOURCE_PACKET_SIZE + AVTP_CIP_HEADER_SIZE);
+	avtp_set_stream_data_length(packet,
+				    (payload_num * AVTP_SOURCE_PACKET_SIZE) + AVTP_CIP_HEADER_SIZE);
 	avtp_set_iec61883_dbc(packet, iec61883_4->dbc);
-	iec61883_4->dbc += payloads;
+	iec61883_4->dbc += payload_num;
 
+	/* Set offset address of payload */
 	payload = packet + AVTP_IEC61883_4_PAYLOAD_OFFSET;
-	for (i = 0; i < payloads; i++) {
-		if (is_ts) {                    /* TS */
-			avtp_timestamp = iec61883_4->curr_timestamp;
-			iec61883_4->curr_timestamp += iec61883_4->diff_timestamp;
-		} else {                        /* M2TS */
-			avtp_timestamp = iec61883_4->curr_timestamp;
 
-			timestamp_m2ts = ntohl(*(unsigned long *)data);
-			if (is_top_on_buffer && i == 0) {
-				iec61883_4->m2ts_start = timestamp_m2ts;
-			} else {
-				/* timestamp adjust by m2ts timestamp */
-				u32 t = timestamp_m2ts - iec61883_4->m2ts_start;
+	/* If packet piece exitst, copy payload from packet piece */
+	if (piece_num != 0) {
+		copy_payload(iec61883_4,
+			     iec61883_4->packet_piece,
+			     iec61883_4->piece_data_len,
+			     src_packet_size,
+			     payload,
+			     &avtp_timestamp_piece);
 
-				avtp_timestamp += m2ts_timestamp_to_nsec(t);
-			}
-
-			/* offset adjust by m2ts host_header size */
-			data += MSE_TIMESTAMP_SIZE;
-		}
-
-		if (i == 0)
-			avtp_set_timestamp(packet, avtp_timestamp);
-
-		/* copy to source_header_timestamp */
-		*(__be32 *)payload = cpu_to_be32(avtp_timestamp);
-		/* copy to iec61883_4 packet */
-		memcpy(payload + sizeof(__be32), data, MSE_TS_PACKET_SIZE);
-
-		/* increment payload and data offset */
-		payload += AVTP_SOURCE_PACKET_SIZE;
-		data += MSE_TS_PACKET_SIZE;
+		iec61883_4->piece_data_len = 0;
+		payload += piece_num * AVTP_SOURCE_PACKET_SIZE;
 	}
 
+	/* Copy payload */
+	copy_payload(iec61883_4,
+		     data,
+		     data_len,
+		     src_packet_size,
+		     payload,
+		     &avtp_timestamp);
+
+	/* If packet piece exits, use avtp_timestamp of packet piece */
+	if (piece_num != 0)
+		avtp_set_timestamp(packet, avtp_timestamp_piece);
+	else
+		avtp_set_timestamp(packet, avtp_timestamp);
+
+	/* Set output values */
 	*packet_size = AVTP_IEC61883_4_PAYLOAD_OFFSET +
-		max(AVTP_SOURCE_PACKET_SIZE * payloads, AVTP_PAYLOAD_MIN);
-	*buffer_processed += src_packet_size * payloads;
+		max(AVTP_SOURCE_PACKET_SIZE * payload_num, AVTP_PAYLOAD_MIN);
+	*buffer_processed += data_len;
 
 	mse_debug("bp=%zu/%zu, data_len=%d\n",
-		  *buffer_processed, buffer_size, src_packet_size * payloads);
+		  *buffer_processed, buffer_size, data_len);
 
 	if (*buffer_processed >= buffer_size) {
 		iec61883_4->prev_timestamp = *timestamp;
