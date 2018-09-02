@@ -76,9 +76,25 @@
 #define MSE_PACKET_COUNT_MAX (128)
 
 /* Checking the difference between read_p and write_p */
+static int mse_packet_ctrl_check_packet_remain_common(struct mse_packet_ctrl *dma,
+						      int write_p)
+{
+	return (write_p + dma->size - dma->read_p) % dma->size;
+}
+
 int mse_packet_ctrl_check_packet_remain(struct mse_packet_ctrl *dma)
 {
-	return (dma->write_p + dma->size - dma->read_p) % dma->size;
+	return mse_packet_ctrl_check_packet_remain_common(dma, dma->write_p);
+}
+
+int mse_packet_ctrl_check_packet_remain_wait(struct mse_packet_ctrl *dma)
+{
+	return mse_packet_ctrl_check_packet_remain_common(dma, dma->wait_p);
+}
+
+void mse_packet_ctrl_release_all_wait(struct mse_packet_ctrl *dma)
+{
+	dma->wait_p = dma->write_p;
 }
 
 void mse_packet_ctrl_discard_packet(struct mse_packet_ctrl *dma)
@@ -114,6 +130,7 @@ struct mse_packet_ctrl *mse_packet_ctrl_alloc(struct device *dev,
 	dma->size = max_packet;
 	dma->write_p = 0;
 	dma->read_p = 0;
+	dma->wait_p = 0;
 	dma->max_packet_size = max_packet_size;
 	dma->packet_table = kmalloc((sizeof(struct mse_packet) * dma->size),
 				    GFP_KERNEL);
@@ -265,14 +282,15 @@ int mse_packet_ctrl_send_prepare_packet(
 				 dma->size);
 }
 
-int mse_packet_ctrl_send_packet(int index,
-				struct mse_packet_ctrl *dma,
-				struct mse_adapter_network_ops *ops)
+static int mse_packet_ctrl_send_packet_common(int index,
+					      struct mse_packet_ctrl *dma,
+					      struct mse_adapter_network_ops *ops,
+					      int write_p)
 {
 	int read_p, ret, send_size;
 	int packetized;
 
-	packetized = mse_packet_ctrl_check_packet_remain(dma);
+	packetized = mse_packet_ctrl_check_packet_remain_common(dma, write_p);
 	send_size = min(packetized, MSE_PACKET_COUNT_MAX);
 
 	if (!send_size)
@@ -290,6 +308,26 @@ int mse_packet_ctrl_send_packet(int index,
 		  ret, dma->write_p, read_p, dma->read_p);
 
 	return 0;
+}
+
+int mse_packet_ctrl_send_packet(int index,
+				struct mse_packet_ctrl *dma,
+				struct mse_adapter_network_ops *ops)
+{
+	return mse_packet_ctrl_send_packet_common(index,
+						  dma,
+						  ops,
+						  dma->write_p);
+}
+
+int mse_packet_ctrl_send_packet_wait(int index,
+				     struct mse_packet_ctrl *dma,
+				     struct mse_adapter_network_ops *ops)
+{
+	return mse_packet_ctrl_send_packet_common(index,
+						  dma,
+						  ops,
+						  dma->wait_p);
 }
 
 int mse_packet_ctrl_receive_prepare_packet(
