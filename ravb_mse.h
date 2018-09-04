@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2016-2017 Renesas Electronics Corporation
+ Copyright (C) 2016-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -172,10 +172,18 @@ struct mse_media_video_config {
 #define MSE_CONFIG_TSPACKET_PER_FRAME_MAX (7)
 #define MSE_CONFIG_PCR_PID_MAX            (8192)
 
+enum MSE_TRANSMIT_MODE {
+	MSE_TRANSMIT_MODE_BITRATE,
+	MSE_TRANSMIT_MODE_PCR,
+	MSE_TRANSMIT_MODE_TIMESTAMP,
+	MSE_TRANSMIT_MODE_MAX,
+};
+
 struct mse_media_mpeg2ts_config {
 	uint32_t tspackets_per_frame;
 	uint32_t bitrate;
 	uint32_t pcr_pid;
+	enum MSE_TRANSMIT_MODE transmit_mode;
 };
 
 enum MSE_PTP_TYPE {
@@ -203,6 +211,9 @@ struct mse_ptp_config {
 struct mse_mch_config {
 	bool enable;
 };
+
+#define MSE_CONFIG_TX_DELAY_TIME_NS_MAX (0x40000000)
+#define MSE_CONFIG_RX_DELAY_TIME_NS_MAX (0x40000000)
 
 struct mse_delay_time {
 	uint32_t max_transit_time_ns;

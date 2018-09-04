@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2018 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -484,6 +484,9 @@ int mse_config_set_media_mpeg2ts_config(int index,
 	if (data->pcr_pid > MSE_CONFIG_PCR_PID_MAX)
 		goto wrong_value;
 
+	if (data->transmit_mode >= MSE_TRANSMIT_MODE_MAX)
+		goto wrong_value;
+
 	spin_lock_irqsave(&config->lock, flags);
 	config->media_mpeg2ts_config = *data;
 	spin_unlock_irqrestore(&config->lock, flags);
@@ -491,8 +494,8 @@ int mse_config_set_media_mpeg2ts_config(int index,
 	return 0;
 
 wrong_value:
-	mse_err("invalid value. bitrate=%d pcr_pid=%d\n",
-		data->bitrate, data->pcr_pid);
+	mse_err("invalid value. bitrate=%d pcr_pid=%d transmit_mode=%d\n",
+		data->bitrate, data->pcr_pid, data->transmit_mode);
 	return -EINVAL;
 }
 
@@ -792,11 +795,25 @@ int mse_config_set_delay_time(int index, struct mse_delay_time *data)
 
 	mse_debug("START\n");
 
+	if (data->tx_delay_time_ns > MSE_CONFIG_TX_DELAY_TIME_NS_MAX)
+		goto wrong_value;
+
+	if (data->rx_delay_time_ns > MSE_CONFIG_RX_DELAY_TIME_NS_MAX)
+		goto wrong_value;
+
 	spin_lock_irqsave(&config->lock, flags);
 	config->delay_time = *data;
 	spin_unlock_irqrestore(&config->lock, flags);
 
 	return 0;
+
+wrong_value:
+	mse_err("invalid value. max_transit_time_ns=%d, tx_delay_time_ns=%d, rx_delay_time_ns=%d\n",
+		data->max_transit_time_ns,
+		data->tx_delay_time_ns,
+		data->rx_delay_time_ns);
+
+	return -EINVAL;
 }
 
 int mse_config_get_delay_time(int index, struct mse_delay_time *data)
@@ -911,8 +928,8 @@ static struct mse_config mse_config_default_video = {
 	},
 	.delay_time = {
 		.max_transit_time_ns = 2000000,
-		.tx_delay_time_ns = 2000000,
-		.rx_delay_time_ns = 2000000,
+		.tx_delay_time_ns = 0,
+		.rx_delay_time_ns = 0,
 	},
 };
 
@@ -943,6 +960,7 @@ static struct mse_config mse_config_default_mpeg2ts = {
 		.tspackets_per_frame = 7,
 		.bitrate = 50000000,
 		.pcr_pid = MSE_CONFIG_PCR_PID_MAX,
+		.transmit_mode = MSE_TRANSMIT_MODE_TIMESTAMP,
 	},
 	.ptp_config = {
 		.type = MSE_PTP_TYPE_CURRENT_TIME,
@@ -950,8 +968,8 @@ static struct mse_config mse_config_default_mpeg2ts = {
 	},
 	.delay_time = {
 		.max_transit_time_ns = 2000000,
-		.tx_delay_time_ns = 2000000,
-		.rx_delay_time_ns = 2000000,
+		.tx_delay_time_ns = 0,
+		.rx_delay_time_ns = 0,
 	},
 };
 

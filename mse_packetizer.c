@@ -255,7 +255,7 @@ int mse_packetizer_calc_cbs_by_bitrate(u32 port_transmit_rate,
 	 *
 	 */
 	bw_num = (u64)(payload_bitrate / TRANSMIT_RATE_BASE) *
-		(u64)ether_size;
+		(u64)(ether_size + ETHERNET_OVERHEAD);
 	bw_denom = (u64)(port_transmit_rate / TRANSMIT_RATE_BASE) *
 		(u64)payload_size;
 

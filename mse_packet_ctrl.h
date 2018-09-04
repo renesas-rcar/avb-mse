@@ -67,6 +67,7 @@ struct mse_packet_ctrl {
 	int size;
 	int write_p;
 	int read_p;
+	int wait_p;
 	int max_packet_size;
 	dma_addr_t dma_handle;
 	void *dma_vaddr;
@@ -74,6 +75,8 @@ struct mse_packet_ctrl {
 };
 
 int mse_packet_ctrl_check_packet_remain(struct mse_packet_ctrl *dma);
+int mse_packet_ctrl_check_packet_remain_wait(struct mse_packet_ctrl *dma);
+void mse_packet_ctrl_release_all_wait(struct mse_packet_ctrl *dma);
 struct mse_packet_ctrl *mse_packet_ctrl_alloc(struct device *dev,
 					      int max_packet,
 					      int max_packet_size);
@@ -94,6 +97,9 @@ int mse_packet_ctrl_send_prepare_packet(int index,
 int mse_packet_ctrl_send_packet(int index,
 				struct mse_packet_ctrl *dma,
 				struct mse_adapter_network_ops *ops);
+int mse_packet_ctrl_send_packet_wait(int index,
+				     struct mse_packet_ctrl *dma,
+				     struct mse_adapter_network_ops *ops);
 int mse_packet_ctrl_receive_prepare_packet(int index,
 					   struct mse_packet_ctrl *dma,
 					   struct mse_adapter_network_ops *ops);
