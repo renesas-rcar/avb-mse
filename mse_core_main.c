@@ -175,6 +175,7 @@
 #define MPEG2TS_NS_TO_M2TS(ns)     (MPEG2TS_M2TS_FREQ / 1000000 * (ns) / 1000)
 #define MPEG2TS_WAIT_INTERVAL      MPEG2TS_NS_TO_M2TS(10000000) /* 10ms */
 #define MPEG2TS_INTERVAL_THRESHOLD MPEG2TS_NS_TO_M2TS(PTP_TIMER_START_THRESHOLD * 2) /* 1ms */
+#define MPEG2TS_MAX_WAIT_TIME      (1500000000) /* 1.5secs */
 
 #define atomic_dec_not_zero(v)  atomic_add_unless((v), -1, 0)
 
@@ -2021,8 +2022,33 @@ static bool check_packet_remain(struct mse_instance *instance)
 {
 	int wait_count = MSE_TX_RING_SIZE - MSE_TX_PACKET_NUM;
 	int rem = mse_packet_ctrl_check_packet_remain(instance->packet_buffer);
+	struct mse_wait_packet *wp0, *wp1;
+	u32 accum_wait_time;
 
-	return wait_count > rem;
+	/**
+	 * Check accumulate wait time of wait packets.
+	 *
+	 * This check is effect only on MPEG2TS usecase. On the other usecases
+	 * does not effect because wait_packet_list is always empty.
+	 */
+	if (list_empty(&instance->wait_packet_list)) {
+		accum_wait_time = 0;
+	} else {
+		wp0 = list_first_entry(&instance->wait_packet_list,
+				       struct mse_wait_packet,
+				       list);
+		wp1 = list_last_entry(&instance->wait_packet_list,
+				      struct mse_wait_packet,
+				      list);
+
+		accum_wait_time = (u32)PTP_TIME_DIFF_S32(wp1->launch_avtp_timestamp,
+							 wp0->launch_avtp_timestamp);
+	}
+
+	if (accum_wait_time > MPEG2TS_MAX_WAIT_TIME)
+		return false;
+	else
+		return wait_count > rem;
 }
 
 static void mse_work_packetize_common(struct mse_instance *instance)
@@ -2502,7 +2528,7 @@ static void mse_update_wait_packet(struct mse_instance *instance,
 	wp->launch_avtp_timestamp = timestamp;
 
 	list_add_tail(&wp->list, &instance->wait_packet_list);
-	instance->wait_packet_idx = (instance->wait_packet_idx + 1) % MSE_CRF_TX_RING_SIZE;
+	instance->wait_packet_idx = (instance->wait_packet_idx + 1) % MSE_TX_RING_SIZE;
 }
 
 static void mse_control_wait_packet(struct mse_instance *instance,
