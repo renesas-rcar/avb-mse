@@ -79,6 +79,7 @@
 #define MSE_TIMESTAMP_SIZE      (4)
 #define MSE_M2TS_PACKET_SIZE    (MSE_TIMESTAMP_SIZE + MSE_TS_PACKET_SIZE)
 #define M2TS_FREQ               (27000000)    /* 27MHz */
+#define M2TS_DIFF(a, b)         (((a) - (b)) & 0x3fffffff)
 #define DEFAULT_DIFF_TIMESTAMP  (NSEC_SCALE / DEFAULT_INTERVAL_FRAMES)
 #define PACKET_PIECE_SIZE_MAX   (MSE_M2TS_PACKET_SIZE * MSE_CONFIG_TSPACKET_PER_FRAME_MAX)
 
@@ -327,7 +328,7 @@ static void copy_payload(struct iec61883_4_packetizer *iec61883_4,
 			timestamp_m2ts = ntohl(*(u32 *)data);
 
 			/* timestamp adjust by m2ts timestamp */
-			diff = timestamp_m2ts - iec61883_4->base_timestamp_m2ts;
+			diff = M2TS_DIFF(timestamp_m2ts, iec61883_4->base_timestamp_m2ts);
 
 			timestamp += m2ts_timestamp_to_nsec(diff);
 			iec61883_4->curr_timestamp = timestamp;
@@ -402,7 +403,7 @@ static void update_base_timestamp(struct iec61883_4_packetizer *iec61883_4,
 			timestamp_m2ts_piece = ntohl(*(u32 *)iec61883_4->packet_piece);
 
 			/* timestamp adjust by m2ts timestamp */
-			diff = timestamp_m2ts - timestamp_m2ts_piece;
+			diff = M2TS_DIFF(timestamp_m2ts, timestamp_m2ts_piece);
 			timestamp -= m2ts_timestamp_to_nsec(diff);
 
 			timestamp_m2ts = timestamp_m2ts_piece;

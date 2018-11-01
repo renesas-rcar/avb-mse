@@ -164,6 +164,7 @@
 #define MPEG2TS_M2TS_OFFSET       (4)
 #define MPEG2TS_M2TS_SIZE         (MPEG2TS_M2TS_OFFSET + MPEG2TS_TS_SIZE)
 #define MPEG2TS_M2TS_FREQ         (27000000)    /* 27MHz */
+#define MPEG2TS_M2TS_DIFF(a, b)   (((a) - (b)) & 0x3fffffff)
 #define MPEG2TS_PCR_PID_IGNORE    (MSE_CONFIG_PCR_PID_MAX)
 #define MPEG2TS_PCR27M_BITS       (42)
 #define MPEG2TS_PCR27M_INVALID    (BIT_ULL(MPEG2TS_PCR27M_BITS))
@@ -2323,7 +2324,7 @@ static bool mse_search_mpeg2ts_m2ts_interval(struct mse_instance *instance,
 
 	while (work_length + MPEG2TS_M2TS_SIZE <= data_size) {
 		m2ts_timestamp = ntohl(*(u32 *)(buf->buffer + work_length));
-		diff = m2ts_timestamp - base_m2ts_timestamp;
+		diff = MPEG2TS_M2TS_DIFF(m2ts_timestamp, base_m2ts_timestamp);
 		if (diff >= MPEG2TS_WAIT_INTERVAL) {
 			*found_pos = work_length;
 			return true;
@@ -2375,7 +2376,7 @@ static void mse_update_mpeg2ts_base_timestamp(struct mse_instance *instance,
 	} else if (instance->transmit_mode == MSE_TRANSMIT_MODE_TIMESTAMP) {
 		/* Add diff of m2ts timestamp */
 		m2ts_timestamp = ntohl(*(u32 *)(buf->buffer + buf->work_length));
-		diff = (u32)(m2ts_timestamp - instance->mpeg2ts_m2ts_base);
+		diff = MPEG2TS_M2TS_DIFF(m2ts_timestamp, instance->mpeg2ts_m2ts_base);
 
 		m2ts_timestamp_base += m2ts_timestamp_to_nsec(diff);
 		instance->mpeg2ts_m2ts_base = m2ts_timestamp;
@@ -2462,7 +2463,7 @@ static bool mse_check_wait_packet(struct mse_instance *instance,
 	if (buf->buffer_size != trans_size) {
 		/* Check difference between interval packet and next PCR */
 		m2ts_timestamp = ntohl(*(u32 *)(buf->buffer + trans_size));
-		diff = m2ts_timestamp - m2ts_timestamp_base;
+		diff = MPEG2TS_M2TS_DIFF(m2ts_timestamp, m2ts_timestamp_base);
 		if (diff <= MPEG2TS_WAIT_INTERVAL + MPEG2TS_INTERVAL_THRESHOLD) {
 			/* Difference is within interval plus threshold */
 			*size = trans_size;
