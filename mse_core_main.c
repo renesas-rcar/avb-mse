@@ -3332,17 +3332,17 @@ static void mse_work_callback_common(struct mse_instance *instance)
 					   &instance->proc_buf_list,
 					   work_length);
 
+	write_lock_irqsave(&instance->lock_state, flags);
+
 	if (mse_is_buffer_empty(instance)) {
 		/* state is STOPPING */
-		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
+		if (mse_state_test_nolock(instance, MSE_STATE_STOPPING)) {
 			queue_work(instance->wq_packet,
 				   &instance->wk_stop_streaming);
 		} else {
-			write_lock_irqsave(&instance->lock_state, flags);
 			/* if state is EXECUTE, change to IDLE */
 			mse_state_change_if(instance, MSE_STATE_IDLE,
 					    MSE_STATE_EXECUTE);
-			write_unlock_irqrestore(&instance->lock_state, flags);
 		}
 	} else {
 		/* if NOT work queued, then queue it */
@@ -3354,6 +3354,8 @@ static void mse_work_callback_common(struct mse_instance *instance)
 			queue_work(instance->wq_packet,
 				   &instance->wk_depacketize);
 	}
+
+	write_unlock_irqrestore(&instance->lock_state, flags);
 }
 
 static void mse_work_callback_video_rx(struct mse_instance *instance)
@@ -3379,19 +3381,23 @@ static void mse_work_callback_video_rx(struct mse_instance *instance)
 	list_for_each_entry_safe(buf, buf1, &buf_list, list)
 		mse_trans_complete(instance, &buf_list, buf->work_length);
 
+	write_lock_irqsave(&instance->lock_state, flags);
+
 	/* buffer is NOT empty, so wait next callback queued */
-	if (!mse_is_buffer_empty(instance))
+	if (!mse_is_buffer_empty(instance)) {
+		write_unlock_irqrestore(&instance->lock_state, flags);
 		return;
+	}
 
 	/* state is STOPPING */
-	if (mse_state_test(instance, MSE_STATE_STOPPING)) {
+	if (mse_state_test_nolock(instance, MSE_STATE_STOPPING)) {
 		queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 	} else {
-		write_lock_irqsave(&instance->lock_state, flags);
 		/* if state is EXECUTE, change to IDLE */
 		mse_state_change_if(instance, MSE_STATE_IDLE, MSE_STATE_EXECUTE);
-		write_unlock_irqrestore(&instance->lock_state, flags);
 	}
+
+	write_unlock_irqrestore(&instance->lock_state, flags);
 }
 
 static void mse_work_callback_mpeg2ts_tx(struct mse_instance *instance)
@@ -3417,21 +3423,24 @@ static void mse_work_callback_mpeg2ts_tx(struct mse_instance *instance)
 	list_for_each_entry_safe(buf, buf1, &buf_list, list)
 		mse_trans_complete(instance, &buf_list, buf->work_length);
 
+	write_lock_irqsave(&instance->lock_state, flags);
+
 	/* buffer is NOT empty, so wait next callback queued */
 	if (!mse_is_buffer_empty(instance)) {
 		queue_work(instance->wq_packet, &instance->wk_packetize);
+		write_unlock_irqrestore(&instance->lock_state, flags);
 		return;
 	}
 
 	/* state is STOPPING */
-	if (mse_state_test(instance, MSE_STATE_STOPPING)) {
+	if (mse_state_test_nolock(instance, MSE_STATE_STOPPING)) {
 		queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 	} else {
-		write_lock_irqsave(&instance->lock_state, flags);
 		/* if state is EXECUTE, change to IDLE */
 		mse_state_change_if(instance, MSE_STATE_IDLE, MSE_STATE_EXECUTE);
-		write_unlock_irqrestore(&instance->lock_state, flags);
 	}
+
+	write_unlock_irqrestore(&instance->lock_state, flags);
 }
 
 static void mse_work_callback(struct work_struct *work)
@@ -5875,7 +5884,7 @@ int mse_start_transmission(int index,
 	int buf_cnt;
 	u64 now;
 	int idx;
-	unsigned long flags;
+	unsigned long flags, flags2;
 
 	if ((index < 0) || (index >= MSE_INSTANCE_MAX)) {
 		mse_err("invalid argument. index=%d\n", index);
@@ -5903,12 +5912,12 @@ int mse_start_transmission(int index,
 		return -EPERM;
 	}
 
-	write_lock_irqsave(&instance->lock_state, flags);
+	write_lock_irqsave(&instance->lock_state, flags2);
 	mse_debug_state(instance);
 
 	/* state is STOPPING */
 	if (mse_state_test_nolock(instance, MSE_STATE_STOPPING)) {
-		write_unlock_irqrestore(&instance->lock_state, flags);
+		write_unlock_irqrestore(&instance->lock_state, flags2);
 		mse_err("instance is busy. index=%d\n", index);
 
 		return -EBUSY;
@@ -5916,19 +5925,19 @@ int mse_start_transmission(int index,
 
 	/* state is NOT RUNNABLE */
 	if (!mse_state_test_nolock(instance, MSE_STATE_RUNNABLE)) {
-		write_unlock_irqrestore(&instance->lock_state, flags);
+		write_unlock_irqrestore(&instance->lock_state, flags2);
 		mse_err("operation is not permitted. index=%d\n", index);
 
 		return -EPERM;
 	}
 
 	err = mse_state_change(instance, MSE_STATE_EXECUTE);
-	write_unlock_irqrestore(&instance->lock_state, flags);
-
 	if (!err) {
 		buf_cnt = atomic_read(&instance->trans_buf_cnt);
-		if (buf_cnt >= MSE_TRANS_BUF_ACCEPTABLE)
+		if (buf_cnt >= MSE_TRANS_BUF_ACCEPTABLE) {
+			write_unlock_irqrestore(&instance->lock_state, flags2);
 			return -EAGAIN;
+		}
 
 		spin_lock_irqsave(&instance->lock_buf_list, flags);
 		idx = instance->trans_idx;
@@ -5957,6 +5966,8 @@ int mse_start_transmission(int index,
 		spin_unlock_irqrestore(&instance->lock_buf_list, flags);
 		queue_work(instance->wq_packet, &instance->wk_start_trans);
 	}
+
+	write_unlock_irqrestore(&instance->lock_state, flags2);
 
 	return err;
 }
