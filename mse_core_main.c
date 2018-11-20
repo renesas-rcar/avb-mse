@@ -1322,6 +1322,8 @@ static int tstamps_calc_tstamp_nolock(struct timestamp_reader *reader,
 	struct timestamp_set ts1, ts2;
 	int pos1, pos2;
 	u64 t;
+	s64 ts21_diff;
+	s64 interval_thresh;
 	bool f_first = false;
 
 	if (!que)
@@ -1385,6 +1387,21 @@ static int tstamps_calc_tstamp_nolock(struct timestamp_reader *reader,
 
 	ts1 = que->timestamps[pos1];
 	ts2 = que->timestamps[pos2];
+
+	ts21_diff = (ts2.real - ts1.real) - (ts2.std - ts1.std);
+
+	/* half of the interval */
+	interval_thresh = interval >> 1;
+
+	/**
+	 * If ts2 to ts1 differ greatly from the nominal time period, do
+	 * replace ts2 value by interpolate value.
+	 */
+	if (ts21_diff < -interval_thresh || interval_thresh < ts21_diff) {
+		/* interpolate by the nominal time period */
+		ts2.real = ts1.real + (ts2.std - ts1.std);
+		que->timestamps[pos2].real = ts2.real;
+	}
 
 	t = (ts2.real - ts1.real) * (reader->out_std - ts1.std);
 	*timestamp = div64_u64(t, ts2.std - ts1.std) +
