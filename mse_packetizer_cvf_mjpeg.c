@@ -382,7 +382,7 @@ static ssize_t parse_jpeg_headers(struct cvf_mjpeg_packetizer *cvf_mjpeg,
 				return ret;
 			}
 
-			if (&jpeg->rheader.restart_interval) {
+			if (jpeg->rheader.restart_interval) {
 				jpeg->dri_f = true;
 				cvf_mjpeg->type |= MJPEG_TYPE_RESTART_BIT;
 			}
