@@ -1152,7 +1152,7 @@ static ssize_t mse_ptp_config_type_store(struct device *dev,
 					 const char *buf,
 					 size_t len)
 {
-	enum MSE_CRF_TYPE type = -1;
+	enum MSE_PTP_TYPE type = -1;
 	struct mse_ptp_config data;
 	int index = mse_dev_to_index(dev);
 	int i, ret;
