@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2018 Renesas Electronics Corporation
+ Copyright (C) 2015-2018,2021 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -6150,7 +6150,7 @@ static int mse_probe(void)
 
 	/* W/A for cannot using DMA APIs */
 	if (IS_ENABLED(CONFIG_OF)) {
-		of_dma_configure(&mse->pdev->dev, NULL);
+		of_dma_configure(&mse->pdev->dev, NULL, false);
 	} else {
 		/*
 		 * MSE has no dependency to OF, but w/o CONFIG_OF set the

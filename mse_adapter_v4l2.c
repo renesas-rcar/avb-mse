@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2017,2021 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -1810,10 +1810,12 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	vdev = &vadp_dev->vdev;
 	vdev->release = video_device_release_empty;
 	vdev->fops = &g_mse_adapter_v4l2_fops;
-	vdev->vfl_type = VFL_TYPE_GRABBER;
+	vdev->vfl_type = VFL_TYPE_VIDEO;
 	vdev->ioctl_ops = &g_mse_adapter_v4l2_ioctl_ops;
 	vdev->vfl_dir = VFL_DIR_M2M;
 	vdev->queue = &vadp_dev->q_cap; /* default queue is capture */
+	vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_VIDEO_OUTPUT |
+				V4L2_CAP_STREAMING;
 
 	mutex_init(&vadp_dev->mutex_vb2);
 
@@ -1850,7 +1852,7 @@ static int mse_adapter_v4l2_probe(int dev_num, enum MSE_TYPE type)
 	}
 
 	vdev->v4l2_dev = v4l2_dev;
-	err = video_register_device(vdev, VFL_TYPE_GRABBER, -1);
+	err = video_register_device(vdev, VFL_TYPE_VIDEO, -1);
 	if (err) {
 		mse_err("Failed video_register_device() Rtn=%d\n", err);
 		v4l2_device_unregister(&vadp_dev->v4l2_dev);

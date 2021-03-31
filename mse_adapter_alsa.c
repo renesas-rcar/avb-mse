@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2018 Renesas Electronics Corporation
+ Copyright (C) 2015-2018,2021 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -690,17 +690,11 @@ static int mse_adapter_alsa_probe(struct snd_card *card, int devno)
 			&g_mse_adapter_alsa_capture_ops);
 
 	/* pre-allocation of buffers */
-	err = snd_pcm_lib_preallocate_pages_for_all(
-					pcm,
-					SNDRV_DMA_TYPE_CONTINUOUS,
-					snd_dma_continuous_data(GFP_KERNEL),
-					MSE_ADAPTER_ALSA_PAGE_SIZE,
-					MSE_ADAPTER_ALSA_PAGE_SIZE);
-	if (err < 0) {
-		mse_err("Failed pre-allocation err=%d\n", err);
-		mse_unregister_adapter_media(index);
-		return -EPERM;
-	}
+	snd_pcm_lib_preallocate_pages_for_all(pcm,
+				SNDRV_DMA_TYPE_CONTINUOUS,
+				snd_dma_continuous_data(GFP_KERNEL),
+				MSE_ADAPTER_ALSA_PAGE_SIZE,
+				MSE_ADAPTER_ALSA_PAGE_SIZE);
 
 	/* allocate a chip-specific data with zero filled */
 	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
