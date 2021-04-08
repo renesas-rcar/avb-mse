@@ -423,6 +423,7 @@ static int mse_adapter_eavb_send_prepare(int index,
 		(eavb->entry + i)->seq_no = i;
 		(eavb->entry + i)->vec[0].base = packets[i].paddr;
 		(eavb->entry + i)->vec[0].len = packets[i].len;
+		(eavb->entry + i)->vec[0].vaddr = packets[i].vaddr;
 	}
 
 	eavb->entried = 0;
@@ -586,6 +587,7 @@ static int mse_adapter_eavb_receive_prepare(int index,
 		(eavb->entry + i)->seq_no = i;
 		(eavb->entry + i)->vec[0].base = packets[i].paddr;
 		(eavb->entry + i)->vec[0].len = packets[i].len;
+		(eavb->entry + i)->vec[0].vaddr = packets[i].vaddr;
 	}
 
 	/* entry queue */
