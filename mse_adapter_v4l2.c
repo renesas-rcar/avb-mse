@@ -354,31 +354,47 @@ static struct v4l2_adapter_temp_buffer *temp_buffer_get_prepared(
 #define MPEG2TS_SYNC            (0x47)
 #define MPEG2TS_M2TS_OFFSET     (4)
 #define MPEG2TS_M2TS_SIZE       (MPEG2TS_M2TS_OFFSET + MPEG2TS_TS_SIZE)
-static bool is_mpeg2ts_ts(unsigned char *tsp)
+#define MPEG2TS_MIN_LEN_REQUIRED (MPEG2TS_M2TS_OFFSET + MPEG2TS_M2TS_SIZE * 2)
+
+/* Check at least 2 adjacent packets.
+ * Optionally 3 if enough data are available.
+ */
+#define MPEG2TS_MIN_PKT_CHECK 2
+#define MPEG2TS_MAX_PKT_CHECK 3
+
+static bool is_mpeg2ts_ts(unsigned char *tsp, size_t len)
 {
-	if (tsp[0] == MPEG2TS_SYNC &&
-	    tsp[MPEG2TS_TS_SIZE] == MPEG2TS_SYNC &&
-	    tsp[MPEG2TS_TS_SIZE * 2] == MPEG2TS_SYNC)
-		return true;
-	else
-		return false;
+	size_t offs = 0;
+	unsigned int succ = 0;
+
+	while ((offs < len) && (succ < MPEG2TS_MAX_PKT_CHECK)) {
+		if (tsp[offs] != MPEG2TS_SYNC)
+			return false;
+		succ++;
+		offs += MPEG2TS_TS_SIZE;
+	}
+	return (succ >= MPEG2TS_MIN_PKT_CHECK) ? true : false;
 }
 
-static bool is_mpeg2ts_m2ts(unsigned char *tsp)
+static bool is_mpeg2ts_m2ts(unsigned char *tsp, size_t len)
 {
-	if (tsp[MPEG2TS_M2TS_OFFSET] == MPEG2TS_SYNC &&
-	    tsp[MPEG2TS_M2TS_OFFSET + MPEG2TS_M2TS_SIZE] == MPEG2TS_SYNC &&
-	    tsp[MPEG2TS_M2TS_OFFSET + MPEG2TS_M2TS_SIZE * 2] == MPEG2TS_SYNC)
-		return true;
-	else
-		return false;
+	size_t offs = MPEG2TS_M2TS_OFFSET;
+	unsigned int succ = 0;
+
+	while ((offs < len) && (succ < MPEG2TS_MAX_PKT_CHECK)) {
+		if (tsp[offs] != MPEG2TS_SYNC)
+			return false;
+		succ++;
+		offs += MPEG2TS_M2TS_SIZE;
+	}
+	return (succ >= MPEG2TS_MIN_PKT_CHECK) ? true : false;
 }
 
-static int get_mpeg2ts_format(unsigned char *buf)
+static int get_mpeg2ts_format(unsigned char *buf, size_t size)
 {
-	if (is_mpeg2ts_ts(buf))
+	if (is_mpeg2ts_ts(buf, size))
 		return MSE_MPEG2TS_TYPE_TS;
-	else if (is_mpeg2ts_m2ts(buf))
+	else if (is_mpeg2ts_m2ts(buf, size))
 		return MSE_MPEG2TS_TYPE_M2TS;
 	else
 		return -1;
@@ -414,7 +430,7 @@ static bool jpeg_frame_is_valid(unsigned char *buf, size_t size)
 
 static int temp_buffer_check_type(struct v4l2_adapter_device *vadp_dev,
 				  unsigned char *buf,
-				  size_t size)
+				  size_t size, size_t size_fmtchk)
 {
 	int ret;
 	u8 mk;
@@ -422,7 +438,7 @@ static int temp_buffer_check_type(struct v4l2_adapter_device *vadp_dev,
 
 	switch (vadp_dev->format.pixelformat) {
 	case V4L2_PIX_FMT_MPEG:
-		ret = get_mpeg2ts_format(buf);
+		ret = get_mpeg2ts_format(buf, size_fmtchk);
 		vadp_dev->mpeg2ts_type = ret;
 		vadp_dev->use_temp_buffer = !tspacket_size_is_valid(ret, size);
 		break;
@@ -1326,7 +1342,7 @@ static void prepare_stream_buffer(struct vb2_queue *vq)
 	struct v4l2_adapter_device *vadp_dev = vb2_get_drv_priv(vq);
 	struct v4l2_adapter_buffer *vadp_buf;
 	void *buf;
-	long size;
+	size_t size;
 	int ret = 0;
 
 	mse_debug("START vq=%p, type=%s\n", vq, v4l2_type_stringfy(vq->type));
@@ -1346,7 +1362,31 @@ static void prepare_stream_buffer(struct vb2_queue *vq)
 
 		/* Check stream type */
 		if (vadp_dev->sequence == 0) {
-			ret = temp_buffer_check_type(vadp_dev, buf, size);
+			unsigned char *check_type = buf;
+			size_t len = size;
+			unsigned char concat_buf[MPEG2TS_MIN_LEN_REQUIRED];
+			/* If the buffer is too small - concatenate several buffers */
+			if (size < MPEG2TS_MIN_LEN_REQUIRED &&
+			    vadp_dev->format.pixelformat == V4L2_PIX_FMT_MPEG) {
+				struct v4l2_adapter_buffer *tmp, *buf_next;
+
+				len = 0;
+				check_type = concat_buf;
+				list_for_each_entry_safe(tmp, buf_next,
+							 &vadp_dev->buf_list, list) {
+					void *tmp_buf = vb2_plane_vaddr(&tmp->vb.vb2_buf, 0);
+					size_t tmp_len = vb2_get_plane_payload(&tmp->vb.vb2_buf, 0);
+					size_t cpy = MPEG2TS_MIN_LEN_REQUIRED - len;
+
+					if (tmp_len < cpy)
+						cpy = tmp_len;
+					memcpy(concat_buf + len, tmp_buf, cpy);
+					len += cpy;
+					if (len >= MPEG2TS_MIN_LEN_REQUIRED)
+						break;
+				}
+			}
+			ret = temp_buffer_check_type(vadp_dev, check_type, size, len);
 			if (ret < 0) {
 				vadp_buffer_done(vadp_dev, vadp_buf,
 						 VB2_BUF_STATE_ERROR);
