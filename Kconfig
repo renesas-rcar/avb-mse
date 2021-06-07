@@ -5,7 +5,7 @@
 menuconfig AVB_MSE
 	bool "AVB MSE"
 	default y
-	---help---
+	help
 	  This option enable Renesas AVB Media Streaming Engine (MSE) driver.
 	  MSE contains following sub modules.
 	  - MSE Core module
@@ -19,7 +19,7 @@ if AVB_MSE
 config MSE_CORE
 	tristate "MSE Core module"
 	default m
-	---help---
+	help
 	  This option enable core functions in MSE.
 	  Core functions contains following features.
 	  - In kernel API for MSE Adapters.
@@ -30,7 +30,7 @@ config MSE_IOCTL
 	bool "MSE ioctl interface for configuration"
 	depends on MSE_CORE
 	default y
-	---help---
+	help
 	  This option enable ioctl interface for MSE.
 	  Say Y here to enable ioctl interface.
 	  Say N if unsure.
@@ -39,7 +39,7 @@ config MSE_SYSFS
 	bool "MSE sysfs interface for configuration"
 	depends on MSE_CORE
 	default y
-	---help---
+	help
 	  This option enable sysfs interface for MSE.
 	  Say Y here to enable sysfs interface.
 	  Say N if unsure.
@@ -48,7 +48,7 @@ config MSE_PACKETIZER_AAF
 	bool "MSE Packetizer AAF"
 	depends on MSE_CORE
 	default y
-	---help---
+	help
 	  This option enable packetizer functions in MSE.
 	  Say Y here to enable AVTP Packetizer/De-Packetizer AAF.
 	  Say N if unsure.
@@ -57,7 +57,7 @@ config MSE_PACKETIZER_IEC61883_4
 	bool "MSE Packetizer IEC61883_4"
 	depends on MSE_CORE
 	default y
-	---help---
+	help
 	  This option enable packetizer functions in MSE.
 	  Say Y here to enable AVTP Packetizer/De-Packetizer IEC61883_4.
 	  Say N if unsure.
@@ -66,7 +66,7 @@ config MSE_PACKETIZER_IEC61883_6
 	bool "MSE Packetizer IEC61883_6"
 	depends on MSE_CORE
 	default y
-	---help---
+	help
 	  This option enable packetizer functions in MSE.
 	  Say Y here to enable AVTP Packetizer/De-Packetizer IEC61883_6.
 	  Say N if unsure.
@@ -75,7 +75,7 @@ config MSE_PACKETIZER_CVF_H264
 	bool "MSE Packetizer CVF_H264"
 	depends on MSE_CORE
 	default y
-	---help---
+	help
 	  This option enable packetizer functions in MSE.
 	  Say Y here to enable AVTP Packetizer/De-Packetizer CVF_H264.
 	  Say N if unsure.
@@ -85,7 +85,7 @@ config MSE_PACKETIZER_CVF_H264_SINGLE_NAL
 	depends on MSE_CORE
 	depends on MSE_PACKETIZER_CVF_H264
 	default y
-	---help---
+	help
 	  This option enable packetizer functions in MSE.
 	  Say Y here to enable AVTP Packetizer CVF_H264 Single NAL format.
 	  Say N if unsure.
@@ -94,7 +94,7 @@ config MSE_PACKETIZER_CVF_MJPEG
 	bool "MSE Packetizer CVF_MJPEG"
 	depends on MSE_CORE
 	default y
-	---help---
+	help
 	  This option enable packetizer functions in MSE.
 	  Say Y here to enable AVTP Packetizer/De-Packetizer CVF_MJPEG.
 	  Say N if unsure.
@@ -104,7 +104,7 @@ config MSE_ADAPTER_EAVB
 	depends on MSE_CORE
 	depends on RAVB_STREAMING
 	default m
-	---help---
+	help
 	  Renesas Ethernet AVB software
 	  Support MSE Adapter for Renesas AVB Streaming driver
 
@@ -112,7 +112,7 @@ config MSE_ADAPTER_ALSA
 	tristate "MSE ALSA Adapter"
 	depends on MSE_CORE
 	default m
-	---help---
+	help
 	  Renesas Ethernet AVB software
 	  Support MSE Adapter for Linux ALSA
 
@@ -121,7 +121,7 @@ config MSE_ADAPTER_V4L2
 	depends on MSE_CORE
 	select VIDEOBUF2_VMALLOC
 	default m
-	---help---
+	help
 	  Renesas Ethernet AVB software.
 	  Support MSE Adapter for V4L2.
 
@@ -130,7 +130,7 @@ config MSE_ADAPTER_MCH
 	depends on MSE_CORE
 	depends on MCH_CORE
 	default m
-	---help---
+	help
 	  Renesas Ethernet AVB software.
 	  Support MSE Adapter for MCH.
 
