@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2017 Renesas Electronics Corporation
+ Copyright (C) 2015-2017,2021 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -353,11 +353,20 @@ static int mse_packetizer_cvf_h264_calc_cbs(int index,
 	mse_debug("index=%d\n", index);
 	h264 = &cvf_h264_packetizer_table[index];
 
-	return mse_packetizer_calc_cbs_by_bitrate(
+	if (h264->video_config.bitrate)
+		return mse_packetizer_calc_cbs_by_bitrate(
+				h264->net_config.port_transmit_rate,
+				h264->payload_max + AVTP_PAYLOAD_OFFSET,
+				h264->video_config.bitrate,
+				h264->payload_max,
+				cbs);
+
+	return mse_packetizer_calc_cbs_by_frames(
 			h264->net_config.port_transmit_rate,
 			h264->payload_max + AVTP_PAYLOAD_OFFSET,
-			h264->video_config.bitrate,
-			h264->payload_max,
+			h264->video_config.class_interval_frames *
+			h264->video_config.max_interval_frames,
+			CBS_ADJUSTMENT_FACTOR,
 			cbs);
 }
 

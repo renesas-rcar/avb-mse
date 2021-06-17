@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2018 Renesas Electronics Corporation
+ Copyright (C) 2015-2018,2021 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -68,6 +68,8 @@
 #define CRF_INTERVAL_FRAMES     (50) /* CRF AVTPDUs per Second */
 #define AVTP_PAYLOAD_MAX (ETHFRAMELEN_MAX - AVTP_PAYLOAD_OFFSET)
 #define JPEG_PAYLOAD_MAX (ETHFRAMELEN_MAX - AVTP_CVF_MJPEG_PAYLOAD_OFFSET)
+
+#define CBS_ADJUSTMENT_FACTOR   (103) /* percent */
 
 /**
  * @brief packetizer status

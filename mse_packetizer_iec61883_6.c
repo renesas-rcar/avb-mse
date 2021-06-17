@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2018 Renesas Electronics Corporation
+ Copyright (C) 2015-2018,2021 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -72,7 +72,6 @@
 #include "mse_packetizer.h"
 #include "avtp.h"
 
-#define CBS_ADJUSTMENT_FACTOR   (103) /* percent */
 #define AM824_DATA_SIZE         (sizeof(u32))
 
 struct avtp_iec61883_6_param {

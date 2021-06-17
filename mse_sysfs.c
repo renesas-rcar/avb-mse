@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2018 Renesas Electronics Corporation
+ Copyright (C) 2015-2018,2021 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -116,6 +116,8 @@
 #define MSE_SYSFS_NAME_STR_FPS_DENOMINATOR           "fps_denominator"
 #define MSE_SYSFS_NAME_STR_FPS_NUMERATOR             "fps_numerator"
 #define MSE_SYSFS_NAME_STR_BITRATE                   "bitrate"
+#define MSE_SYSFS_NAME_STR_CLASS_INTERVAL_FRAMES     "class_interval_frames"
+#define MSE_SYSFS_NAME_STR_MAX_INTERVAL_FRAMES       "max_interval_frames"
 #define MSE_SYSFS_NAME_STR_TSPACKETS_PER_FRAME       "tspackets_per_frame"
 #define MSE_SYSFS_NAME_STR_PCR_PID                   "pcr_pid"
 #define MSE_SYSFS_NAME_STR_TRANSMIT_MODE             "transmit_mode"
@@ -918,6 +920,12 @@ static ssize_t mse_video_config_u32_show(struct device *dev,
 	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_BITRATE,
 			  strlen(attr->attr.name)))
 		value = data.bitrate;
+	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_CLASS_INTERVAL_FRAMES,
+			  strlen(attr->attr.name)))
+		value = data.class_interval_frames;
+	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_MAX_INTERVAL_FRAMES,
+			  strlen(attr->attr.name)))
+		value = data.max_interval_frames;
 	else
 		return -EPERM;
 
@@ -960,6 +968,12 @@ static ssize_t mse_video_config_u32_store(struct device *dev,
 	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_BITRATE,
 			  strlen(attr->attr.name)))
 		data.bitrate = value;
+	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_CLASS_INTERVAL_FRAMES,
+			  strlen(attr->attr.name)))
+		data.class_interval_frames = value;
+	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_MAX_INTERVAL_FRAMES,
+			  strlen(attr->attr.name)))
+		data.max_interval_frames = value;
 	else
 		return -EPERM;
 
@@ -1068,6 +1082,12 @@ static ssize_t mse_mpeg2ts_config_u32_show(struct device *dev,
 	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_PCR_PID,
 			  strlen(attr->attr.name)))
 		value = data.pcr_pid;
+	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_CLASS_INTERVAL_FRAMES,
+			  strlen(attr->attr.name)))
+		value = data.class_interval_frames;
+	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_MAX_INTERVAL_FRAMES,
+			  strlen(attr->attr.name)))
+		value = data.max_interval_frames;
 	else
 		return -EPERM;
 
@@ -1107,6 +1127,12 @@ static ssize_t mse_mpeg2ts_config_u32_store(struct device *dev,
 	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_PCR_PID,
 			  strlen(attr->attr.name)))
 		data.pcr_pid = value;
+	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_CLASS_INTERVAL_FRAMES,
+			  strlen(attr->attr.name)))
+		data.class_interval_frames = value;
+	else if (!strncmp(attr->attr.name, MSE_SYSFS_NAME_STR_MAX_INTERVAL_FRAMES,
+			  strlen(attr->attr.name)))
+		data.max_interval_frames = value;
 	else
 		return -EPERM;
 
@@ -1834,12 +1860,18 @@ static MSE_DEVICE_ATTR(fps_numerator, video_config, 0644,
 		       mse_video_config_u32_show, mse_video_config_u32_store);
 static MSE_DEVICE_ATTR(bitrate, video_config, 0644,
 		       mse_video_config_u32_show, mse_video_config_u32_store);
+static MSE_DEVICE_ATTR(class_interval_frames, video_config, 0644,
+		       mse_video_config_u32_show, mse_video_config_u32_store);
+static MSE_DEVICE_ATTR(max_interval_frames, video_config, 0644,
+		       mse_video_config_u32_show, mse_video_config_u32_store);
 
 static struct attribute *mse_attr_video_config[] = {
 	&mse_dev_attr_video_config_bytes_per_frame.attr,
 	&mse_dev_attr_video_config_fps_denominator.attr,
 	&mse_dev_attr_video_config_fps_numerator.attr,
 	&mse_dev_attr_video_config_bitrate.attr,
+	&mse_dev_attr_video_config_class_interval_frames.attr,
+	&mse_dev_attr_video_config_max_interval_frames.attr,
 	NULL,
 };
 
@@ -1860,12 +1892,20 @@ static MSE_DEVICE_ATTR(pcr_pid, mpeg2ts_config, 0644,
 static MSE_DEVICE_ATTR(transmit_mode, mpeg2ts_config, 0644,
 		       mse_mpeg2ts_config_transmit_mode_show,
 		       mse_mpeg2ts_config_transmit_mode_store);
+static MSE_DEVICE_ATTR(class_interval_frames, mpeg2ts_config, 0644,
+		       mse_mpeg2ts_config_u32_show,
+		       mse_mpeg2ts_config_u32_store);
+static MSE_DEVICE_ATTR(max_interval_frames, mpeg2ts_config, 0644,
+		       mse_mpeg2ts_config_u32_show,
+		       mse_mpeg2ts_config_u32_store);
 
 static struct attribute *mse_attr_mpeg2ts_config[] = {
 	&mse_dev_attr_mpeg2ts_config_tspackets_per_frame.attr,
 	&mse_dev_attr_mpeg2ts_config_bitrate.attr,
 	&mse_dev_attr_mpeg2ts_config_pcr_pid.attr,
 	&mse_dev_attr_mpeg2ts_config_transmit_mode.attr,
+	&mse_dev_attr_mpeg2ts_config_class_interval_frames.attr,
+	&mse_dev_attr_mpeg2ts_config_max_interval_frames.attr,
 	NULL,
 };
 

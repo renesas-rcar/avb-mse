@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2018 Renesas Electronics Corporation
+ Copyright (C) 2015-2018,2021 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -407,7 +407,11 @@ int mse_config_set_media_video_config(int index,
 	if (data->fps_numerator > MSE_CONFIG_FPS_NUMERATOR_MAX)
 		goto wrong_value;
 
-	if (data->bitrate < MSE_CONFIG_BITRATE_MIN)
+	if ((data->class_interval_frames * data->max_interval_frames >
+				MSE_CONFIG_CLASS_INTERVAL_FRAMES_MAX) ||
+	    (data->class_interval_frames * data->max_interval_frames <
+			 MSE_CONFIG_CLASS_INTERVAL_FRAMES_MIN) ||
+	    (data->class_interval_frames * data->max_interval_frames % 100))
 		goto wrong_value;
 
 	spin_lock_irqsave(&config->lock, flags);
@@ -417,9 +421,10 @@ int mse_config_set_media_video_config(int index,
 	return 0;
 
 wrong_value:
-	mse_err("invalid value. bytes_per_frame=%d fps=%d/%d bitrate=%d\n",
+	mse_err("invalid value. bytes_per_frame=%d fps=%d/%d bitrate=%d frames=%d, max_frames=%d\n",
 		data->bytes_per_frame, data->fps_numerator,
-		data->fps_denominator, data->bitrate);
+		data->fps_denominator, data->bitrate,
+		data->class_interval_frames, data->max_interval_frames);
 
 	return -EINVAL;
 }
@@ -478,13 +483,17 @@ int mse_config_set_media_mpeg2ts_config(int index,
 	    (data->tspackets_per_frame > MSE_CONFIG_TSPACKET_PER_FRAME_MAX))
 		goto wrong_value;
 
-	if (data->bitrate < MSE_CONFIG_BITRATE_MIN)
-		goto wrong_value;
-
 	if (data->pcr_pid > MSE_CONFIG_PCR_PID_MAX)
 		goto wrong_value;
 
 	if (data->transmit_mode >= MSE_TRANSMIT_MODE_MAX)
+		goto wrong_value;
+
+	if ((data->class_interval_frames * data->max_interval_frames >
+				MSE_CONFIG_CLASS_INTERVAL_FRAMES_MAX) ||
+	    (data->class_interval_frames * data->max_interval_frames <
+			 MSE_CONFIG_CLASS_INTERVAL_FRAMES_MIN) ||
+	    (data->class_interval_frames * data->max_interval_frames % 100))
 		goto wrong_value;
 
 	spin_lock_irqsave(&config->lock, flags);
@@ -494,8 +503,9 @@ int mse_config_set_media_mpeg2ts_config(int index,
 	return 0;
 
 wrong_value:
-	mse_err("invalid value. bitrate=%d pcr_pid=%d transmit_mode=%d\n",
-		data->bitrate, data->pcr_pid, data->transmit_mode);
+	mse_err("invalid value. bitrate=%d pcr_pid=%d transmit_mode=%d frames=%d, max_frames=%d\n",
+		data->bitrate, data->pcr_pid, data->transmit_mode,
+		data->class_interval_frames, data->max_interval_frames);
 	return -EINVAL;
 }
 
@@ -921,6 +931,8 @@ static struct mse_config mse_config_default_video = {
 		.fps_denominator = 0,
 		.fps_numerator = 0,
 		.bitrate = 50000000,
+		.class_interval_frames = DEFAULT_INTERVAL_FRAMES,
+		.max_interval_frames = 1,
 	},
 	.ptp_config = {
 		.type = MSE_PTP_TYPE_CURRENT_TIME,
@@ -961,6 +973,8 @@ static struct mse_config mse_config_default_mpeg2ts = {
 		.bitrate = 50000000,
 		.pcr_pid = MSE_CONFIG_PCR_PID_MAX,
 		.transmit_mode = MSE_TRANSMIT_MODE_TIMESTAMP,
+		.class_interval_frames = DEFAULT_INTERVAL_FRAMES,
+		.max_interval_frames = 1,
 	},
 	.ptp_config = {
 		.type = MSE_PTP_TYPE_CURRENT_TIME,

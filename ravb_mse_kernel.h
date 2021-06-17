@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2018 Renesas Electronics Corporation
+ Copyright (C) 2015-2018,2021 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -189,6 +189,10 @@ struct mse_video_config {
 	} fps;
 	/** @brief bytes per frame is data size in 1 ether frame */
 	int bytes_per_frame;
+	/** @brief count of class interval frames */
+	int class_interval_frames;
+	/** @brief maximum frames per class interval */
+	int max_interval_frames;
 };
 
 /**
@@ -212,6 +216,10 @@ struct mse_mpeg2ts_config {
 	enum MSE_MPEG2TS_TYPE mpeg2ts_type;
 	/** @brief transmit mode */
 	enum MSE_TRANSMIT_MODE transmit_mode;
+	/** @brief count of class interval frames */
+	int class_interval_frames;
+	/** @brief maximum frames per class interval */
+	int max_interval_frames;
 };
 
 /**

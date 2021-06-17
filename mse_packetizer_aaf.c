@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2018 Renesas Electronics Corporation
+ Copyright (C) 2015-2018,2021 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -72,8 +72,6 @@
 #include "ravb_mse_kernel.h"
 #include "mse_packetizer.h"
 #include "avtp.h"
-
-#define CBS_ADJUSTMENT_FACTOR   (103) /* percent */
 
 struct avtp_aaf_param {
 	char dest_addr[MSE_MAC_LEN_MAX];

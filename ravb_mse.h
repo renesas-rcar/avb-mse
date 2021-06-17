@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2016-2018 Renesas Electronics Corporation
+ Copyright (C) 2016-2018,2021 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -159,13 +159,16 @@ struct mse_media_audio_config {
 #define MSE_CONFIG_BYTES_PER_FRAME_MIN (128)
 #define MSE_CONFIG_FPS_DENOMINATOR_MAX (1001)
 #define MSE_CONFIG_FPS_NUMERATOR_MAX   (60000)
-#define MSE_CONFIG_BITRATE_MIN         (1)
+#define MSE_CONFIG_CLASS_INTERVAL_FRAMES_MAX (8000)
+#define MSE_CONFIG_CLASS_INTERVAL_FRAMES_MIN (100)
 
 struct mse_media_video_config {
 	uint32_t bytes_per_frame;
 	uint32_t fps_denominator;
 	uint32_t fps_numerator;
 	uint32_t bitrate;
+	uint32_t class_interval_frames;
+	uint32_t max_interval_frames;
 };
 
 #define MSE_CONFIG_TSPACKET_PER_FRAME_MIN (1)
@@ -184,6 +187,8 @@ struct mse_media_mpeg2ts_config {
 	uint32_t bitrate;
 	uint32_t pcr_pid;
 	enum MSE_TRANSMIT_MODE transmit_mode;
+	uint32_t class_interval_frames;
+	uint32_t max_interval_frames;
 };
 
 enum MSE_PTP_TYPE {

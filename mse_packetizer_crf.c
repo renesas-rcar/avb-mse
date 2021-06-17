@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2016-2018 Renesas Electronics Corporation
+ Copyright (C) 2016-2018,2021 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -72,7 +72,6 @@
 #include "mse_packetizer.h"
 #include "avtp.h"
 
-#define CBS_ADJUSTMENT_FACTOR   (103) /* percent */
 #define MSE_CRFDATA_MAX         (6)
 
 struct avtp_crf_param {

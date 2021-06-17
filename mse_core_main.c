@@ -859,6 +859,8 @@ static void mse_get_default_config(struct mse_instance *instance,
 		video->fps.denominator = video_config.fps_denominator;
 		video->bitrate = video_config.bitrate;
 		video->bytes_per_frame = video_config.bytes_per_frame;
+		video->class_interval_frames = video_config.class_interval_frames;
+		video->max_interval_frames = video_config.max_interval_frames;
 
 		if (!tx && delay_time.rx_delay_time_ns != 0)
 			instance->f_ptp_timer = true;
@@ -875,6 +877,8 @@ static void mse_get_default_config(struct mse_instance *instance,
 		mpeg2ts->bitrate = mpeg2ts_config.bitrate;
 		mpeg2ts->pcr_pid = mpeg2ts_config.pcr_pid;
 		mpeg2ts->transmit_mode = mpeg2ts_config.transmit_mode;
+		mpeg2ts->class_interval_frames = mpeg2ts_config.class_interval_frames;
+		mpeg2ts->max_interval_frames = mpeg2ts_config.max_interval_frames;
 
 		if (tx && mpeg2ts->transmit_mode != MSE_TRANSMIT_MODE_BITRATE)
 			instance->f_ptp_timer = true;
