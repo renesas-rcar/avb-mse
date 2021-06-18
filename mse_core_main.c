@@ -4207,7 +4207,7 @@ static void mse_work_start_transmission_common(struct mse_instance *instance)
 
 		return;
 	} else if (IS_MSE_TYPE_AUDIO(instance->media->type)) {
-		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
+		if (mse_state_test_nolock(instance, MSE_STATE_STOPPING)) {
 			spin_unlock_irqrestore(&instance->lock_buf_list,
 					       flags);
 			queue_work(instance->wq_packet,
