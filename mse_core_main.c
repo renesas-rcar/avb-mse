@@ -528,9 +528,9 @@ static struct mse_device *mse;
 static int major;
 module_param(major, int, 0440);
 
-static int avb_rt_prio;
-module_param(avb_rt_prio, int, 0660);
-MODULE_PARM_DESC(avb_rt_prio, "apply RT priority to worker threads (1-99) or do NOT apply RT priority (0)");
+static int rt_prio;
+module_param(rt_prio, int, 0660);
+MODULE_PARM_DESC(rt_prio, "apply RT priority to worker threads (1-99) or do NOT apply RT priority (0)");
 
 /*
  * function prototypes
@@ -5294,20 +5294,15 @@ static int mse_create_workqueue(struct mse_workqueue *wrk, const char *name)
 	}
 
 	/* rt priority needed? */
-	if (avb_rt_prio > 0) {
+	if (rt_prio > 0) {
 		struct sched_param param = { 0 };
 
-		if (avb_rt_prio > (MAX_RT_PRIO - 1)) {
-			mse_warn("limit avb_rt_prio val %d to maximum %d\n", avb_rt_prio, MAX_RT_PRIO - 1);
-			avb_rt_prio = MAX_RT_PRIO - 1;
+		if (rt_prio > (MAX_RT_PRIO - 1)) {
+			mse_warn("limit rt_prio val %d to maximum %d\n", rt_prio, MAX_RT_PRIO - 1);
+			rt_prio = MAX_RT_PRIO - 1;
 		}
-		param.sched_priority = avb_rt_prio;
-		if ((MAX_RT_PRIO / 2) == param.sched_priority)
-			sched_set_fifo (wrk->tsk);
-		else if (1 == param.sched_priority)
-			sched_set_fifo_low (wrk->tsk);
-		else
-			sched_set_normal (wrk->tsk, MAX_NICE);
+		param.sched_priority = rt_prio;
+		sched_setscheduler(wrk->tsk, SCHED_FIFO, &param);
 	}
 	return 0;
 }
