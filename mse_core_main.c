@@ -70,7 +70,8 @@
 #include <linux/platform_device.h>
 #include <linux/of_device.h>
 #include <linux/spinlock.h>
-#include <linux/workqueue.h>
+#include <linux/kthread.h>
+#include <uapi/linux/sched/types.h>
 #include <linux/completion.h>
 #include <linux/time.h>
 #include <linux/hrtimer.h>
@@ -279,6 +280,14 @@ struct mse_wait_packet {
 	struct list_head list;
 };
 
+/** @brief workqueue */
+struct mse_workqueue {
+	/** @brief kthread worker to queue the work */
+	struct kthread_worker wrk;
+	/** @brief task of kthread worker */
+	struct task_struct *tsk;
+};
+
 /** @brief instance by related adapter */
 struct mse_instance {
 	/** @brief wait for streaming stop */
@@ -306,32 +315,32 @@ struct mse_instance {
 	enum MSE_PACKETIZER packetizer_id;
 
 	/** @brief streaming queue */
-	struct work_struct wk_stream;
+	struct kthread_work wk_stream;
 	/** @brief paketize queue */
-	struct work_struct wk_packetize;
+	struct kthread_work wk_packetize;
 	/** @brief depaketize queue */
-	struct work_struct wk_depacketize;
+	struct kthread_work wk_depacketize;
 	/** @brief callback queue */
-	struct work_struct wk_callback;
+	struct kthread_work wk_callback;
 	/** @brief timestamp queue */
-	struct work_struct wk_timestamp;
+	struct kthread_work wk_timestamp;
 	/** @brief crf send queue */
-	struct work_struct wk_crf_send;
+	struct kthread_work wk_crf_send;
 	/** @brief crf receive queue */
-	struct work_struct wk_crf_receive;
+	struct kthread_work wk_crf_receive;
 	/** @brief start transmission queue */
-	struct work_struct wk_start_trans;
+	struct kthread_work wk_start_trans;
 	/** @brief stop streaming queue */
-	struct work_struct wk_stop_streaming;
+	struct kthread_work wk_stop_streaming;
 
 	/** @brief stream workqueue */
-	struct workqueue_struct *wq_stream;
+	struct mse_workqueue wq_stream;
 	/** @brief packet workqueue */
-	struct workqueue_struct *wq_packet;
+	struct mse_workqueue wq_packet;
 	/** @brief timestamp workqueue */
-	struct workqueue_struct *wq_tstamp;
+	struct mse_workqueue wq_tstamp;
 	/** @brief crf packet workqueue */
-	struct workqueue_struct *wq_crf_packet;
+	struct mse_workqueue wq_crf_packet;
 
 	/** @brief wait queue for streaming */
 	wait_queue_head_t wait_wk_stream;
@@ -518,6 +527,10 @@ static struct mse_device *mse;
  */
 static int major;
 module_param(major, int, 0440);
+
+static int rt_prio;
+module_param(rt_prio, int, 0660);
+MODULE_PARM_DESC(rt_prio, "apply RT priority to worker threads (1-99) or do NOT apply RT priority (0)");
 
 /*
  * function prototypes
@@ -1118,6 +1131,11 @@ static void mse_free_all_trans_buffers(struct mse_instance *instance, int size)
 	atomic_set(&instance->trans_buf_cnt, 0);
 }
 
+#define mse_queue_work(_q, _wrk) kthread_queue_work(&(_q).wrk, _wrk)
+#define mse_flush_work(_wrk) kthread_flush_work(_wrk)
+#define mse_flush_workqueue(_q) kthread_flush_worker(&(_q).wrk)
+#define mse_destroy_workqueue(_q) kthread_stop((_q).tsk)
+
 static void mse_work_stream_common(struct mse_instance *instance)
 {
 	int index_network;
@@ -1171,17 +1189,13 @@ static void mse_work_stream_common(struct mse_instance *instance)
 				break;
 			}
 
-			/* if NOT work queued, then queue it */
-			if (!work_busy(&instance->wk_depacketize))
-				queue_work(instance->wq_packet,
-					   &instance->wk_depacketize);
+			/* process depacketize */
+			mse_queue_work(instance->wq_packet, &instance->wk_depacketize);
 		}
 
-		/* if NOT work queued, then queue it to process last data */
+		/* process depacketize to process last data */
 		if (mse_state_test(instance, MSE_STATE_STOPPING))
-			if (!work_busy(&instance->wk_depacketize))
-				queue_work(instance->wq_packet,
-					   &instance->wk_depacketize);
+			mse_queue_work(instance->wq_packet, &instance->wk_depacketize);
 	}
 
 	write_lock_irqsave(&instance->lock_stream, flags);
@@ -1237,7 +1251,7 @@ static void mse_work_stream_mpeg2ts_tx(struct mse_instance *instance)
 	mse_debug("END\n");
 }
 
-static void mse_work_stream(struct work_struct *work)
+static void mse_work_stream(struct kthread_work *work)
 {
 	struct mse_instance *instance;
 
@@ -1844,7 +1858,7 @@ static int media_clock_recovery(struct mse_instance *instance)
 	return out;
 }
 
-static void mse_work_timestamp(struct work_struct *work)
+static void mse_work_timestamp(struct kthread_work *work)
 {
 	struct mse_instance *instance;
 	int captured;
@@ -2115,8 +2129,7 @@ static void mse_work_packetize_common(struct mse_instance *instance)
 				read_lock_irqsave(&instance->lock_stream,
 						  flags);
 				if (!instance->f_streaming)
-					queue_work(instance->wq_stream,
-						   &instance->wk_stream);
+					mse_queue_work(instance->wq_stream, &instance->wk_stream);
 				read_unlock_irqrestore(&instance->lock_stream,
 						       flags);
 
@@ -2146,7 +2159,7 @@ static void mse_work_packetize_common(struct mse_instance *instance)
 		/* start workqueue for streaming */
 		read_lock_irqsave(&instance->lock_stream, flags);
 		if (!instance->f_streaming && ret > 0)
-			queue_work(instance->wq_stream, &instance->wk_stream);
+			mse_queue_work(instance->wq_stream, &instance->wk_stream);
 		read_unlock_irqrestore(&instance->lock_stream, flags);
 	}
 
@@ -2162,8 +2175,7 @@ static void mse_work_packetize_common(struct mse_instance *instance)
 				mse_debug("discard %zu byte before stopping\n",
 					  buf->buffer_size - buf->work_length);
 
-				queue_work(instance->wq_packet,
-					   &instance->wk_stop_streaming);
+				mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 			} else {
 				mse_err("short of data\n");
 
@@ -2190,8 +2202,7 @@ static void mse_work_packetize_common(struct mse_instance *instance)
 
 		/* state is STOPPING */
 		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
-			queue_work(instance->wq_packet,
-				   &instance->wk_stop_streaming);
+			mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 		} else {
 			write_lock_irqsave(&instance->lock_state, flags);
 			/* if state is EXECUTE, change to IDLE */
@@ -2204,13 +2215,13 @@ static void mse_work_packetize_common(struct mse_instance *instance)
 	}
 
 	if (instance->f_continue) {
-		queue_work(instance->wq_packet, &instance->wk_packetize);
+		mse_queue_work(instance->wq_packet, &instance->wk_packetize);
 	} else {
 		if (!instance->timer_interval)
 			atomic_inc(&instance->done_buf_cnt);
 
 		if (atomic_read(&instance->done_buf_cnt) > 0)
-			queue_work(instance->wq_packet, &instance->wk_callback);
+			mse_queue_work(instance->wq_packet, &instance->wk_callback);
 	}
 }
 
@@ -2569,7 +2580,7 @@ static void mse_control_wait_packet(struct mse_instance *instance,
 		read_lock_irqsave(&instance->lock_stream, flags);
 		/* start workqueue for streaming */
 		if (!instance->f_streaming)
-			queue_work(instance->wq_stream, &instance->wk_stream);
+			mse_queue_work(instance->wq_stream, &instance->wk_stream);
 		read_unlock_irqrestore(&instance->lock_stream, flags);
 
 		return;
@@ -2586,7 +2597,7 @@ static void mse_control_wait_packet(struct mse_instance *instance,
 
 		/* start workqueue for streaming */
 		if (!instance->f_streaming)
-			queue_work(instance->wq_stream, &instance->wk_stream);
+			mse_queue_work(instance->wq_stream, &instance->wk_stream);
 	} else {
 		/* Update wait packet queue when start timer */
 		mse_update_wait_packet(instance, timestamp);
@@ -2606,7 +2617,7 @@ static void mse_control_wait_packet(struct mse_instance *instance,
 			INIT_LIST_HEAD(&instance->wait_packet_list);
 			mse_packet_ctrl_release_all_wait(instance->packet_buffer);
 			if (!instance->f_streaming)
-				queue_work(instance->wq_stream, &instance->wk_stream);
+				mse_queue_work(instance->wq_stream, &instance->wk_stream);
 
 		} else {
 			instance->f_timer_started = true;
@@ -2672,7 +2683,7 @@ static void mse_work_packetize_mpeg2ts_tx(struct mse_instance *instance)
 						      false,
 						      &piece_length);
 
-			queue_work(instance->wq_packet, &instance->wk_stop_streaming);
+			mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 		}
 		return; /* skip work */
 	}
@@ -2684,7 +2695,7 @@ static void mse_work_packetize_mpeg2ts_tx(struct mse_instance *instance)
 	if (trans_size <= 0) {
 		/* no data to process */
 		list_move_tail(&buf->list, &instance->done_buf_list);
-		queue_work(instance->wq_packet, &instance->wk_callback);
+		mse_queue_work(instance->wq_packet, &instance->wk_callback);
 		return;
 	}
 
@@ -2713,8 +2724,7 @@ static void mse_work_packetize_mpeg2ts_tx(struct mse_instance *instance)
 				read_lock_irqsave(&instance->lock_stream,
 						  flags);
 				if (!instance->f_streaming)
-					queue_work(instance->wq_stream,
-						   &instance->wk_stream);
+					mse_queue_work(instance->wq_stream, &instance->wk_stream);
 				read_unlock_irqrestore(&instance->lock_stream,
 						       flags);
 
@@ -2749,20 +2759,20 @@ static void mse_work_packetize_mpeg2ts_tx(struct mse_instance *instance)
 	}
 
 	if (instance->f_continue) {
-		queue_work(instance->wq_packet, &instance->wk_packetize);
+		mse_queue_work(instance->wq_packet, &instance->wk_packetize);
 	} else {
 		list_move_tail(&buf->list, &instance->done_buf_list);
 
-		queue_work(instance->wq_packet, &instance->wk_callback);
+		mse_queue_work(instance->wq_packet, &instance->wk_callback);
 
 		if (!list_empty(&instance->proc_buf_list) ||
 		    mse_state_test(instance, MSE_STATE_STOPPING)) {
-			queue_work(instance->wq_packet, &instance->wk_packetize);
+			mse_queue_work(instance->wq_packet, &instance->wk_packetize);
 		}
 	}
 }
 
-static void mse_work_packetize(struct work_struct *work)
+static void mse_work_packetize(struct kthread_work *work)
 {
 	struct mse_instance *instance;
 
@@ -2820,15 +2830,14 @@ static void mse_work_depacketize_common(struct mse_instance *instance)
 	if (!buf) {
 		/* state is STOPPING */
 		if (mse_state_test(instance, MSE_STATE_STOPPING))
-			queue_work(instance->wq_packet,
-				   &instance->wk_stop_streaming);
+			mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 
 		return;
 	}
 
 	read_lock_irqsave(&instance->lock_stream, flags);
 	if (!instance->f_streaming)
-		queue_work(instance->wq_stream, &instance->wk_stream);
+		mse_queue_work(instance->wq_stream, &instance->wk_stream);
 	read_unlock_irqrestore(&instance->lock_stream, flags);
 	instance->f_depacketizing = true;
 
@@ -2962,14 +2971,13 @@ static void mse_work_depacketize_common(struct mse_instance *instance)
 
 	if (atomic_read(&instance->done_buf_cnt) > 0 &&
 	    has_valid_data)
-		queue_work(instance->wq_packet, &instance->wk_callback);
+		mse_queue_work(instance->wq_packet, &instance->wk_callback);
 
 	/* state is STOPPING */
 	if (mse_state_test(instance, MSE_STATE_STOPPING)) {
 		if (instance->ptp_timer_handle ||
 		    !atomic_read(&instance->done_buf_cnt))
-			queue_work(instance->wq_packet,
-				   &instance->wk_stop_streaming);
+			mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 
 		if (atomic_inc_return(&instance->done_buf_cnt) != 1)
 			atomic_dec(&instance->done_buf_cnt);
@@ -3163,7 +3171,7 @@ static void mse_work_depacketize_video_rx(struct mse_instance *instance)
 			if (wait_buf) {
 				/* Move from wait_buf_list to done_buf_list */
 				list_move_tail(&wait_buf->list, &instance->done_buf_list);
-				queue_work(instance->wq_packet, &instance->wk_callback);
+				mse_queue_work(instance->wq_packet, &instance->wk_callback);
 			}
 		}
 
@@ -3174,7 +3182,7 @@ static void mse_work_depacketize_video_rx(struct mse_instance *instance)
 
 	read_lock_irqsave(&instance->lock_stream, flags);
 	if (!instance->f_streaming)
-		queue_work(instance->wq_stream, &instance->wk_stream);
+		mse_queue_work(instance->wq_stream, &instance->wk_stream);
 	read_unlock_irqrestore(&instance->lock_stream, flags);
 
 	instance->f_depacketizing = true;
@@ -3188,14 +3196,14 @@ static void mse_work_depacketize_video_rx(struct mse_instance *instance)
 	 * wk_callback
 	 */
 	if (!list_empty(&instance->done_buf_list))
-		queue_work(instance->wq_packet, &instance->wk_callback);
+		mse_queue_work(instance->wq_packet, &instance->wk_callback);
 
 	/* state is NOT EXECUTE */
 	if (!mse_state_test(instance, MSE_STATE_EXECUTE))
 		instance->f_depacketizing = false;
 }
 
-static void mse_work_depacketize(struct work_struct *work)
+static void mse_work_depacketize(struct kthread_work *work)
 {
 	struct mse_instance *instance;
 
@@ -3227,8 +3235,7 @@ static void mse_work_callback_common(struct mse_instance *instance)
 	if (!buf) {
 		/* state is STOPPING */
 		if (mse_state_test(instance, MSE_STATE_STOPPING))
-			queue_work(instance->wq_packet,
-				   &instance->wk_stop_streaming);
+			mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 
 		return; /* skip work */
 	}
@@ -3342,8 +3349,7 @@ static void mse_work_callback_common(struct mse_instance *instance)
 
 		/* state is STOPPING */
 		if (mse_state_test(instance, MSE_STATE_STOPPING))
-			queue_work(instance->wq_packet,
-				   &instance->wk_stop_streaming);
+			mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 	}
 
 	/* complete callback */
@@ -3358,22 +3364,19 @@ static void mse_work_callback_common(struct mse_instance *instance)
 	if (mse_is_buffer_empty(instance)) {
 		/* state is STOPPING */
 		if (mse_state_test_nolock(instance, MSE_STATE_STOPPING)) {
-			queue_work(instance->wq_packet,
-				   &instance->wk_stop_streaming);
+			mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 		} else {
 			/* if state is EXECUTE, change to IDLE */
 			mse_state_change_if(instance, MSE_STATE_IDLE,
 					    MSE_STATE_EXECUTE);
 		}
 	} else {
-		/* if NOT work queued, then queue it */
-		if (instance->tx && !work_busy(&instance->wk_packetize))
-			queue_work(instance->wq_packet,
-				   &instance->wk_packetize);
+		/* queue it */
+		if (instance->tx)
+			mse_queue_work(instance->wq_packet, &instance->wk_packetize);
 
-		if (!instance->tx && !work_busy(&instance->wk_depacketize))
-			queue_work(instance->wq_packet,
-				   &instance->wk_depacketize);
+		if (!instance->tx)
+			mse_queue_work(instance->wq_packet, &instance->wk_depacketize);
 	}
 
 	write_unlock_irqrestore(&instance->lock_state, flags);
@@ -3412,7 +3415,7 @@ static void mse_work_callback_video_rx(struct mse_instance *instance)
 
 	/* state is STOPPING */
 	if (mse_state_test_nolock(instance, MSE_STATE_STOPPING)) {
-		queue_work(instance->wq_packet, &instance->wk_stop_streaming);
+		mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 	} else {
 		/* if state is EXECUTE, change to IDLE */
 		mse_state_change_if(instance, MSE_STATE_IDLE, MSE_STATE_EXECUTE);
@@ -3448,14 +3451,14 @@ static void mse_work_callback_mpeg2ts_tx(struct mse_instance *instance)
 
 	/* buffer is NOT empty, so wait next callback queued */
 	if (!mse_is_buffer_empty(instance)) {
-		queue_work(instance->wq_packet, &instance->wk_packetize);
+		mse_queue_work(instance->wq_packet, &instance->wk_packetize);
 		write_unlock_irqrestore(&instance->lock_state, flags);
 		return;
 	}
 
 	/* state is STOPPING */
 	if (mse_state_test_nolock(instance, MSE_STATE_STOPPING)) {
-		queue_work(instance->wq_packet, &instance->wk_stop_streaming);
+		mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 	} else {
 		/* if state is EXECUTE, change to IDLE */
 		mse_state_change_if(instance, MSE_STATE_IDLE, MSE_STATE_EXECUTE);
@@ -3464,7 +3467,7 @@ static void mse_work_callback_mpeg2ts_tx(struct mse_instance *instance)
 	write_unlock_irqrestore(&instance->lock_state, flags);
 }
 
-static void mse_work_callback(struct work_struct *work)
+static void mse_work_callback(struct kthread_work *work)
 {
 	struct mse_instance *instance;
 
@@ -3499,14 +3502,14 @@ static void mse_stop_streaming_audio(struct mse_instance *instance)
 		if (ret)
 			mse_err("failed cancel() ret=%d\n", ret);
 
-		flush_work(&instance->wk_crf_receive);
+		mse_flush_work(&instance->wk_crf_receive);
 	} else if (crf_type == MSE_CRF_TYPE_TX &&
 		   instance->f_crf_sending) {
-		flush_work(&instance->wk_crf_send);
+		mse_flush_work(&instance->wk_crf_send);
 	}
 
 	if (instance->f_work_timestamp)
-		flush_work(&instance->wk_timestamp);
+		mse_flush_work(&instance->wk_timestamp);
 }
 
 static void mse_stop_streaming_common(struct mse_instance *instance)
@@ -3581,13 +3584,13 @@ static void mse_work_stop_streaming_common(struct mse_instance *instance)
 	write_unlock_irqrestore(&instance->lock_state, flags);
 
 	if (instance->tx) {
-		queue_work(instance->wq_packet, &instance->wk_start_trans);
+		mse_queue_work(instance->wq_packet, &instance->wk_start_trans);
 	} else {
 		ret = network->cancel(instance->index_network);
 		if (ret)
 			mse_err("failed network adapter cancel() => %d\n", ret);
 
-		queue_work(instance->wq_packet, &instance->wk_depacketize);
+		mse_queue_work(instance->wq_packet, &instance->wk_depacketize);
 	}
 }
 
@@ -3636,10 +3639,10 @@ static void mse_work_stop_streaming_mpeg2ts_tx(struct mse_instance *instance)
 	mse_state_change(instance, MSE_STATE_STOPPING);
 	write_unlock_irqrestore(&instance->lock_state, flags);
 
-	queue_work(instance->wq_packet, &instance->wk_packetize);
+	mse_queue_work(instance->wq_packet, &instance->wk_packetize);
 }
 
-static void mse_work_stop_streaming(struct work_struct *work)
+static void mse_work_stop_streaming(struct kthread_work *work)
 {
 	struct mse_instance *instance;
 
@@ -3675,7 +3678,7 @@ static enum hrtimer_restart mse_timer_callback(struct hrtimer *arg)
 	hrtimer_add_expires_ns(&instance->timer, instance->timer_interval);
 
 	/* start workqueue for completion */
-	queue_work(instance->wq_packet, &instance->wk_callback);
+	mse_queue_work(instance->wq_packet, &instance->wk_callback);
 
 	return HRTIMER_RESTART;
 }
@@ -3696,7 +3699,7 @@ static u32 mse_ptp_timer_callback_common(struct mse_instance *instance)
 	if (IS_MSE_TYPE_AUDIO(instance->media->type))
 		atomic_inc(&instance->done_buf_cnt);
 
-	queue_work(instance->wq_packet, &instance->wk_callback);
+	mse_queue_work(instance->wq_packet, &instance->wk_callback);
 
 	return (u32)(expire_next - expire_prev);
 }
@@ -3738,7 +3741,7 @@ static u32 mse_ptp_timer_callback_video_rx(struct mse_instance *instance)
 
 		/* Output buffer */
 		list_move_tail(&buf->list, &instance->done_buf_list);
-		queue_work(instance->wq_packet, &instance->wk_callback);
+		mse_queue_work(instance->wq_packet, &instance->wk_callback);
 	}
 
 	/* If not found next timestamp, timer stop */
@@ -3790,7 +3793,7 @@ static u32 mse_ptp_timer_callback_mpeg2ts_tx(struct mse_instance *instance)
 
 	/* start workqueue for streaming */
 	if (!instance->f_streaming)
-		queue_work(instance->wq_stream, &instance->wk_stream);
+		mse_queue_work(instance->wq_stream, &instance->wk_stream);
 
 	/* If not found next timestamp, timer stop */
 	if (expire_next == expire_prev)
@@ -3819,7 +3822,7 @@ static u32 mse_ptp_timer_callback(void *arg)
 			return mse_ptp_timer_callback_common(instance);
 }
 
-static void mse_work_crf_send(struct work_struct *work)
+static void mse_work_crf_send(struct kthread_work *work)
 {
 	struct mse_instance *instance;
 	int err, tsize, size, i;
@@ -3882,7 +3885,7 @@ static void mse_work_crf_send(struct work_struct *work)
 	instance->f_crf_sending = false;
 }
 
-static void mse_work_crf_receive(struct work_struct *work)
+static void mse_work_crf_receive(struct kthread_work *work)
 {
 	struct mse_instance *instance;
 	struct mse_audio_info audio_info;
@@ -3947,7 +3950,7 @@ static enum hrtimer_restart mse_crf_callback(struct hrtimer *arg)
 	/* start workqueue for send */
 	if (!instance->f_crf_sending) {
 		instance->f_crf_sending = true;
-		queue_work(instance->wq_crf_packet, &instance->wk_crf_send);
+		mse_queue_work(instance->wq_crf_packet, &instance->wk_crf_send);
 	}
 
 	return HRTIMER_RESTART;
@@ -3975,10 +3978,10 @@ static enum hrtimer_restart mse_timestamp_collect_callback(struct hrtimer *arg)
 		return HRTIMER_RESTART;
 
 	instance->f_work_timestamp = true;
-	queue_work(instance->wq_tstamp, &instance->wk_timestamp);
+	mse_queue_work(instance->wq_tstamp, &instance->wk_timestamp);
 
 	if (instance->f_wait_start_transmission) {
-		queue_work(instance->wq_packet, &instance->wk_start_trans);
+		mse_queue_work(instance->wq_packet, &instance->wk_start_trans);
 		instance->f_wait_start_transmission = false;
 	}
 
@@ -4100,8 +4103,7 @@ static void mse_start_streaming_audio(struct mse_instance *instance, u64 now)
 
 	/* receive clock using CRF */
 	if (instance->crf_type == MSE_CRF_TYPE_RX) {
-		queue_work(instance->wq_crf_packet,
-			   &instance->wk_crf_receive);
+		mse_queue_work(instance->wq_crf_packet, &instance->wk_crf_receive);
 	}
 }
 
@@ -4205,8 +4207,7 @@ static void mse_work_start_transmission_common(struct mse_instance *instance)
 		spin_unlock_irqrestore(&instance->lock_buf_list, flags);
 		/* state is STOPPING */
 		if (mse_state_test(instance, MSE_STATE_STOPPING)) {
-			queue_work(instance->wq_packet,
-				   &instance->wk_stop_streaming);
+			mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 		}
 
 		return;
@@ -4214,8 +4215,7 @@ static void mse_work_start_transmission_common(struct mse_instance *instance)
 		if (mse_state_test_nolock(instance, MSE_STATE_STOPPING)) {
 			spin_unlock_irqrestore(&instance->lock_buf_list,
 					       flags);
-			queue_work(instance->wq_packet,
-				   &instance->wk_stop_streaming);
+			mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 			return;
 		}
 	}
@@ -4278,13 +4278,13 @@ static void mse_work_start_transmission_common(struct mse_instance *instance)
 		}
 
 		/* start workqueue for packetize */
-		queue_work(instance->wq_packet, &instance->wk_packetize);
+		mse_queue_work(instance->wq_packet, &instance->wk_packetize);
 	} else {
 		if (buf->buffer)
 			memset(buf->buffer, 0, buf->buffer_size);
 
 		/* start workqueue for depacketize */
-		queue_work(instance->wq_packet, &instance->wk_depacketize);
+		mse_queue_work(instance->wq_packet, &instance->wk_depacketize);
 	}
 }
 
@@ -4302,7 +4302,7 @@ static void mse_work_start_transmission_video_rx(struct mse_instance *instance)
 	spin_unlock_irqrestore(&instance->lock_buf_list, flags);
 
 	/* start workqueue for depacketize */
-	queue_work(instance->wq_packet, &instance->wk_depacketize);
+	mse_queue_work(instance->wq_packet, &instance->wk_depacketize);
 }
 
 static void mse_work_start_transmission_mpeg2ts_tx(struct mse_instance *instance)
@@ -4319,10 +4319,10 @@ static void mse_work_start_transmission_mpeg2ts_tx(struct mse_instance *instance
 	spin_unlock_irqrestore(&instance->lock_buf_list, flags);
 
 	/* start workqueue for packetize */
-	queue_work(instance->wq_packet, &instance->wk_packetize);
+	mse_queue_work(instance->wq_packet, &instance->wk_packetize);
 }
 
-static void mse_work_start_transmission(struct work_struct *work)
+static void mse_work_start_transmission(struct kthread_work *work)
 {
 	struct mse_instance *instance;
 
@@ -5260,37 +5260,60 @@ static void mse_exit_kernel_resource(struct mse_instance *instance,
 
 {
 	/* flush workqueue */
-	if (instance->wq_crf_packet)
-		flush_workqueue(instance->wq_crf_packet);
+	if (instance->wq_crf_packet.tsk)
+		mse_flush_workqueue(instance->wq_crf_packet);
 
-	if (instance->wq_tstamp)
-		flush_workqueue(instance->wq_tstamp);
+	if (instance->wq_tstamp.tsk)
+		mse_flush_workqueue(instance->wq_tstamp);
 
-	if (instance->wq_packet)
-		flush_workqueue(instance->wq_packet);
+	if (instance->wq_packet.tsk)
+		mse_flush_workqueue(instance->wq_packet);
 
-	if (instance->wq_stream)
-		flush_workqueue(instance->wq_stream);
+	if (instance->wq_stream.tsk)
+		mse_flush_workqueue(instance->wq_stream);
 
 	/* destroy workqueue */
-	if (instance->wq_crf_packet)
-		destroy_workqueue(instance->wq_crf_packet);
+	if (instance->wq_crf_packet.tsk)
+		mse_destroy_workqueue(instance->wq_crf_packet);
 
-	if (instance->wq_tstamp)
-		destroy_workqueue(instance->wq_tstamp);
+	if (instance->wq_tstamp.tsk)
+		mse_destroy_workqueue(instance->wq_tstamp);
 
-	if (instance->wq_packet)
-		destroy_workqueue(instance->wq_packet);
+	if (instance->wq_packet.tsk)
+		mse_destroy_workqueue(instance->wq_packet);
 
-	if (instance->wq_stream)
-		destroy_workqueue(instance->wq_stream);
+	if (instance->wq_stream.tsk)
+		mse_destroy_workqueue(instance->wq_stream);
+}
+
+static int mse_create_workqueue(struct mse_workqueue *wrk, const char *name)
+{
+	kthread_init_worker(&wrk->wrk);
+	wrk->tsk = kthread_run(kthread_worker_fn, &wrk->wrk, "%s", name);
+	if (IS_ERR(wrk->tsk)) {
+		int err = PTR_ERR(wrk->tsk);
+		/* set to NULL for easier ptr check in cleanup path */
+		wrk->tsk = NULL;
+		return err;
+	}
+
+	/* rt priority needed? */
+	if (rt_prio > 0) {
+		struct sched_param param = { 0 };
+
+		if (rt_prio > (MAX_RT_PRIO - 1)) {
+			mse_warn("limit rt_prio val %d to maximum %d\n", rt_prio, MAX_RT_PRIO - 1);
+			rt_prio = MAX_RT_PRIO - 1;
+		}
+		param.sched_priority = rt_prio;
+		sched_setscheduler(wrk->tsk, SCHED_FIFO, &param);
+	}
+	return 0;
 }
 
 static int mse_init_kernel_resource(struct mse_instance *instance,
 				    struct mse_adapter *adapter)
 {
-	struct workqueue_struct *wq_work;
-
 	init_completion(&instance->completion_stop);
 	complete(&instance->completion_stop);
 	atomic_set(&instance->trans_buf_cnt, 0);
@@ -5308,34 +5331,25 @@ static int mse_init_kernel_resource(struct mse_instance *instance,
 	sema_init(&instance->sem_stopping, 1);
 
 	/* init work queue */
-	INIT_WORK(&instance->wk_packetize, mse_work_packetize);
-	INIT_WORK(&instance->wk_depacketize, mse_work_depacketize);
-	INIT_WORK(&instance->wk_callback, mse_work_callback);
-	INIT_WORK(&instance->wk_stream, mse_work_stream);
-	INIT_WORK(&instance->wk_crf_send, mse_work_crf_send);
-	INIT_WORK(&instance->wk_crf_receive, mse_work_crf_receive);
-	INIT_WORK(&instance->wk_timestamp, mse_work_timestamp);
-	INIT_WORK(&instance->wk_start_trans, mse_work_start_transmission);
-	INIT_WORK(&instance->wk_stop_streaming, mse_work_stop_streaming);
+	kthread_init_work(&instance->wk_packetize, mse_work_packetize);
+	kthread_init_work(&instance->wk_depacketize, mse_work_depacketize);
+	kthread_init_work(&instance->wk_callback, mse_work_callback);
+	kthread_init_work(&instance->wk_stream, mse_work_stream);
+	kthread_init_work(&instance->wk_crf_send, mse_work_crf_send);
+	kthread_init_work(&instance->wk_crf_receive, mse_work_crf_receive);
+	kthread_init_work(&instance->wk_timestamp, mse_work_timestamp);
+	kthread_init_work(&instance->wk_start_trans, mse_work_start_transmission);
+	kthread_init_work(&instance->wk_stop_streaming, mse_work_stop_streaming);
 
-	wq_work = create_singlethread_workqueue("mse_streamq");
-	if (!wq_work)
-		goto error_create_singlethread_wq;
+	if (mse_create_workqueue(&instance->wq_stream, "mse_streamq") < 0)
+		goto error_create_wq;
 
-	instance->wq_stream = wq_work;
-
-	wq_work = create_singlethread_workqueue("mse_packetq");
-	if (!wq_work)
-		goto error_create_singlethread_wq;
-
-	instance->wq_packet = wq_work;
+	if (mse_create_workqueue(&instance->wq_packet, "mse_packetq") < 0)
+		goto error_create_wq;
 
 	/* for timestamp */
-	wq_work = create_singlethread_workqueue("mse_tstampq");
-	if (!wq_work)
-		goto error_create_singlethread_wq;
-
-	instance->wq_tstamp = wq_work;
+	if (mse_create_workqueue(&instance->wq_tstamp, "mse_tstampq") < 0)
+		goto error_create_wq;
 
 	hrtimer_init(&instance->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	instance->timer_interval = 0;
@@ -5349,11 +5363,8 @@ static int mse_init_kernel_resource(struct mse_instance *instance,
 					&mse_timestamp_collect_callback;
 
 		/* for crf */
-		wq_work = create_singlethread_workqueue("mse_crfpacketq");
-		if (!wq_work)
-			goto error_create_singlethread_wq;
-
-		instance->wq_crf_packet = wq_work;
+		if (mse_create_workqueue(&instance->wq_crf_packet, "mse_crfpacketq") < 0)
+			goto error_create_wq;
 
 		hrtimer_init(&instance->crf_timer,
 			     CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -5363,7 +5374,7 @@ static int mse_init_kernel_resource(struct mse_instance *instance,
 
 	return 0;
 
-error_create_singlethread_wq:
+error_create_wq:
 	mse_exit_kernel_resource(instance, adapter);
 
 	return -ENOMEM;
@@ -5886,7 +5897,7 @@ int mse_stop_streaming(int index)
 	/* state is RUNNABLE */
 	if (mse_state_test(instance, MSE_STATE_RUNNABLE)) {
 		down(&instance->sem_stopping);
-		queue_work(instance->wq_packet, &instance->wk_stop_streaming);
+		mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 	}
 
 	return 0;
@@ -5985,7 +5996,7 @@ int mse_start_transmission(int index,
 		atomic_inc(&instance->trans_buf_cnt);
 
 		spin_unlock_irqrestore(&instance->lock_buf_list, flags);
-		queue_work(instance->wq_packet, &instance->wk_start_trans);
+		mse_queue_work(instance->wq_packet, &instance->wk_start_trans);
 	}
 
 	write_unlock_irqrestore(&instance->lock_state, flags2);
