@@ -2970,7 +2970,7 @@ static void mse_work_depacketize_common(struct mse_instance *instance)
 	}
 
 	if (atomic_read(&instance->done_buf_cnt) > 0 &&
-	    has_valid_data)
+	    (has_valid_data || mse_state_test(instance, MSE_STATE_STOPPING)))
 		mse_queue_work(instance->wq_packet, &instance->wk_callback);
 
 	/* state is STOPPING */
