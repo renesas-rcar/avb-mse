@@ -5299,20 +5299,15 @@ static int mse_create_workqueue(struct mse_workqueue *wrk, const char *name)
 
 	/* rt priority needed? */
 	if (avb_rt_prio > 0) {
-		struct sched_param param = { 0 };
-
 		if (avb_rt_prio > (MAX_RT_PRIO - 1)) {
 			mse_warn("limit avb_rt_prio val %d to maximum %d\n",
 				 avb_rt_prio, MAX_RT_PRIO - 1);
 			avb_rt_prio = MAX_RT_PRIO - 1;
 		}
-		param.sched_priority = avb_rt_prio;
-		if ((MAX_RT_PRIO / 2) == param.sched_priority)
+		if (avb_rt_prio >= (MAX_RT_PRIO / 2))
 			sched_set_fifo(wrk->tsk);
-		else if (param.sched_priority == 1)
-			sched_set_fifo_low(wrk->tsk);
 		else
-			sched_set_normal(wrk->tsk, MAX_NICE);
+			sched_set_fifo_low(wrk->tsk);
 	}
 	return 0;
 }
