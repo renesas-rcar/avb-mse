@@ -931,7 +931,7 @@ static struct mse_config mse_config_default_video = {
 		.fps_denominator = 0,
 		.fps_numerator = 0,
 		.bitrate = 50000000,
-		.class_interval_frames = DEFAULT_INTERVAL_FRAMES,
+		.class_interval_frames = 4000,
 		.max_interval_frames = 1,
 	},
 	.ptp_config = {
@@ -973,7 +973,7 @@ static struct mse_config mse_config_default_mpeg2ts = {
 		.bitrate = 50000000,
 		.pcr_pid = MSE_CONFIG_PCR_PID_MAX,
 		.transmit_mode = MSE_TRANSMIT_MODE_TIMESTAMP,
-		.class_interval_frames = DEFAULT_INTERVAL_FRAMES,
+		.class_interval_frames = 4000,
 		.max_interval_frames = 1,
 	},
 	.ptp_config = {
