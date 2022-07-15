@@ -519,8 +519,35 @@ struct mse_device {
 	struct mch_ops *mch_table[MSE_MCH_MAX];
 };
 
+struct mse_instance_dummy {
+	int tx;
+};
+
 /* MSE device data */
 static struct mse_device *mse;
+static const struct mse_instance_dummy instance_dummy = { .tx = -1 };
+static const struct mse_instance_dummy *instance = &instance_dummy;
+
+#undef mse_err
+#undef mse_warn
+#undef mse_info
+#undef mse_debug
+
+#define mse_err(fmt, ...)   \
+	pr_err("%s%s: "fmt, instance ? (int)instance->tx >= 0 ? \
+	       instance->tx ? "tx: " : "rx: " : "" : "", __func__, ## __VA_ARGS__)
+
+#define mse_warn(fmt, ...)   \
+	pr_warn("%s%s: "fmt, instance ? (int)instance->tx >= 0 ? \
+		instance->tx ? "tx: " : "rx: " : "" : "", __func__, ## __VA_ARGS__)
+
+#define mse_info(fmt, ...)   \
+	pr_info("%s%s: "fmt, instance ? (int)instance->tx >= 0 ? \
+		instance->tx ? "tx: " : "rx: " : "" : "", __func__, ## __VA_ARGS__)
+
+#define mse_debug(fmt, ...)   \
+	pr_debug("%s%s: "fmt, instance ? (int)instance->tx >= 0 ? \
+		 instance->tx ? "tx: " : "rx: " : "" : "", __func__, ## __VA_ARGS__)
 
 /*
  * module parameters
@@ -582,7 +609,7 @@ static inline char *mse_state_stringfy(enum MSE_STATE state)
 static inline void __mse_debug_state(const char *func,
 				     struct mse_instance *instance)
 {
-	pr_debug("%s: state=%s flags=[%d %d %d %d %d]\n",
+	pr_debug("%s: %s: state=%s flags=[%d %d %d %d %d]\n", instance->tx ? "tx" : "rx",
 		 func, mse_state_stringfy(instance->state),
 		 instance->f_continue, instance->f_depacketizing,
 		 instance->f_stopping, instance->f_completion,
@@ -1864,9 +1891,9 @@ static void mse_work_timestamp(struct kthread_work *work)
 	int captured;
 	u64 now;
 
-	mse_debug("START\n");
-
 	instance = container_of(work, struct mse_instance, wk_timestamp);
+
+	mse_debug("START\n");
 
 	/* state is NOT RUNNABLE */
 	if (!mse_state_test(instance, MSE_STATE_RUNNABLE)) {
@@ -3224,6 +3251,8 @@ static void mse_work_depacketize(struct kthread_work *work)
 
 	instance = container_of(work, struct mse_instance, wk_depacketize);
 
+	mse_debug("START\n");
+
 	if (IS_MSE_TYPE_VIDEO(instance->media->type) && !instance->tx)
 		mse_work_depacketize_video_rx(instance);
 	else
@@ -3494,6 +3523,8 @@ static void mse_work_callback(struct kthread_work *work)
 
 	instance = container_of(work, struct mse_instance, wk_callback);
 
+	mse_debug("START\n");
+
 	if (instance->tx)
 		if (IS_MSE_TYPE_MPEG2TS(instance->media->type))
 			mse_work_callback_mpeg2ts_tx(instance);
@@ -3670,6 +3701,8 @@ static void mse_work_stop_streaming(struct kthread_work *work)
 	struct mse_instance *instance;
 
 	instance = container_of(work, struct mse_instance, wk_stop_streaming);
+
+	mse_debug("START\n");
 
 	if (instance->tx)
 		if (IS_MSE_TYPE_MPEG2TS(instance->media->type))
@@ -3851,9 +3884,9 @@ static void mse_work_crf_send(struct kthread_work *work)
 	int err, tsize, size, i;
 	u64 timestamps[CRF_AUDIO_TIMESTAMPS];
 
-	mse_debug("START\n");
-
 	instance = container_of(work, struct mse_instance, wk_crf_send);
+
+	mse_debug("START\n");
 
 	/* state is NOT RUNNABLE */
 	if (!mse_state_test(instance, MSE_STATE_RUNNABLE)) {
@@ -4356,6 +4389,8 @@ static void mse_work_start_transmission(struct kthread_work *work)
 	struct mse_instance *instance;
 
 	instance = container_of(work, struct mse_instance, wk_start_trans);
+
+	mse_debug("START\n");
 
 	if (instance->tx)
 		if (IS_MSE_TYPE_MPEG2TS(instance->media->type))
