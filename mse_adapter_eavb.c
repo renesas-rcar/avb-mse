@@ -425,7 +425,7 @@ static int mse_adapter_eavb_send_prepare(int index,
 		return -EINVAL;
 
 	if (num_packets > MSE_EAVB_ADAPTER_PACKET_MAX) {
-		mse_err("too much packets %d\n", num_packets);
+		mse_err("error: too many packets %d\n", num_packets);
 		return -EINVAL;
 	}
 
@@ -481,7 +481,7 @@ static int mse_adapter_eavb_send(int index,
 	}
 
 	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
-		mse_err("too much packets\n");
+		mse_err("error: too many packets %d\n", num_packets);
 		return -EINVAL;
 	}
 
@@ -600,7 +600,7 @@ static int mse_adapter_eavb_receive_prepare(int index,
 	}
 
 	if (num_packets > MSE_EAVB_ADAPTER_PACKET_MAX) {
-		mse_err("too much packets\n");
+		mse_err("error: too many packets %d\n", num_packets);
 		return -EINVAL;
 	}
 
@@ -664,7 +664,7 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 	}
 
 	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
-		mse_err("too much packets\n");
+		mse_err("error: too many packets %d\n", num_packets);
 		return -EINVAL;
 	}
 
