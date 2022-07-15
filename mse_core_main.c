@@ -4851,14 +4851,14 @@ int mse_set_video_config(int index, struct mse_video_config *config)
 		     MSE_PACKETIZER_CVF_H264) &&
 		    (instance->media->config.packetizer.packetizer !=
 		     MSE_PACKETIZER_CVF_H264_D13)) {
-			mse_err("invalid format.\n");
+			mse_err("H264: invalid format\n");
 			return -EINVAL;
 		}
 		break;
 	case MSE_VIDEO_FORMAT_MJPEG:
 		if (instance->media->config.packetizer.packetizer !=
 		    MSE_PACKETIZER_CVF_MJPEG) {
-			mse_err("invalid format.\n");
+			mse_err("MJPEG: invalid format\n");
 			return -EINVAL;
 		}
 		break;
@@ -5671,7 +5671,7 @@ int mse_open(int index_media, bool tx)
 	index = find_first_zero_bit(mse->mse_instance_map, MSE_INSTANCE_MAX);
 	if (ARRAY_SIZE(mse->instance_table) <= index) {
 		spin_unlock_irqrestore(&mse->lock_instance_table, flags);
-		mse_err("resister instance full!\n");
+		mse_err("resister instance full, index=%d!\n", index);
 		err = -EBUSY;
 
 		goto error_mse_resource_release;
