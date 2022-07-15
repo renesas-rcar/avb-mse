@@ -342,7 +342,7 @@ static int mse_packetizer_crf_audio_depacketize(int index,
 	size = avtp_get_crf_data_length(packet);
 
 	if (size > buffer_size) {
-		mse_err("error\n");
+		mse_err("packet too small, size=%d buffer_size=%lu\n", size, buffer_size);
 		return -ENOMEM;
 	}
 
