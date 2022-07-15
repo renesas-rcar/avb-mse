@@ -534,6 +534,8 @@ static int mse_adapter_eavb_send(int index,
 				num_packets - eavb->num_entry + eavb->unentry);
 		if (wret2 >= 0)
 			wret += wret2;
+		else
+			mse_err("write error %zd\n", wret2);
 	}
 
 	if (wret != num_packets) {
@@ -703,14 +705,20 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 		ret = eavb->ravb.write(eavb->ravb.handle,
 				       eavb->entry + eavb->unentry,
 				       receive);
+		if (ret < 0)
+			mse_err("write error %zd\n", ret);
 	} else {
 		ret = eavb->ravb.write(eavb->ravb.handle,
 				       eavb->entry + eavb->unentry,
 				       eavb->num_entry - eavb->unentry);
+		if (ret < 0)
+			mse_err("write error %zd\n", ret);
 		ret = eavb->ravb.write(
 				eavb->ravb.handle,
 				eavb->entry,
 				receive - eavb->num_entry + eavb->unentry);
+		if (ret < 0)
+			mse_err("write error %zd\n", ret);
 	}
 
 	eavb->unentry = (eavb->unentry + receive) % eavb->num_entry;
