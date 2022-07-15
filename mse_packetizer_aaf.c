@@ -830,7 +830,9 @@ static int mse_packetizer_aaf_depacketize(int index,
 		buf = buffer + *buffer_processed;
 
 	/* seq_num check */
-	mse_packetizer_stats_seqnum(&aaf->stats, avtp_get_sequence_num(packet));
+	ret = mse_packetizer_stats_seqnum(&aaf->stats, avtp_get_sequence_num(packet));
+	if (ret < 0)
+		mse_err("packet seq num check error, ret=%d\n", ret);
 
 	copy_buffer(buf, &stored,
 		    packet + AVTP_AAF_PAYLOAD_OFFSET,
