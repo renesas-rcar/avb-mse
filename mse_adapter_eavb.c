@@ -243,8 +243,10 @@ static int mse_adapter_eavb_open(char *name)
 	mse_debug("dev=%s(%d)\n", avb_devname, device_id);
 
 	eavb = mse_adapter_eavb_alloc_priv(device_id);
-	if (!eavb)
+	if (!eavb) {
+		mse_err("failed to allocate eavb, device_id=%d\n", device_id);
 		return -EPERM;
+	}
 
 	err = ravb_streaming_open_stq_kernel(device_id, &eavb->ravb, O_DSYNC);
 	if (err) {
@@ -285,8 +287,10 @@ static int mse_adapter_eavb_release(int index)
 	mse_debug("index=%d\n", index);
 
 	eavb = mse_adapter_eavb_get_priv(index);
-	if (!eavb)
+	if (!eavb) {
+		mse_err("failed to get adapter\n");
 		return -EPERM;
+	}
 
 	if (!avb_device_is_tx(eavb->device_id)) {
 		err = eavb->ravb.set_rxparam(eavb->ravb.handle, &eavb->rxparam);
@@ -316,11 +320,15 @@ static int mse_adapter_eavb_set_cbs_param(int index, struct mse_cbsparam *cbs)
 	mse_debug("index=%d\n", index);
 
 	eavb = mse_adapter_eavb_get_priv(index);
-	if (!eavb)
+	if (!eavb) {
+		mse_err("failed to get adapter\n");
 		return -EPERM;
+	}
 
-	if (!avb_device_is_tx(eavb->device_id))
+	if (!avb_device_is_tx(eavb->device_id)) {
+		mse_err("error: wrong avb device, tx expected\n");
 		return -EPERM;
+	}
 
 	if (!cbs) {
 		mse_err("invalid argument. cbs\n");
@@ -357,11 +365,15 @@ static int mse_adapter_eavb_set_streamid(int index, u8 streamid[8])
 	mse_debug("index=%d\n", index);
 
 	eavb = mse_adapter_eavb_get_priv(index);
-	if (!eavb)
+	if (!eavb) {
+		mse_err("failed to get adapter\n");
 		return -EPERM;
+	}
 
-	if (avb_device_is_tx(eavb->device_id))
+	if (avb_device_is_tx(eavb->device_id)) {
+		mse_err("error: wrong avb device, rx expected\n");
 		return -EPERM;
+	}
 
 	if (!streamid) {
 		mse_err("invalid argument. streamid\n");
@@ -394,11 +406,15 @@ static int mse_adapter_eavb_send_prepare(int index,
 	mse_debug("index=%d addr=%p num=%d\n", index, packets, num_packets);
 
 	eavb = mse_adapter_eavb_get_priv(index);
-	if (!eavb)
+	if (!eavb) {
+		mse_err("failed to get adapter\n");
 		return -EPERM;
+	}
 
-	if (!avb_device_is_tx(eavb->device_id))
+	if (!avb_device_is_tx(eavb->device_id)) {
+		mse_err("error: wrong avb device, tx expected\n");
 		return -EPERM;
+	}
 
 	if (!packets) {
 		mse_err("invalid argument. packets\n");
@@ -444,19 +460,25 @@ static int mse_adapter_eavb_send(int index,
 	mse_debug("index=%d num=%d\n", index, num_packets);
 
 	eavb = mse_adapter_eavb_get_priv(index);
-	if (!eavb)
+	if (!eavb) {
+		mse_err("failed to get adapter\n");
 		return -EPERM;
+	}
 
-	if (!avb_device_is_tx(eavb->device_id))
+	if (!avb_device_is_tx(eavb->device_id)) {
+		mse_err("error: wrong avb device, tx expected\n");
 		return -EPERM;
+	}
 
 	if (!packets) {
 		mse_err("invalid argument. packets\n");
 		return -EINVAL;
 	}
 
-	if (num_packets <= 0)
+	if (num_packets <= 0) {
+		mse_err("incorrect num_packets: %d\n", num_packets);
 		return -EINVAL;
+	}
 
 	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
 		mse_err("too much packets\n");
@@ -557,19 +579,25 @@ static int mse_adapter_eavb_receive_prepare(int index,
 	mse_debug("index=%d addr=%p num=%d\n", index, packets, num_packets);
 
 	eavb = mse_adapter_eavb_get_priv(index);
-	if (!eavb)
+	if (!eavb) {
+		mse_err("failed to get adapter\n");
 		return -EPERM;
+	}
 
-	if (avb_device_is_tx(eavb->device_id))
+	if (avb_device_is_tx(eavb->device_id)) {
+		mse_err("error: wrong avb device, rx expected\n");
 		return -EPERM;
+	}
 
 	if (!packets) {
 		mse_err("invalid argument. packets\n");
 		return -EINVAL;
 	}
 
-	if (num_packets <= 0)
+	if (num_packets <= 0) {
+		mse_err("incorrect num_packets: %d\n", num_packets);
 		return -EINVAL;
+	}
 
 	if (num_packets > MSE_EAVB_ADAPTER_PACKET_MAX) {
 		mse_err("too much packets\n");
@@ -620,14 +648,20 @@ static int mse_adapter_eavb_receive(int index, int num_packets)
 	mse_debug("index=%d num=%d\n", index, num_packets);
 
 	eavb = mse_adapter_eavb_get_priv(index);
-	if (!eavb)
+	if (!eavb) {
+		mse_err("failed to get adapter\n");
 		return -EPERM;
+	}
 
-	if (avb_device_is_tx(eavb->device_id))
+	if (avb_device_is_tx(eavb->device_id)) {
+		mse_err("error: wrong avb device, rx expected\n");
 		return -EPERM;
+	}
 
-	if (num_packets <= 0)
+	if (num_packets <= 0) {
+		mse_err("incorrect num_packets: %d\n", num_packets);
 		return -EINVAL;
+	}
 
 	if (num_packets > MSE_EAVB_ADAPTER_ENTRY_MAX) {
 		mse_err("too much packets\n");
@@ -689,8 +723,10 @@ static int mse_adapter_eavb_cancel(int index)
 	struct mse_adapter_eavb *eavb;
 
 	eavb = mse_adapter_eavb_get_priv(index);
-	if (!eavb)
+	if (!eavb) {
+		mse_err("failed to get adapter\n");
 		return -EPERM;
+	}
 
 	return eavb->ravb.blocking_cancel(eavb->ravb.handle);
 }
@@ -703,8 +739,10 @@ static int mse_adapter_eavb_get_link_speed(int index)
 	mse_debug("index=%d\n", index);
 
 	eavb = mse_adapter_eavb_get_priv(index);
-	if (!eavb)
+	if (!eavb) {
+		mse_err("failed to get adapter\n");
 		return -EPERM;
+	}
 
 	link_speed = eavb->ravb.get_linkspeed(eavb->ravb.handle);
 	if (link_speed < 0)
