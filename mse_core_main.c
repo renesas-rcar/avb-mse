@@ -5372,15 +5372,21 @@ static int mse_init_kernel_resource(struct mse_instance *instance,
 	kthread_init_work(&instance->wk_start_trans, mse_work_start_transmission);
 	kthread_init_work(&instance->wk_stop_streaming, mse_work_stop_streaming);
 
-	if (mse_create_workqueue(&instance->wq_stream, "mse_streamq") < 0)
+	if (mse_create_workqueue(&instance->wq_stream, "mse_streamq") < 0) {
+		mse_err("failed to create mse_streamq workqueue\n");
 		goto error_create_wq;
+	}
 
-	if (mse_create_workqueue(&instance->wq_packet, "mse_packetq") < 0)
+	if (mse_create_workqueue(&instance->wq_packet, "mse_packetq") < 0) {
+		mse_err("failed to create mse_packetq workqueue\n");
 		goto error_create_wq;
+	}
 
 	/* for timestamp */
-	if (mse_create_workqueue(&instance->wq_tstamp, "mse_tstampq") < 0)
+	if (mse_create_workqueue(&instance->wq_tstamp, "mse_tstampq") < 0) {
+		mse_err("failed to create mse_tstampq workqueue\n");
 		goto error_create_wq;
+	}
 
 	hrtimer_init(&instance->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	instance->timer_interval = 0;
@@ -5394,8 +5400,10 @@ static int mse_init_kernel_resource(struct mse_instance *instance,
 					&mse_timestamp_collect_callback;
 
 		/* for crf */
-		if (mse_create_workqueue(&instance->wq_crf_packet, "mse_crfpacketq") < 0)
+		if (mse_create_workqueue(&instance->wq_crf_packet, "mse_crfpacketq") < 0) {
+			mse_err("failed to create mse_crfpacketq workqueue\n");
 			goto error_create_wq;
+		}
 
 		hrtimer_init(&instance->crf_timer,
 			     CLOCK_MONOTONIC, HRTIMER_MODE_REL);
