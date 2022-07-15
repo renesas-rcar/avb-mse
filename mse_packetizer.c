@@ -126,6 +126,8 @@ enum MSE_STREAM_TYPE mse_packetizer_get_type(enum MSE_PACKETIZER id)
 
 	if (id < MSE_PACKETIZER_MAX)
 		type = packetizer_table[id].type;
+	else
+		mse_err("failed to get type, id=%d\n", id);
 
 	return type;
 }
@@ -136,6 +138,8 @@ struct mse_packetizer_ops *mse_packetizer_get_ops(enum MSE_PACKETIZER id)
 
 	if (id < MSE_PACKETIZER_MAX)
 		ops = packetizer_table[id].ops;
+	else
+		mse_err("failed to get ops, id=%d\n", id);
 
 	return ops;
 }

@@ -777,8 +777,10 @@ static int mse_packetizer_aaf_depacketize(int index,
 
 	ret = check_receive_packet(index, channels, aaf_sample_rate,
 				   aaf_bit_depth);
-	if (ret < 0)
+	if (ret < 0) {
+		mse_err("failed to receive packet, ret=%d\n", ret);
 		return ret;
+	}
 
 	aaf->sample_per_packet = payload_size / (channels * aaf_byte_per_ch);
 	aaf->frame_interval_time = div_u64(NSEC_SCALE * aaf->sample_per_packet,

@@ -852,8 +852,10 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 						     data_size - piece_size,
 						     buf,
 						     packet);
-	if (ret < 0)
+	if (ret < 0) {
+		mse_err("packetizer data convert error, ret=%d\n", ret);
 		return ret;
+	}
 
 	if (*buffer_processed + data_size > buffer_size) {
 		iec61883_6->piece_f = true;
