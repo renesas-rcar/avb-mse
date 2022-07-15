@@ -689,8 +689,10 @@ static int try_mse_open(struct v4l2_adapter_device *vadp_dev,
 	}
 
 	index = mse_open(vadp_dev->index_mse, tx);
-	if (index < 0)
+	if (index < 0) {
+		mse_err("failed to open mse, err=%d\n", index);
 		return index;
+	}
 
 	vadp_dev->index_instance = index;
 	vadp_dev->f_mse_open = true;
@@ -1044,8 +1046,10 @@ static int mse_adapter_v4l2_streamon(struct file *filp,
 	if (vadp_owner_get(vadp_fh))
 		return -EBUSY;
 
-	if (i != vadp_dev->vdev.queue->type)
+	if (i != vadp_dev->vdev.queue->type) {
+		mse_err("invalid buffer type, %d != %d\n", i, vadp_dev->vdev.queue->type);
 		return -EINVAL;
+	}
 
 	err = try_mse_open(vadp_dev, i);
 	if (err) {
@@ -1111,8 +1115,10 @@ static int mse_adapter_v4l2_s_parm(struct file *filp,
 
 	mse_debug("START\n");
 
-	if (vadp_owner_get(vadp_fh))
+	if (vadp_owner_get(vadp_fh)) {
+		mse_err("failed to get ownership\n");
 		return -EBUSY;
+	}
 
 	if (V4L2_TYPE_IS_OUTPUT(sp->type))
 		fract = &sp->parm.output.timeperframe;
@@ -1731,6 +1737,7 @@ static int mse_adapter_v4l2_start_streaming(struct vb2_queue *vq,
 			if (err == -EAGAIN)
 				break;
 
+			mse_err("failed to set stream buffer, err=%d\n", err);
 			goto error_cannot_start_streaming;
 		}
 	}
