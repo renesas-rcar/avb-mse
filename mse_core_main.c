@@ -1872,6 +1872,7 @@ static void mse_work_timestamp(struct kthread_work *work)
 	if (!mse_state_test(instance, MSE_STATE_RUNNABLE)) {
 		mse_debug_state(instance);
 		instance->f_work_timestamp = false;
+		mse_err("instance is not in the RUNNABLE state\n");
 		return;
 	}
 
@@ -2097,8 +2098,10 @@ static void mse_work_packetize_common(struct mse_instance *instance)
 	mse_debug_state(instance);
 
 	/* state is NOT RUNNING */
-	if (!mse_state_test(instance, MSE_STATE_RUNNING))
+	if (!mse_state_test(instance, MSE_STATE_RUNNING)) {
+		mse_err("instance state is not RUNNING\n");
 		return;
+	}
 
 	buf = list_first_entry_or_null(&instance->proc_buf_list,
 				       struct mse_trans_buffer, list);
@@ -2669,8 +2672,10 @@ static void mse_work_packetize_mpeg2ts_tx(struct mse_instance *instance)
 	mse_debug_state(instance);
 
 	/* state is NOT RUNNING */
-	if (!mse_state_test(instance, MSE_STATE_RUNNING))
+	if (!mse_state_test(instance, MSE_STATE_RUNNING)) {
+		mse_err("instance state is not RUNNING\n");
 		return;
+	}
 
 	buf = list_first_entry_or_null(&instance->proc_buf_list,
 				       struct mse_trans_buffer, list);
@@ -3156,8 +3161,10 @@ static void mse_work_depacketize_video_rx(struct mse_instance *instance)
 	unsigned long flags;
 
 	/* state is NOT RUNNING */
-	if (!mse_state_test(instance, MSE_STATE_RUNNING))
+	if (!mse_state_test(instance, MSE_STATE_RUNNING)) {
+		mse_err("instance state is not RUNNING\n");
 		return; /* skip work */
+	}
 
 	/* no buffer to write data */
 	if (list_empty(&instance->proc_buf_list)) {
@@ -3223,8 +3230,10 @@ static void mse_work_callback_common(struct mse_instance *instance)
 	unsigned long flags;
 
 	/* state is NOT RUNNING */
-	if (!mse_state_test(instance, MSE_STATE_RUNNING))
+	if (!mse_state_test(instance, MSE_STATE_RUNNING)) {
+		mse_err("instance state is not RUNNING\n");
 		return; /* skip work */
+	}
 
 	adapter = instance->media;
 
@@ -3389,8 +3398,10 @@ static void mse_work_callback_video_rx(struct mse_instance *instance)
 	unsigned long flags;
 
 	/* state is NOT RUNNING */
-	if (!mse_state_test(instance, MSE_STATE_RUNNING))
+	if (!mse_state_test(instance, MSE_STATE_RUNNING)) {
+		mse_err("instance state is not RUNNING\n");
 		return; /* skip work */
+	}
 
 	mse_debug_state(instance);
 
@@ -3431,8 +3442,10 @@ static void mse_work_callback_mpeg2ts_tx(struct mse_instance *instance)
 	unsigned long flags;
 
 	/* state is NOT RUNNING */
-	if (!mse_state_test(instance, MSE_STATE_RUNNING))
+	if (!mse_state_test(instance, MSE_STATE_RUNNING)) {
+		mse_err("instance state is not RUNNING\n");
 		return; /* skip work */
+	}
 
 	mse_debug_state(instance);
 
@@ -3610,8 +3623,10 @@ static void mse_work_stop_streaming_mpeg2ts_tx(struct mse_instance *instance)
 	mse_debug_state(instance);
 
 	/* state is NOT STARTED */
-	if (!mse_state_test(instance, MSE_STATE_STARTED))
+	if (!mse_state_test(instance, MSE_STATE_STARTED)) {
+		mse_err("instance state is not STARTED\n");
 		return; /* skip work */
+	}
 
 	instance->f_stopping = true;
 
@@ -4195,8 +4210,10 @@ static void mse_work_start_transmission_common(struct mse_instance *instance)
 	unsigned long flags;
 
 	/* state is NOT RUNNING */
-	if (!mse_state_test(instance, MSE_STATE_RUNNING))
+	if (!mse_state_test(instance, MSE_STATE_RUNNING)) {
+		mse_err("instance state is not RUNNING\n");
 		return;
+	}
 
 	spin_lock_irqsave(&instance->lock_buf_list, flags);
 	buf = list_first_entry_or_null(&instance->trans_buf_list,
@@ -4293,8 +4310,10 @@ static void mse_work_start_transmission_video_rx(struct mse_instance *instance)
 	unsigned long flags;
 
 	/* state is NOT RUNNING */
-	if (!mse_state_test(instance, MSE_STATE_RUNNING))
+	if (!mse_state_test(instance, MSE_STATE_RUNNING)) {
+		mse_err("instance state is not RUNNING\n");
 		return;
+	}
 
 	spin_lock_irqsave(&instance->lock_buf_list, flags);
 	list_splice_tail_init(&instance->trans_buf_list,
@@ -4310,8 +4329,10 @@ static void mse_work_start_transmission_mpeg2ts_tx(struct mse_instance *instance
 	unsigned long flags;
 
 	/* state is NOT RUNNING */
-	if (!mse_state_test(instance, MSE_STATE_RUNNING))
+	if (!mse_state_test(instance, MSE_STATE_RUNNING)) {
+		mse_err("instance state is not RUNNING\n");
 		return;
+	}
 
 	spin_lock_irqsave(&instance->lock_buf_list, flags);
 	list_splice_tail_init(&instance->trans_buf_list,
