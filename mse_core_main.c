@@ -1983,26 +1983,34 @@ static int mse_initialize_crf_packetizer(struct mse_instance *instance)
 	}
 
 	ret = crf->set_audio_config(instance->crf_index, &config);
-	if (ret < 0)
+	if (ret < 0) {
+		mse_err("set audio config error, ret=%d\n", ret);
 		return ret;
+	}
 
 	if (instance->crf_type == MSE_CRF_TYPE_TX) {
 		ret = crf->calc_cbs(instance->crf_index, &cbs);
-		if (ret < 0)
+		if (ret < 0) {
+			mse_err("cbs calculation error, ret=%d\n", ret);
 			return ret;
+		}
 
 		ret = instance->network->set_cbs_param(
 			instance->crf_index_network, &cbs);
-		if (ret < 0)
+		if (ret < 0) {
+			mse_err("cbs param set error, ret=%d\n", ret);
 			return ret;
+		}
 	}
 
 	if (instance->crf_type == MSE_CRF_TYPE_RX) {
 		ret = instance->network->set_streamid(
 					instance->crf_index_network,
 					instance->crf_net_config.streamid);
-		if (ret < 0)
+		if (ret < 0) {
+			mse_err("stream id set error, ret=%d\n", ret);
 			return ret;
+		}
 	}
 
 	return 0;
@@ -5139,6 +5147,7 @@ static int mse_setup_crf_network_interface(struct mse_instance *instance)
 		network->release(index_network);
 		module_put(network->owner);
 
+		mse_err("crf buffer associate error, ret=%d\n", ret);
 		return ret;
 	}
 
@@ -5524,6 +5533,7 @@ static int mse_setup_network_interface(struct mse_instance *instance,
 		network->release(index_network);
 		module_put(network->owner);
 
+		mse_err("packet buffer associate error, ret=%d\n", ret);
 		return ret;
 	}
 
@@ -5536,6 +5546,7 @@ static int mse_setup_network_interface(struct mse_instance *instance,
 			network->release(index_network);
 			module_put(network->owner);
 
+			mse_err("wait_packet memory allocation error\n");
 			return -ENOMEM;
 		}
 
@@ -5588,8 +5599,10 @@ static int mse_open_packetizer(struct mse_instance *instance,
 
 	/* init packetizer */
 	ret = instance->packetizer->init(instance->index_packetizer);
-	if (ret < 0)
+	if (ret < 0) {
+		mse_err("packetizer init error ret=%d\n", ret);
 		return ret;
+	}
 
 	return 0;
 }
@@ -5680,29 +5693,39 @@ int mse_open(int index_media, bool tx)
 
 	/* setup network interface & open packetizer */
 	err = mse_setup_network_interface(instance, adapter, tx);
-	if (err < 0)
+	if (err < 0) {
+		mse_err("network interface setup error, err=%d\n", err);
 		goto error_mse_resource_release;
+	}
 
 	err = mse_open_packetizer(instance,
 				  adapter->config.packetizer.packetizer);
-	if (err < 0)
+	if (err < 0) {
+		mse_err("packetizer open error, err=%d\n", err);
 		goto error_mse_resource_release;
+	}
 
 	err = mse_setup_crf_network_interface(instance);
-	if (err < 0)
+	if (err < 0) {
+		mse_err("crf network interface setup error, err=%d\n", err);
 		goto error_mse_resource_release;
+	}
 
 	err = mse_open_crf_packetizer(instance);
-	if (err < 0)
+	if (err < 0) {
+		mse_err("crf packetizer open error, err=%d\n", err);
 		goto error_mse_resource_release;
+	}
 
 	instance->ptp_index = mse_ptp_get_first_index();
 
 	/* open PTP capture and PTP Timer */
 	if (instance->f_ptp_capture) {
 		err = mse_setup_ptp(instance);
-		if (err < 0)
+		if (err < 0) {
+			mse_err("ptp setup error, err=%d\n", err);
 			goto error_mse_resource_release;
+		}
 	}
 
 	/* open PTP Timer */
@@ -5741,6 +5764,8 @@ error_mse_resource_release:
 	spin_unlock_irqrestore(&mse->lock_media_table, flags);
 
 	kfree(instance);
+
+	mse_err("failed to open mse, err=%d\n", err);
 
 	return err;
 }
@@ -5795,8 +5820,10 @@ int mse_close(int index)
 
 	err = mse_state_change(instance, MSE_STATE_CLOSE);
 	write_unlock_irqrestore(&instance->lock_state, flags);
-	if (err)
+	if (err) {
+		mse_err("unable to change state to CLOSE, err=%d\n", err);
 		return err;
+	}
 
 	mse_exit_kernel_resource(instance, adapter);
 
@@ -5853,6 +5880,7 @@ int mse_start_streaming(int index)
 	/* state is NOT OPEN */
 	if (!mse_state_test(instance, MSE_STATE_OPEN)) {
 		up(&instance->sem_stopping);
+		mse_err("instance %d is not OPEN\n", index);
 		return -EPERM;
 	}
 
@@ -5861,6 +5889,7 @@ int mse_start_streaming(int index)
 	write_unlock_irqrestore(&instance->lock_state, flags);
 	if (err) {
 		up(&instance->sem_stopping);
+		mse_err("unable to change state to IDLE, err=%d\n", err);
 		return err;
 	}
 
@@ -6219,6 +6248,7 @@ static int mse_probe(void)
 	major = mse_ioctl_init(major, mse_instance_max);
 	if (major < 0) {
 		err = major;
+		mse_err("mse ioctl init error, err=%d\n", err);
 		goto error;
 	}
 
