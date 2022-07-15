@@ -145,8 +145,10 @@ static int check_packet_format(int index)
 	enum MSE_AUDIO_BIT sample_bit_depth;
 	int bytes_per_sample, bit_depth, sample_rate, channels;
 
-	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	iec61883_6 = &iec61883_6_packetizer_table[index];
 	audio_config = &iec61883_6->audio_config;
@@ -210,8 +212,10 @@ static int mse_packetizer_iec61883_6_open(void)
 	     index < ARRAY_SIZE(iec61883_6_packetizer_table); index++)
 		;
 
-	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	iec61883_6 = &iec61883_6_packetizer_table[index];
 
@@ -236,8 +240,10 @@ static int mse_packetizer_iec61883_6_release(int index)
 {
 	struct iec61883_6_packetizer *iec61883_6;
 
-	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	iec61883_6 = &iec61883_6_packetizer_table[index];
 	mse_debug("index=%d\n", index);
@@ -253,8 +259,10 @@ static int mse_packetizer_iec61883_6_packet_init(int index)
 {
 	struct iec61883_6_packetizer *iec61883_6;
 
-	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	iec61883_6 = &iec61883_6_packetizer_table[index];
@@ -279,8 +287,10 @@ static int mse_packetizer_iec61883_6_set_network_config(
 {
 	struct iec61883_6_packetizer *iec61883_6;
 
-	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	iec61883_6 = &iec61883_6_packetizer_table[index];
@@ -339,8 +349,10 @@ static int mse_packetizer_iec61883_6_set_audio_config(
 	int payload_size;
 	int ret;
 
-	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d rate=%d channels=%d samples_per_frame=%d\n",
 		  index, config->sample_rate, config->channels,
@@ -402,8 +414,10 @@ static int mse_packetizer_iec61883_6_get_audio_info(
 {
 	struct iec61883_6_packetizer *iec61883_6;
 
-	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	iec61883_6 = &iec61883_6_packetizer_table[index];
@@ -420,8 +434,10 @@ static int mse_packetizer_iec61883_6_calc_cbs(int index,
 {
 	struct iec61883_6_packetizer *iec61883_6;
 
-	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	iec61883_6 = &iec61883_6_packetizer_table[index];
@@ -568,8 +584,10 @@ static int mse_packetizer_iec61883_6_packetize(int index,
 	u32 *sample;
 	int piece_size = 0, piece_len = 0;
 
-	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	iec61883_6 = &iec61883_6_packetizer_table[index];
 	mse_debug("index=%d seqnum=%d process=%zu/%zu t=%d\n",
@@ -741,8 +759,10 @@ static int mse_packetizer_iec61883_6_depacketize(int index,
 	bool tv;
 	u32 avtp_timestamp;
 
-	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	iec61883_6 = &iec61883_6_packetizer_table[index];
@@ -861,8 +881,10 @@ static int mse_packetizer_iec61883_6_set_start_time(int index, u32 start_time)
 {
 	struct iec61883_6_packetizer *iec61883_6;
 
-	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	iec61883_6 = &iec61883_6_packetizer_table[index];
 	iec61883_6->start_time = start_time;
@@ -874,8 +896,10 @@ static int mse_packetizer_iec61883_6_set_need_calc_offset(int index)
 {
 	struct iec61883_6_packetizer *iec61883_6;
 
-	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table))
+	if (index >= ARRAY_SIZE(iec61883_6_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	iec61883_6 = &iec61883_6_packetizer_table[index];
 	iec61883_6->f_need_calc_offset = true;

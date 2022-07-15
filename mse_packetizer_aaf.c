@@ -196,8 +196,10 @@ static int check_packet_format(int index)
 	enum MSE_AUDIO_BIT sample_bit_depth;
 	int bytes_per_sample, bit_depth, sample_rate, channels;
 
-	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+	if (index >= ARRAY_SIZE(aaf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	aaf = &aaf_packetizer_table[index];
 	audio_config = &aaf->audio_config;
@@ -270,8 +272,10 @@ static int mse_packetizer_aaf_open(void)
 	     index < ARRAY_SIZE(aaf_packetizer_table); index++)
 		;
 
-	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+	if (index >= ARRAY_SIZE(aaf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	aaf = &aaf_packetizer_table[index];
 
@@ -295,8 +299,10 @@ static int mse_packetizer_aaf_release(int index)
 {
 	struct aaf_packetizer *aaf;
 
-	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+	if (index >= ARRAY_SIZE(aaf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	aaf = &aaf_packetizer_table[index];
 	mse_debug("index=%d\n", index);
@@ -312,8 +318,10 @@ static int mse_packetizer_aaf_packet_init(int index)
 {
 	struct aaf_packetizer *aaf;
 
-	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+	if (index >= ARRAY_SIZE(aaf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	aaf = &aaf_packetizer_table[index];
@@ -337,8 +345,10 @@ static int mse_packetizer_aaf_set_network_config(
 {
 	struct aaf_packetizer *aaf;
 
-	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+	if (index >= ARRAY_SIZE(aaf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	aaf = &aaf_packetizer_table[index];
@@ -392,8 +402,10 @@ static int mse_packetizer_aaf_set_audio_config(int index,
 	int payload_size;
 	int ret;
 
-	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+	if (index >= ARRAY_SIZE(aaf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d rate=%d channels=%d samples_per_frame=%d\n",
 		  index, config->sample_rate, config->channels,
@@ -453,8 +465,10 @@ static int mse_packetizer_aaf_get_audio_info(int index,
 {
 	struct aaf_packetizer *aaf;
 
-	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+	if (index >= ARRAY_SIZE(aaf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	aaf = &aaf_packetizer_table[index];
@@ -471,8 +485,10 @@ static int mse_packetizer_aaf_calc_cbs(int index,
 {
 	struct aaf_packetizer *aaf;
 
-	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+	if (index >= ARRAY_SIZE(aaf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	aaf = &aaf_packetizer_table[index];
@@ -638,8 +654,10 @@ static int mse_packetizer_aaf_packetize(int index,
 	int count, dest_byte, readed_byte;
 	struct mse_audio_config *config;
 
-	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+	if (index >= ARRAY_SIZE(aaf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	aaf = &aaf_packetizer_table[index];
 	config = &aaf->audio_config;
@@ -849,8 +867,10 @@ static int mse_packetizer_aaf_set_start_time(int index, u32 start_time)
 {
 	struct aaf_packetizer *aaf;
 
-	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+	if (index >= ARRAY_SIZE(aaf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	aaf = &aaf_packetizer_table[index];
 	aaf->start_time = start_time;
@@ -862,8 +882,10 @@ static int mse_packetizer_aaf_set_need_calc_offset(int index)
 {
 	struct aaf_packetizer *aaf;
 
-	if (index >= ARRAY_SIZE(aaf_packetizer_table))
+	if (index >= ARRAY_SIZE(aaf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	aaf = &aaf_packetizer_table[index];
 	aaf->f_need_calc_offset = true;

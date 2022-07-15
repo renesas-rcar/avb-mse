@@ -164,8 +164,10 @@ static int mse_packetizer_cvf_h264_open(void)
 	for (index = 0; cvf_h264_packetizer_table[index].used_f &&
 	     index < ARRAY_SIZE(cvf_h264_packetizer_table); index++)
 		;
-	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	h264 = &cvf_h264_packetizer_table[index];
 
@@ -189,8 +191,10 @@ static int mse_packetizer_cvf_h264_d13_open(void)
 	for (index = 0; cvf_h264_packetizer_table[index].used_f &&
 	     index < ARRAY_SIZE(cvf_h264_packetizer_table); index++)
 		;
-	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	h264 = &cvf_h264_packetizer_table[index];
 
@@ -210,8 +214,10 @@ static int mse_packetizer_cvf_h264_release(int index)
 {
 	struct cvf_h264_packetizer *h264;
 
-	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	h264 = &cvf_h264_packetizer_table[index];
 	mse_debug("index=%d\n", index);
@@ -226,8 +232,10 @@ static int mse_packetizer_cvf_h264_packet_init(int index)
 {
 	struct cvf_h264_packetizer *h264;
 
-	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	h264 = &cvf_h264_packetizer_table[index];
@@ -245,8 +253,10 @@ static int mse_packetizer_cvf_h264_set_network_config(
 {
 	struct cvf_h264_packetizer *h264;
 
-	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	h264 = &cvf_h264_packetizer_table[index];
@@ -295,8 +305,10 @@ static int mse_packetizer_cvf_h264_set_video_config(
 	struct avtp_cvf_h264_param param;
 	int bytes_per_frame;
 
-	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	h264 = &cvf_h264_packetizer_table[index];
@@ -347,8 +359,10 @@ static int mse_packetizer_cvf_h264_calc_cbs(int index,
 {
 	struct cvf_h264_packetizer *h264;
 
-	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	h264 = &cvf_h264_packetizer_table[index];
@@ -395,8 +409,10 @@ static int mse_packetizer_cvf_h264_packetize(int index,
 	unsigned char *cur_nal;
 	unsigned char *payload;
 
-	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	h264 = &cvf_h264_packetizer_table[index];
 	mse_debug("index=%d seqnum=%d process=%zu/%zu t=%u\n",
@@ -560,8 +576,10 @@ static int mse_packetizer_cvf_h264_depacketize(int index,
 	unsigned char fu_indicator, fu_header;
 	bool pic_end = false;
 
-	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_h264_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	h264 = &cvf_h264_packetizer_table[index];
 	mse_debug("index=%d\n", index);

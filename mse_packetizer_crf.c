@@ -107,8 +107,10 @@ static int mse_packetizer_crf_audio_open(void)
 	     index < ARRAY_SIZE(crf_packetizer_table); index++)
 		;
 
-	if (index >= ARRAY_SIZE(crf_packetizer_table))
+	if (index >= ARRAY_SIZE(crf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	crf = &crf_packetizer_table[index];
 
@@ -122,8 +124,10 @@ static int mse_packetizer_crf_audio_release(int index)
 {
 	struct crf_packetizer *crf;
 
-	if (index >= ARRAY_SIZE(crf_packetizer_table))
+	if (index >= ARRAY_SIZE(crf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	crf = &crf_packetizer_table[index];
 
@@ -136,8 +140,10 @@ static int mse_packetizer_crf_audio_packet_init(int index)
 {
 	struct crf_packetizer *crf;
 
-	if (index >= ARRAY_SIZE(crf_packetizer_table))
+	if (index >= ARRAY_SIZE(crf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	crf = &crf_packetizer_table[index];
 
@@ -152,8 +158,10 @@ static int mse_packetizer_crf_audio_set_network_config(
 {
 	struct crf_packetizer *crf;
 
-	if (index >= ARRAY_SIZE(crf_packetizer_table))
+	if (index >= ARRAY_SIZE(crf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	if (!config)
 		return -EPERM;
@@ -206,8 +214,10 @@ static int mse_packetizer_crf_audio_set_audio_config(
 	struct crf_packetizer *crf;
 	struct avtp_crf_param param;
 
-	if (index >= ARRAY_SIZE(crf_packetizer_table))
+	if (index >= ARRAY_SIZE(crf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	if (!config)
 		return -EPERM;
@@ -238,8 +248,10 @@ static int mse_packetizer_crf_audio_get_audio_info(
 {
 	struct crf_packetizer *crf;
 
-	if (index >= ARRAY_SIZE(crf_packetizer_table))
+	if (index >= ARRAY_SIZE(crf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	crf = &crf_packetizer_table[index];
 
@@ -253,8 +265,10 @@ static int mse_packetizer_crf_audio_calc_cbs(int index,
 {
 	struct crf_packetizer *crf;
 
-	if (index >= ARRAY_SIZE(crf_packetizer_table))
+	if (index >= ARRAY_SIZE(crf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	crf = &crf_packetizer_table[index];
@@ -280,8 +294,10 @@ static int mse_packetizer_crf_audio_packetize(int index,
 	u64 *sample;
 	int i, data_len;
 
-	if (index >= ARRAY_SIZE(crf_packetizer_table))
+	if (index >= ARRAY_SIZE(crf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	crf = &crf_packetizer_table[index];
 
@@ -316,8 +332,10 @@ static int mse_packetizer_crf_audio_depacketize(int index,
 	unsigned long value;
 	struct crf_packetizer *crf;
 
-	if (index >= ARRAY_SIZE(crf_packetizer_table))
+	if (index >= ARRAY_SIZE(crf_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	crf = &crf_packetizer_table[index];
 

@@ -134,8 +134,10 @@ static int mse_packetizer_cvf_mjpeg_open(void)
 	     index < ARRAY_SIZE(cvf_mjpeg_packetizer_table); index++)
 		;
 
-	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	cvf_mjpeg = &cvf_mjpeg_packetizer_table[index];
 
@@ -153,8 +155,10 @@ static int mse_packetizer_cvf_mjpeg_release(int index)
 {
 	struct cvf_mjpeg_packetizer *cvf_mjpeg;
 
-	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	cvf_mjpeg = &cvf_mjpeg_packetizer_table[index];
 	mse_debug("index=%d\n", index);
@@ -178,8 +182,10 @@ static int mse_packetizer_cvf_mjpeg_packet_init(int index)
 {
 	struct cvf_mjpeg_packetizer *cvf_mjpeg;
 
-	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 
@@ -201,8 +207,10 @@ static int mse_packetizer_cvf_mjpeg_set_network_config(
 {
 	struct cvf_mjpeg_packetizer *cvf_mjpeg;
 
-	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 
@@ -258,8 +266,10 @@ static int mse_packetizer_cvf_mjpeg_set_video_config(
 	struct mse_network_config *net_config;
 	int bytes_per_frame;
 
-	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 
@@ -299,8 +309,10 @@ static int mse_packetizer_cvf_mjpeg_calc_cbs(int index,
 {
 	struct cvf_mjpeg_packetizer *cvf_mjpeg;
 
-	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 	cvf_mjpeg = &cvf_mjpeg_packetizer_table[index];
@@ -454,8 +466,10 @@ static int mse_packetizer_cvf_mjpeg_packetize(int index,
 	int i;
 	bool pic_end = false;
 
-	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	cvf_mjpeg = &cvf_mjpeg_packetizer_table[index];
 	jpeg = &cvf_mjpeg->jpeg;
@@ -644,8 +658,10 @@ static int mse_packetizer_cvf_mjpeg_depacketize(int index,
 	u16 dri = 0;
 	u32 offset, width, height;
 
-	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table))
+	if (index >= ARRAY_SIZE(cvf_mjpeg_packetizer_table)) {
+		mse_err("wrong index: %d\n", index);
 		return -EPERM;
+	}
 
 	mse_debug("index=%d\n", index);
 
