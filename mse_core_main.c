@@ -534,19 +534,19 @@ static const struct mse_instance_dummy *instance = &instance_dummy;
 #undef mse_debug
 
 #define mse_err(fmt, ...)   \
-	pr_err("%s%s: "fmt, instance ? (int)instance->tx >= 0 ? \
+	pr_err("%s%s: " fmt, instance ? (int)instance->tx >= 0 ? \
 	       instance->tx ? "tx: " : "rx: " : "" : "", __func__, ## __VA_ARGS__)
 
 #define mse_warn(fmt, ...)   \
-	pr_warn("%s%s: "fmt, instance ? (int)instance->tx >= 0 ? \
+	pr_warn("%s%s: " fmt, instance ? (int)instance->tx >= 0 ? \
 		instance->tx ? "tx: " : "rx: " : "" : "", __func__, ## __VA_ARGS__)
 
 #define mse_info(fmt, ...)   \
-	pr_info("%s%s: "fmt, instance ? (int)instance->tx >= 0 ? \
+	pr_info("%s%s: " fmt, instance ? (int)instance->tx >= 0 ? \
 		instance->tx ? "tx: " : "rx: " : "" : "", __func__, ## __VA_ARGS__)
 
 #define mse_debug(fmt, ...)   \
-	pr_debug("%s%s: "fmt, instance ? (int)instance->tx >= 0 ? \
+	pr_debug("%s%s: " fmt, instance ? (int)instance->tx >= 0 ? \
 		 instance->tx ? "tx: " : "rx: " : "" : "", __func__, ## __VA_ARGS__)
 
 /*
