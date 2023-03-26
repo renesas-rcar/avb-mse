@@ -1,7 +1,7 @@
 /*************************************************************************/ /*
  avb-mse
 
- Copyright (C) 2015-2018,2021 Renesas Electronics Corporation
+ Copyright (C) 2015-2018,2021,2023 Renesas Electronics Corporation
 
  License        Dual MIT/GPLv2
 
@@ -1856,6 +1856,10 @@ static int media_clock_recovery(struct mse_instance *instance)
 
 		/* get mch ops */
 		m_ops = mse->mch_table[instance->mch_index];
+
+		if (!m_ops)
+			return 0;
+
 		m_ops->set_interval(instance->mch_handle, delta_ts);
 		m_ops->send_timestamps(instance->mch_handle, instance->ts, out);
 
@@ -5103,6 +5107,7 @@ static int check_mch_config(struct mse_instance *instance)
 static void mse_cleanup_crf_network_interface(struct mse_instance *instance)
 {
 	struct mse_adapter_network_ops *network = instance->network;
+	struct mse_packet_ctrl *crf_packet_buffer;
 
 	if (instance->crf_index_network < 0)
 		return;
@@ -5111,8 +5116,9 @@ static void mse_cleanup_crf_network_interface(struct mse_instance *instance)
 	instance->crf_index_network = MSE_INDEX_UNDEFINED;
 	module_put(network->owner);
 
-	mse_packet_ctrl_free(instance->crf_packet_buffer);
+	crf_packet_buffer = instance->crf_packet_buffer;
 	instance->crf_packet_buffer = NULL;
+	mse_packet_ctrl_free(crf_packet_buffer);
 }
 
 static int mse_setup_crf_network_interface(struct mse_instance *instance)
@@ -5272,6 +5278,10 @@ static void mse_cleanup_mch(struct mse_instance *instance)
 		return;
 
 	m_ops = mse->mch_table[instance->mch_index];
+
+	if (!m_ops)
+		return;
+
 	m_ops->close(instance->mch_handle);
 
 	instance->mch_index = MSE_INDEX_UNDEFINED;
@@ -5457,6 +5467,8 @@ error_create_wq:
 static void mse_cleanup_network_interface(struct mse_instance *instance)
 {
 	struct mse_adapter_network_ops *network = instance->network;
+	struct mse_wait_packet *wait_packet;
+	struct mse_packet_ctrl *packet_buffer;
 
 	if (instance->index_network < 0)
 		return;
@@ -5466,12 +5478,14 @@ static void mse_cleanup_network_interface(struct mse_instance *instance)
 	module_put(network->owner);
 
 	if (IS_MSE_TYPE_MPEG2TS(instance->media->type) && instance->tx) {
-		kfree(instance->wait_packet);
+		wait_packet = instance->wait_packet;
 		instance->wait_packet = NULL;
+		kfree(wait_packet);
 	}
 
-	mse_packet_ctrl_free(instance->packet_buffer);
+	packet_buffer = instance->packet_buffer;
 	instance->packet_buffer = NULL;
+	mse_packet_ctrl_free(packet_buffer);
 }
 
 static int mse_setup_network_interface(struct mse_instance *instance,
