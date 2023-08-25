@@ -5926,7 +5926,8 @@ int mse_start_streaming(int index)
 
 	mse_debug_state(instance);
 
-	down(&instance->sem_stopping);
+	if(down_trylock(&instance->sem_stopping))
+		return -EBUSY;
 
 	/* state is RUNNABLE */
 	if (mse_state_test(instance, MSE_STATE_RUNNABLE)) {
@@ -6004,7 +6005,8 @@ int mse_stop_streaming(int index)
 
 	/* state is RUNNABLE */
 	if (mse_state_test(instance, MSE_STATE_RUNNABLE)) {
-		down(&instance->sem_stopping);
+		if(down_trylock(&instance->sem_stopping))
+			return -EBUSY;
 		mse_queue_work(instance->wq_packet, &instance->wk_stop_streaming);
 	}
 
