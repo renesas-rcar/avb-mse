@@ -4500,20 +4500,21 @@ int mse_register_adapter_media(enum MSE_TYPE type,
 			mse_type_to_stream_type(type),
 			device_name);
 
+	spin_lock_irqsave(&mse->lock_media_table, flags);
+	mse->media_table[index] = media;
+	spin_unlock_irqrestore(&mse->lock_media_table, flags);
+
 	/* create control device */
 	if (mse_create_config_device(media) < 0) {
 		spin_lock_irqsave(&mse->lock_media_table, flags);
 		clear_bit(index, mse->mse_media_map);
+		mse->media_table[index] = NULL;
 		spin_unlock_irqrestore(&mse->lock_media_table, flags);
 		kfree(media);
 		mse_err("%s is not registered\n", name);
 
 		return -EPERM;
 	}
-
-	spin_lock_irqsave(&mse->lock_media_table, flags);
-	mse->media_table[index] = media;
-	spin_unlock_irqrestore(&mse->lock_media_table, flags);
 
 	mse_debug("registered index=%d\n", index);
 
