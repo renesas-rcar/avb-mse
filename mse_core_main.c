@@ -2367,7 +2367,7 @@ static bool mse_search_mpeg2ts_pcr(struct mse_instance *instance,
 			break;
 		}
 
-		if (compare_pcr(pcr, instance->mpeg2ts_pre_pcr_27m)) {
+		if (compare_pcr(pcr, instance->mpeg2ts_pcr_27m)) {
 			if (update_pcr) {
 				instance->mpeg2ts_pre_pcr_27m = instance->mpeg2ts_pcr_27m;
 				instance->mpeg2ts_pcr_27m = pcr;
