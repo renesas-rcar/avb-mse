@@ -332,7 +332,7 @@ int mse_ptp_close_dummy(void *ptp_handle)
 	return 0;
 }
 
-void *mse_ptp_timer_open_dummy(u32 (*handler)(void *),
+void *mse_ptp_timer_open_dummy(u32 (*handler)(void *, bool*),
 			       void *priv)
 {
 	return NULL;

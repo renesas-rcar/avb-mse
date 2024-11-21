@@ -316,7 +316,7 @@ struct mse_ptp_ops {
 	int (*get_timestamps)(void *ptp_handle, int req_count, u64 *timestamps);
 
 	/* PTP Timer API */
-	void *(*timer_open)(u32 (*handler)(void *), void *priv);
+	void *(*timer_open)(u32 (*handler)(void *, bool *), void *priv);
 	int (*timer_close)(void *timer_handle);
 	int (*timer_start)(void *timer_handle, u32 start);
 	int (*timer_cancel)(void *timer_handle);
