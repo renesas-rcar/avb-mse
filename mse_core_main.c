@@ -1075,7 +1075,7 @@ static int mse_ptp_get_timestamps(int index,
 				     timestamps);
 }
 
-static void *mse_ptp_timer_open(int index, u32 (*handler)(void *priv),
+static void *mse_ptp_timer_open(int index, u32 (*handler)(void *priv, bool *param_type),
 				void *priv)
 {
 	struct mse_ptp_ops *p_ops = mse_ptp_find_ops(index);
@@ -3866,13 +3866,16 @@ static u32 mse_ptp_timer_callback_mpeg2ts_tx(struct mse_instance *instance)
 	return (u32)PTP_TIME_DIFF_S32(expire_next, expire_prev);
 }
 
-static u32 mse_ptp_timer_callback(void *arg)
+static u32 mse_ptp_timer_callback(void *arg, bool *param_type)
 {
 	struct mse_instance *instance = arg;
+	*param_type = false;
 
 	if (instance->tx)
-		if (IS_MSE_TYPE_MPEG2TS(instance->media->type))
+		if (IS_MSE_TYPE_MPEG2TS(instance->media->type)){
+			*param_type = true;
 			return mse_ptp_timer_callback_mpeg2ts_tx(instance);
+		}
 		else
 			return mse_ptp_timer_callback_common(instance);
 	else

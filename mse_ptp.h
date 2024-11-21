@@ -79,7 +79,7 @@ int mse_ptp_get_timestamps_dummy(void *ptp_handle,
 				 int req_count,
 				 u64 *timestamps);
 
-void *mse_ptp_timer_open_dummy(u32 (*handler)(void *),
+void *mse_ptp_timer_open_dummy(u32 (*handler)(void *, bool *),
 			       void *priv);
 
 int mse_ptp_timer_close_dummy(void *timer_handle);
