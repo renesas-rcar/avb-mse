@@ -692,7 +692,7 @@ static int mse_adapter_alsa_probe(struct snd_card *card, int devno)
 	/* pre-allocation of buffers */
 	snd_pcm_lib_preallocate_pages_for_all(pcm,
 				SNDRV_DMA_TYPE_CONTINUOUS,
-				snd_dma_continuous_data(GFP_KERNEL),
+				NULL,
 				MSE_ADAPTER_ALSA_PAGE_SIZE,
 				MSE_ADAPTER_ALSA_PAGE_SIZE);
 

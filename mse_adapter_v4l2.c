@@ -1558,19 +1558,22 @@ static int mse_adapter_v4l2_callback(void *priv, int size)
 		return 0;
 	}
 
-	if (!V4L2_TYPE_IS_OUTPUT(vq->type)) {
-		vb2_set_plane_payload(&vadp_buf->vb.vb2_buf, 0, size);
-		vadp_buf->vb.vb2_buf.timestamp = ktime_get_ns();
-		vadp_buf->vb.sequence = vadp_dev->sequence++;
-		vadp_buf->vb.field = vadp_dev->format.field;
-	} else {
-		if (vadp_dev->use_temp_buffer) {
-			temp = temp_buffer_get_prepared(vadp_dev);
-			if (temp) {
-				temp->prepared = false;
-				temp->bytesused = 0;
-				vadp_dev->temp_r =
-					(vadp_dev->temp_r + 1) % NUM_BUFFERS;
+	if (size != -EAGAIN)
+	{
+		if (!V4L2_TYPE_IS_OUTPUT(vq->type)) {
+			vb2_set_plane_payload(&vadp_buf->vb.vb2_buf, 0, size);
+			vadp_buf->vb.vb2_buf.timestamp = ktime_get_ns();
+			vadp_buf->vb.sequence = vadp_dev->sequence++;
+			vadp_buf->vb.field = vadp_dev->format.field;
+		} else {
+			if (vadp_dev->use_temp_buffer) {
+				temp = temp_buffer_get_prepared(vadp_dev);
+				if (temp) {
+					temp->prepared = false;
+					temp->bytesused = 0;
+					vadp_dev->temp_r =
+						(vadp_dev->temp_r + 1) % NUM_BUFFERS;
+				}
 			}
 		}
 	}
